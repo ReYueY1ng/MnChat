@@ -183,15 +183,22 @@ class ChatService {
   // ── 推送分发（对齐反编译源码）────────────────────────────────────────
 
   void _handlePush(ChatPushPush push) {
+    // 真实推送帧（实机抓包确认）:
+    //   ChatPushConnection 按 [11, service, method, seq, ts, args] 派发，
+    //   实际收到 service="client", method="on" → eventName="client.on"
+    //   args = ["friend.msg", {...data...}]
+    // 所以事件名不是 "friend.msg"，data 在 args[1]。
     final eventName = push.eventName;
-    if (eventName == 'friend.msg') {
-      // friend.msg: args[0] 是 data dict，按 cmd 分发
-      final data = push.args.isNotEmpty ? push.args.first : null;
-      if (data is Map) {
+    if (eventName == 'client.on' && push.args.length >= 2) {
+      final kind = push.args[0]?.toString();
+      final data = push.args[1];
+      if (kind == 'friend.msg' && data is Map) {
         final m = data.cast<String, Object?>();
         _handleFriendMsg(m);
       }
-    } else if (eventName == 'buddysvr.speek') {
+      return;
+    }
+    if (eventName == 'buddysvr.speek') {
       // speek(ts, msg, who, speeker) 位置参数
       if (push.args.length >= 3) {
         final ts = (push.args[0] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -209,10 +216,14 @@ class ChatService {
     final cmd = data['cmd']?.toString() ?? '';
     switch (cmd) {
       case 'chat_notify':
-        // 好友私聊推送: {cmd, src_uin, des_uin, chat_msg, send_time, extend_data, online}
-        final src = (data['src_uin'] as num?)?.toInt() ?? 0;
-        final otherUin = src == myUin ? (data['des_uin'] as num?)?.toInt() ?? 0 : src;
-        final time = (data['send_time'] as num?)?.toInt() ?? 0;
+        // {cmd, src_uin, des_uin, chat_msg, send_time, ts, extend_data, online}
+        // 注意 send_time/src_uin 是字符串，需兼容解析。
+        final src = _toNum(data['src_uin']);
+        final des = _toNum(data['des_uin']);
+        final otherUin = src == myUin ? des : src;
+        final time = _toNum(data['send_time']) != 0
+            ? _toNum(data['send_time'])
+            : _toNum(data['ts']);
         final m = ChatMessage(
           uin: src,
           text: data['chat_msg']?.toString() ?? '',
@@ -251,6 +262,13 @@ class ChatService {
 
   void _handleRpc(ChatPushRpcResult rpc) {
     // 未被 pending 匹配的 RPC 响应（一般不会到这）
+  }
+
+  /// 兼容解析数字：int / num / 数字字符串。
+  int _toNum(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
   }
 
   // ── 消息读写 ───────────────────────────────────────────────────────────
