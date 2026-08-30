@@ -17,6 +17,7 @@ import 'dart:io';
 import 'package:mnchat/core/services/auth.dart';
 import 'package:mnchat/core/services/chatpush.dart';
 import 'package:mnchat/core/services/friend.dart';
+import 'package:mnchat/core/services/group.dart';
 
 const _client = '''
 import 'package:dio/dio.dart';
@@ -88,7 +89,7 @@ Future<void> main() async {
   await conn.close();
 
   // ── 5. 好友列表 ───────────────────────────────────────────────────────
-  print('[5/5] 好友列表 (HTTP) …');
+  print('[5/6] 好友列表 (HTTP) …');
   final friend = FriendClient(uin: uin, s2: s2, s2t: s2t);
   final resp = await friend.queryFriendList();
   final data = resp['data'];
@@ -107,6 +108,12 @@ Future<void> main() async {
   } else {
     print('  好友响应: $resp');
   }
+
+  // ── 6. 群列表 ────────────────────────────────────────────────────────
+  print('[6/6] 群列表 (HTTP) …');
+  final group = GroupClient(uin: uin, s2: s2, s2t: s2t);
+  final gresp = await group.queryUserGroups();
+  print('  query_user_groups: $gresp');
 
   print('\n== 验收完成 ==');
   exit(0);

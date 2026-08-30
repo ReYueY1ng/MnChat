@@ -3,7 +3,6 @@
 .flutter-plugins
 .flutter-plugins-dependencies
 build/
-pubspec.lock
 .fvm/
 
 # IDE
@@ -12,7 +11,11 @@ pubspec.lock
 .vscode/
 *.swp
 
-# Runtime
+# OpenCode 内部状态（不入库）
+.omo/
+
+# Runtime / 凭据（绝不入库）
 *.log
 session.json
 config.yaml
+tool/ws_debug.dart

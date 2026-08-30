@@ -46,32 +46,26 @@ String buildFriendRequestUrl({
   return '${_rstripSlash(server)}$path?$query&auth=$sign';
 }
 
-/// 群组请求 URL 构造器 (newfriendservice.lua CreateGroupChatRequest)。
-/// 签名：http_get_s1(time, s2, uin, s2t)。
+/// 群组请求 URL 构造器 (friendservice.lua CreateGroupChatRequest)。
+/// 与 Python MNClient `http_group.py:_build_url` 完全对齐：
+/// query = act + 调用方 params（不排序、不自动注入），签名 = http_get_s1。
 String buildGroupUrl({
   required String server,
   required String path,
-  required int uin,
-  required String ver,
-  required String apiId,
-  required String act,
   required String s2,
   required String s2t,
+  required int uin,
+  required String act,
   Map<String, String>? extraParams,
 }) {
-  final httpGetS1_ = httpGetS1(DateTime.now().millisecondsSinceEpoch ~/ 1000, s2, uin, s2t);
-  final params = <String, String>{
-    'uin': '$uin',
-    'ver': ver,
-    'apiid': apiId,
-    'log': 'null',
-    'act': act,
-    'json': '1',
-    ...?extraParams,
-  };
-  final sorted = params.keys.toList()..sort();
-  final query = sorted.map((k) => '$k=${Uri.encodeQueryComponent(params[k]!)}').join('&');
-  return '${_rstripSlash(server)}$path?$query&$httpGetS1_';
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final sign = httpGetS1(now, s2, uin, s2t);
+  final parts = <String>['act=$act'];
+  for (final e in (extraParams ?? {}).entries) {
+    parts.add('${e.key}=${e.value}');
+  }
+  final query = parts.join('&');
+  return '${_rstripSlash(server)}$path?$query&$sign';
 }
 
 /// 统一 GET 请求（网关路径，自动带 UA）。

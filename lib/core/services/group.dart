@@ -127,12 +127,10 @@ class GroupClient {
       buildGroupUrl(
         server: _gw.resolve('HttpFriendGroup'),
         path: kGroupPath,
-        uin: uin,
-        ver: ver,
-        apiId: apiId,
-        act: act,
         s2: s2,
         s2t: s2t,
+        uin: uin,
+        act: act,
         extraParams: {
           ...extra,
           'country': country,

@@ -318,34 +318,53 @@ class ChatService {
     if (friend == null) return;
     try {
       final resp = await friend.queryFriendList();
-      final data = resp['data'];
-      if (data is Map) {
-        final list = data['FriendList'] ?? data['list'] ?? data['friendlist'];
-        if (list is List) {
-          _contacts.clear();
-          _friendSessions.clear();
-          for (final item in list) {
-            if (item is! Map) continue;
-            final m = item.cast<String, Object?>();
-            final uin2 = (m['Uin'] ?? m['uin'] ?? 0);
-            if (uin2 is! num) continue;
-            final u = uin2.toInt();
-            if (u == myUin) continue;
-            final nickname = (m['NickName'] ?? m['nickname'] ?? '').toString();
-            _contacts.add(Contact(uin: u, nickname: nickname));
-            _friendSessions[u] = ChatSession(
-              id: u,
-              type: ChatSessionType.friend,
-              name: nickname,
-              avatar: m['IconUrl']?.toString() ?? m['HeadIconUrl']?.toString(),
-            );
-          }
-        }
+      // 真实响应: {friend_list: {...}, result: 0} —— friend_list 是顶层 key，
+      // 可能是 Map(uin→info) 或 List。
+      final data = resp['friend_list'] ?? resp['data'] ?? resp;
+      final items = _asFriendItems(data);
+      if (items.isNotEmpty) {
+        _contacts.clear();
+        _friendSessions.clear();
+      }
+      for (final m in items) {
+        final uin2 = (m['Uin'] ?? m['uin'] ?? 0);
+        if (uin2 is! num) continue;
+        final u = uin2.toInt();
+        if (u == myUin || u == 1000) continue;
+        final nickname = (m['NickName'] ?? m['nickname'] ?? m['Name'] ?? '').toString();
+        _contacts.add(Contact(uin: u, nickname: nickname));
+        _friendSessions[u] = ChatSession(
+          id: u,
+          type: ChatSessionType.friend,
+          name: nickname,
+          avatar: m['IconUrl']?.toString() ?? m['HeadIconUrl']?.toString(),
+        );
       }
     } catch (e) {
       // ignore: avoid_print
       print('query_friend_list failed: $e');
     }
+  }
+
+  /// 把 friend_list 各种可能结构归一化成 List<Map>。
+  static List<Map<String, Object?>> _asFriendItems(Object? data) {
+    if (data is List) {
+      return data.whereType<Map>().map((m) => m.cast<String, Object?>()).toList();
+    }
+    if (data is Map) {
+      final out = <Map<String, Object?>>[];
+      // 若 Map 本身就是一条好友记录（含 Uin/uin key）
+      if (data.containsKey('Uin') || data.containsKey('uin')) {
+        out.add(data.cast<String, Object?>());
+        return out;
+      }
+      // 否则视为 uin→info 的映射
+      for (final v in data.values) {
+        if (v is Map) out.add(v.cast<String, Object?>());
+      }
+      return out;
+    }
+    return const [];
   }
 
   Future<void> _loadGroupSessions() async {
