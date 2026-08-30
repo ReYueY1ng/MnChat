@@ -4,6 +4,7 @@ library;
 
 import 'package:dio/dio.dart';
 
+import '../crypto/encoding.dart' show luaUrlEncode;
 import '../crypto/md5_sign.dart';
 import '../net/config.dart';
 import '../net/http_factory.dart';
@@ -21,10 +22,12 @@ Object? decodeGatewayResponse(String text) {
 /// Dart 版 rstrip('/')。
 String _rstripSlash(String s) => s.endsWith('/') ? s.substring(0, s.length - 1) : s;
 
-/// CreateFriendRequest URL 构造器 (friendservice.lua:259-296)。
-/// 与 Python MNClient `_build_friend_url` 完全对齐：
-/// all_params = {cmd} + 调用方 params；签名 = md5(排除 notAuth 的
-/// 排序后 key=value 拼接 + ROOM_AUTH_KEY)。**不自动注入任何字段**。
+/// CreateFriendRequest URL 构造器 (friendservice.lua:947-1010)。
+///
+/// 实测对齐（穷举验证，send_chat_msg 返回 {"send_time":..,"result":0} 为成功）：
+/// - **所有参数（含 cmd、msg）都参与签名**（msg 无 notAuth 标记）
+/// - 签名串用 **Lua urlEncode 转义后的值**（同反编译 addparam url_escape）
+/// - URL query 同样排序 + urlencode
 String buildFriendRequestUrl({
   required String server,
   required String path,
@@ -34,14 +37,14 @@ String buildFriendRequestUrl({
 }) {
   final allParams = <String, String>{'cmd': cmd, ...params};
   final sorted = allParams.keys.toList()..sort();
-  // URL query: 排序后 urlencode（空格→+，与 Python urlencode 一致）
+  // URL query: 排序后 urlencode
   final query = sorted
       .map((k) => '$k=${Uri.encodeQueryComponent(allParams[k]!)}')
       .join('&');
-  // canonical（签名串）: 排除 notAuth 字段，用原始值（不 urlencode）
+  // canonical（签名串）: 全部参与（除非显式 notAuth），值用 Lua urlEncode 转义
   final canonical = sorted
       .where((k) => !(notAuthKeys?.contains(k) ?? false))
-      .map((k) => '$k=${allParams[k]}')
+      .map((k) => '$k=${luaUrlEncode(allParams[k]!)}')
       .join('&');
   final sign = md5Sign([canonical, roomAuthKey]);
   return '${_rstripSlash(server)}$path?$query&auth=$sign';

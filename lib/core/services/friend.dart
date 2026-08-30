@@ -2,7 +2,7 @@
 /// 移植自 MNClient `services/friend.py`（NewFriendClient + CreateFriendRequest）。
 library;
 
-import '../crypto/md5_sign.dart' show md5Token;
+import '../crypto/md5_sign.dart' show httpGetRealNameMobileSum, md5Token;
 import 'gateway.dart';
 
 /// 好友服务 URL 路径。
@@ -39,12 +39,14 @@ class FriendClient {
   Future<Map<String, Object?>> _get(String url) => _gw.get(url);
 
   /// 发送聊天消息 (cmd=send_chat_msg)。msg 标记 not_auth 不参与签名。
-  /// 参数集与 Python friend.py:404-448 完全一致。
+  /// 参数集对齐反编译源码 mainchatinterface.lua:131-132（真实客户端总是带
+  /// uin=src_uin、msgtype=1，且 **URL 末尾追加 http_getRealNameMobileSum(text)
+  /// 的 mmsum/cthash** —— 缺 cthash 服务器返回 result:2）。
   Future<Map<String, Object?>> sendChatMsg({
     required Object desUin,
     required String msg,
     int showType = 1,
-    int? msgtype,
+    int msgtype = 1, // 1=文本（Lua 原码固定 msgtype=1）
     Object? extendData,
     Object? uinOverride,
   }) async {
@@ -58,20 +60,18 @@ class FriendClient {
       'encrypt_ver': '1',
       'lang': lang,
       'msg': msg,
+      'msgtype': '$msgtype',
       's2t': s2t,
       'show_type': '$showType',
       'src_uin': '$uin',
       'time': '$now',
       'token': token,
+      'uin': '${uinOverride ?? uin}',
       'ver': ver,
       'pushchannel': pushChannel,
       'game_session_id': gameSessionId,
       'cid': cid,
     };
-    if (msgtype != null) {
-      params['msgtype'] = '$msgtype';
-      params['uin'] = '${uinOverride ?? uin}';
-    }
     if (extendData != null) {
       params['extend_data'] = extendData.toString();
     }
@@ -81,9 +81,17 @@ class FriendClient {
       path: kFriendPath,
       cmd: 'send_chat_msg',
       params: params,
-      notAuthKeys: {'msg'},
+      // 注意: msg **必须参与签名**（穷举验证 cmd+msg 都入签名 →
+      // {"send_time":..,"result":0} 成功；排除 msg 签名 → result:2）
     );
-    return _get(url);
+    // URL 末尾追加 http_getRealNameMobileSum(msg) 的 mmsum/cthash（实名/内容校验）
+    final sum = httpGetRealNameMobileSum(
+      msg,
+      uin: uin,
+      s2t: s2t,
+      nowVal: now,
+    );
+    return _get('$url&$sum');
   }
 
   /// 好友列表 (cmd=query_friend_list)。与 Python friend.py:450-466 一致。

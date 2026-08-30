@@ -7,28 +7,28 @@ library;
 
 import 'dart:convert';
 
-/// URL-encode matching Lua `urlEncode`:
-/// keeps alnum, `.`, `-`, `_`, space; spaces become `+`.
+/// URL-encode matching Lua `urlEncode`（用于**签名串**）:
+/// keeps alnum, `.`, `-`, `_`；空格 → `%20`（实测服务器签名要求 %20，非 +）。
+///
+/// 注意：query 用的 Uri.encodeQueryComponent 把空格转 `+` 也能被服务器接受，
+/// 但**签名串必须用 %20**（穷举验证 send_chat_msg result:0）。
 String luaUrlEncode(Object value) {
   final s = value.toString();
+  final bytes = utf8.encode(s); // UTF-8 字节流
   final sb = StringBuffer();
-  for (final rune in s.runes) {
-    final c = String.fromCharCode(rune);
-    final isAlnum = (c.codeUnitAt(0) >= 0x30 && c.codeUnitAt(0) <= 0x39) || // 0-9
-        (c.codeUnitAt(0) >= 0x41 && c.codeUnitAt(0) <= 0x5A) || // A-Z
-        (c.codeUnitAt(0) >= 0x61 && c.codeUnitAt(0) <= 0x7A); // a-z
-    if (isAlnum || c == '.' || c == '-' || c == '_') {
-      sb.write(c);
-    } else if (c == ' ') {
-      sb.write('+');
+  var i = 0;
+  while (i < bytes.length) {
+    final b = bytes[i];
+    final isAlnum = (b >= 0x30 && b <= 0x39) || // 0-9
+        (b >= 0x41 && b <= 0x5A) || // A-Z
+        (b >= 0x61 && b <= 0x7A); // a-z
+    if (isAlnum || b == 0x2E || b == 0x2D || b == 0x5F) {
+      // . - _
+      sb.writeCharCode(b);
     } else {
-      // Percent-encode UTF-8 bytes, uppercase hex
-      for (final byte in c.codeUnits) {
-        if (byte < 0x80) {
-          sb.write('%${byte.toRadixString(16).toUpperCase().padLeft(2, '0')}');
-        }
-      }
+      sb.write('%${b.toRadixString(16).toUpperCase().padLeft(2, '0')}');
     }
+    i++;
   }
   return sb.toString();
 }
