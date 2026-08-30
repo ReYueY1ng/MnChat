@@ -8,10 +8,12 @@ import 'app_database.dart';
 
 /// ChatMessage → ChatMessagesCompanion（插入用）。
 /// [sessionKey] 如 `friend_123` / `group_456`。
+/// [myUin] 用于判断消息方向：`out`（我发出）vs `in`（对方发出）。
 ChatMessagesCompanion chatMessageToCompanion(
   ChatMessage m,
-  String sessionKey,
-) {
+  String sessionKey, {
+  required int myUin,
+}) {
   return ChatMessagesCompanion(
     sessionKey: Value(sessionKey),
     uin: Value(m.uin),
@@ -26,6 +28,7 @@ ChatMessagesCompanion chatMessageToCompanion(
     groupId: Value(m.groupId),
     isSystemMsg: Value(m.isSystemMsg),
     isTime: Value(m.isTime),
+    direction: Value(m.uin == myUin ? 'out' : 'in'),
   );
 }
 

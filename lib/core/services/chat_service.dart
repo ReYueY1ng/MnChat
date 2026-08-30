@@ -623,7 +623,7 @@ class ChatService {
     final db = _db;
     if (db == null) return;
     final key = _sessionKey(type, id);
-    unawaited(db.insertMessage(chatMessageToCompanion(m, key)));
+    unawaited(db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin)));
     _persistSession(type, id);
   }
 
@@ -656,7 +656,7 @@ class ChatService {
   Future<void> _replaceHistoryInDb(AppDatabase db, String key, List<ChatMessage> msgs) async {
     await db.clearMessages(key);
     for (final m in msgs) {
-      await db.insertMessage(chatMessageToCompanion(m, key));
+      await db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin));
     }
   }
 
