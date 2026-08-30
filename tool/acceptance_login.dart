@@ -49,14 +49,14 @@ Future<void> main() async {
   print('目标账号: $uin');
 
   // ── 1. login_v3 ────────────────────────────────────────────────────────
-  print('\n[1/5] login_v3 …');
+  print('\n[1/7] login_v3 …');
   final login = LoginClient();
   final auth = await login.login(uin: uin, passwd: passwd);
   print('  登录成功: 昵称=${auth.name} s2=${auth.s2.substring(0, 8)}… '
       's2t=${auth.s2t} jwt_len=${auth.jwt.length}');
 
   // ── 2. WS 心跳取 s2/s2t ───────────────────────────────────────────────
-  print('[2/5] WS 心跳 …');
+  print('[2/7] WS 心跳 …');
   final ws = WsConnection();
   var s2 = auth.s2;
   var s2t = auth.s2t;
@@ -70,13 +70,13 @@ Future<void> main() async {
   }
 
   // ── 3. ChatPush alloc（用心跳 s2/s2t）────────────────────────────────
-  print('[3/5] ChatPush alloc …');
+  print('[3/7] ChatPush alloc …');
   final chatpush = ChatPushClient();
   final (host, token) = await chatpush.alloc(uin: uin, s2: s2, s2t: s2t, jwt: auth.jwt);
   print('  alloc 成功: host=$host token=${token.substring(0, 8)}…');
 
   // ── 4. 连接 gate + 心跳 ───────────────────────────────────────────────
-  print('[4/5] 连接 ChatPush gate …');
+  print('[4/7] 连接 ChatPush gate …');
   final conn = await chatpush.connectGate(
     host: host,
     token: token,
@@ -89,7 +89,7 @@ Future<void> main() async {
   await conn.close();
 
   // ── 5. 好友列表 ───────────────────────────────────────────────────────
-  print('[5/6] 好友列表 (HTTP) …');
+  print('[5/7] 好友列表 (HTTP) …');
   final friend = FriendClient(uin: uin, s2: s2, s2t: s2t);
   final resp = await friend.queryFriendList();
   final data = resp['data'];
