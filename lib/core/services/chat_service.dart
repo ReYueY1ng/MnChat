@@ -6,6 +6,8 @@ library;
 import 'dart:async';
 
 import '../models/messages.dart';
+import '../storage/app_database.dart';
+import '../storage/chat_mapper.dart';
 import 'auth.dart';
 import 'chatpush.dart';
 import 'friend.dart';
@@ -64,7 +66,12 @@ class ChatService {
   final List<Contact> _contacts = [];
   final Map<String, List<ChatMessage>> _messagesCache = {};
 
-  ChatService() {
+  /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
+  final AppDatabase? _db;
+
+  // 私有字段无法跨库用 this._db 初始化形参，故保留显式赋值
+  ChatService({AppDatabase? db})
+      : _db = db { // ignore: prefer_initializing_formals
     _login = LoginClient();
     _chatpush = ChatPushClient();
   }
@@ -306,10 +313,38 @@ class ChatService {
   }
 
   Future<void> _loadSessions() async {
+    // 先加载本地离线缓存（SQLite），让 UI 立即有内容
+    await _loadOfflineCache();
     await loadSessions();
     // 拉取每个好友的历史（后台）
     for (final c in _contacts) {
       unawaited(requestFriendHistory(c.uin));
+    }
+  }
+
+  /// 从 SQLite 恢复上次的会话与消息（离线缓存）。
+  Future<void> _loadOfflineCache() async {
+    final db = _db;
+    if (db == null) return;
+    try {
+      final sessionRows = await db.allSessions();
+      for (final r in sessionRows) {
+        final s = chatSessionFromRecord(r);
+        if (s.type == ChatSessionType.friend) {
+          _friendSessions[s.id] = s;
+        } else {
+          _groupSessions[s.id] = s;
+        }
+        final key = sessionKeyOf(s.type, s.id);
+        final msgRows = await db.messagesOf(key);
+        if (msgRows.isNotEmpty) {
+          _messagesCache[key] = msgRows.map(chatMessageFromRecord).toList();
+        }
+      }
+      _emitSessionSnapshot();
+    } catch (e) {
+      // ignore: avoid_print
+      print('load offline cache failed: $e');
     }
   }
 
@@ -433,6 +468,7 @@ class ChatService {
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
+    _persistMessage(ChatSessionType.friend, uin2, m);
     _emitSessionSnapshot();
   }
 
@@ -458,13 +494,50 @@ class ChatService {
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.group, groupId, m));
+    _persistMessage(ChatSessionType.group, groupId, m);
     _emitSessionSnapshot();
+  }
+
+  /// 持久化一条消息 + 更新会话行。
+  void _persistMessage(ChatSessionType type, int id, ChatMessage m) {
+    final db = _db;
+    if (db == null) return;
+    final key = _sessionKey(type, id);
+    unawaited(db.insertMessage(chatMessageToCompanion(m, key)));
+    _persistSession(type, id);
+  }
+
+  /// 持久化会话行（未读/最后消息）。
+  void _persistSession(ChatSessionType type, int id) {
+    final db = _db;
+    if (db == null) return;
+    final s = type == ChatSessionType.friend
+        ? _friendSessions[id]
+        : _groupSessions[id];
+    if (s == null) return;
+    unawaited(db.upsertSession(chatSessionToCompanion(s)));
   }
 
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
     if (msgs.isEmpty) return;
     final key = _sessionKey(type, id);
     _messagesCache[key] = msgs;
+    _persistHistory(type, id, msgs);
+  }
+
+  /// 持久化整段历史（先清空该会话旧消息再批量写入，避免重复）。
+  void _persistHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
+    final db = _db;
+    if (db == null) return;
+    final key = _sessionKey(type, id);
+    unawaited(_replaceHistoryInDb(db, key, msgs));
+  }
+
+  Future<void> _replaceHistoryInDb(AppDatabase db, String key, List<ChatMessage> msgs) async {
+    await db.clearMessages(key);
+    for (final m in msgs) {
+      await db.insertMessage(chatMessageToCompanion(m, key));
+    }
   }
 
   void _emitSessionSnapshot() {
@@ -480,6 +553,7 @@ class ChatService {
     if (existing != null) {
       sessionsMap[id] = existing.copyWith(unreadCount: 0, lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000);
     }
+    _persistSession(type, id);
     _emitSessionSnapshot();
   }
 

@@ -11,9 +11,10 @@ import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 
-/// ChatService 单例。
+/// ChatService 单例（注入本地 SQLite 用于持久化；main() 中 override databaseProvider）。
 final chatServiceProvider = Provider<ChatService>((ref) {
-  final service = ChatService();
+  final db = ref.read(databaseProvider);
+  final service = ChatService(db: db);
   ref.onDispose(service.dispose);
   return service;
 });

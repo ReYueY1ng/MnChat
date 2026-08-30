@@ -41,8 +41,8 @@ class AppDatabase extends _$AppDatabase {
   @override
   int get schemaVersion => 1;
 
-  Future<void> insertMessage(ChatMessageRecord row) =>
-      into(chatMessages).insertOnConflictUpdate(row);
+  Future<void> insertMessage(ChatMessagesCompanion row) =>
+      into(chatMessages).insert(row);
 
   Future<List<ChatMessageRecord>> messagesOf(String key, {int limit = 200}) {
     final query = select(chatMessages)
@@ -55,7 +55,7 @@ class AppDatabase extends _$AppDatabase {
   Future<void> clearMessages(String key) =>
       (delete(chatMessages)..where((t) => t.sessionKey.equals(key))).go();
 
-  Future<void> upsertSession(ChatSessionRecord row) =>
+  Future<void> upsertSession(ChatSessionsCompanion row) =>
       into(chatSessions).insertOnConflictUpdate(row);
 
   Future<List<ChatSessionRecord>> allSessions() => select(chatSessions).get();
