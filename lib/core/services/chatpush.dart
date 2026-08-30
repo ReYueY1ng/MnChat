@@ -96,11 +96,13 @@ class ChatPushClient {
     return (d['host'] as String, d['token'] as String);
   }
 
-  /// 编码：params → JSON → chatpush_encrypt → base64 → url-encode。
+  /// 编码：params → JSON → chatpush_encrypt → **标准 base64** → url-encode。
+  /// Python chatpush.py:_encode: json.dumps(separators=(",",":")) → chatpush_encrypt
+  /// → base64.b64encode → urllib.parse.quote(safe="")。
   static String _encode(Map<String, Object?> params) {
     final jsonBytes = utf8.encode(jsonEncode(params));
     final encrypted = chatpushEncrypt(jsonBytes);
-    final b64 = base64UrlEncode(encrypted).replaceAll('=', '');
+    final b64 = base64Encode(encrypted);
     return Uri.encodeComponent(b64);
   }
 
@@ -211,13 +213,19 @@ class ChatPushConnection {
       return;
     }
 
-    // msg_type == 11: 服务端下行推送 → 回 ack {11, msgseq} → 去重 → 派发事件
+    // msg_type == 11: 服务端下行推送
+    // 帧结构 (0-indexed): [0]=msg_type, [1]=servicename, [2]=methodname,
+    //                     [3]=seq, [4]=ts, [5]=args_or_result
+    // Lua (1-indexed): msg_type, msgseq = msg[1], msg[4] → 对应 [0] 和 [3]
     if (msgType == 11 && msg.length >= 2) {
-      final msgSeq = '${msg[1]}';
+      final msgSeq = msg.length > 3 ? '${msg[3]}' : '';
+      // 回 ack {msg_type, msgseq} 告诉服务器已收到
       _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[11, msgSeq]))));
       final baseSeq = msgSeq.split('_').isEmpty ? '' : msgSeq.split('_').first;
-      if (_recvedOk.contains(baseSeq)) return;
-      if (baseSeq.isNotEmpty) _recvedOk.add(baseSeq);
+      if (baseSeq.isNotEmpty) {
+        if (_recvedOk.contains(baseSeq)) return;
+        _recvedOk.add(baseSeq);
+      }
       if (msg.length >= 6) {
         final service = msg[1]?.toString() ?? '';
         final methodName = msg[2]?.toString() ?? '';
