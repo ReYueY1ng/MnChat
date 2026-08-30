@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart';
 import '../net/config.dart';
+import '../net/http_factory.dart';
 import '../protocol/lua_table.dart';
 
 /// 网关响应解码：先 JSON 后 LuaTable，异常时返回 null 结构。
@@ -75,11 +76,8 @@ class GatewayClient {
 
   GatewayClient({Dio? dio, Map<String, String>? urls})
       : _dio = dio ??
-            Dio(BaseOptions(
-              headers: {'User-Agent': kUa},
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 15),
-            )),
+            (createDio()
+              ..options.headers = {'User-Agent': kUa}),
         _urls = {...kDefaultUrls, ...?urls};
 
   /// 解析 URL key → base URL。

@@ -12,6 +12,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 import '../crypto/chatpush_cipher.dart' show chatpushDecrypt, chatpushEncrypt;
 import '../crypto/md5_sign.dart' show chatpushAuthKey, md5Sign, md5Token;
 import '../net/config.dart';
+import '../net/http_factory.dart';
 import '../net/msgpack.dart' show chatpushJsonDecode;
 
 /// ChatPush 下行推送事件。
@@ -56,7 +57,7 @@ class ChatPushClient {
 
   ChatPushClient({int env = 0, String? lbUrl, Dio? dio})
       : _lbUrl = lbUrl ?? kChatpushLbUrls[env] ?? kProdLb,
-        _dio = dio ?? Dio(BaseOptions(connectTimeout: const Duration(seconds: 15)));
+        _dio = dio ?? createDio();
 
   // ── alloc ─────────────────────────────────────────────────────────────
 

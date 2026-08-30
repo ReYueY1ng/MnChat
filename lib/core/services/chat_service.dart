@@ -394,14 +394,18 @@ class ChatService {
         if (uin2 == 0) continue;
         if (uin2 == myUin || uin2 == 1000) continue;
         final nickname = _friendNickname(m);
+        // friend_list 只返回 {mark, uin, relation}，无昵称 → 用 uin 兜底显示
+        final displayName = nickname.isNotEmpty ? nickname : '$uin2';
         _contacts.add(Contact(uin: uin2, nickname: nickname));
         _friendSessions[uin2] = ChatSession(
           id: uin2,
           type: ChatSessionType.friend,
-          name: nickname,
+          name: displayName,
           avatar: _friendAvatar(m),
         );
       }
+      // 批量拉取昵称/头像（buddysvr batch_friend_info，走 WS；HTTP chatpush 不支持）
+      unawaited(_fetchFriendInfos(items));
     } catch (e) {
       // ignore: avoid_print
       print('query_friend_list failed: $e');
@@ -448,6 +452,70 @@ class ChatService {
     }
     if (direct != null && direct.toString().isNotEmpty) return direct.toString();
     return null;
+  }
+
+  /// 批量拉取好友昵称/头像（buddysvr batch_friend_info）。
+  /// friend_list 仅含 {mark, uin, relation}；昵称头像需此 RPC（WS 通道）。
+  Future<void> _fetchFriendInfos(List<Map<String, Object?>> items) async {
+    final uins = items.map(_friendUin).where((u) => u != 0).toList();
+    if (uins.isEmpty) return;
+    final conn = _conn;
+    if (conn == null) return;
+    try {
+      final rpc = await conn.sendRpc('buddysvr', 'batch_friend_info', [
+        uins,
+        false, // issimple
+      ]);
+      final infos = rpc.result;
+      if (infos is List) {
+        for (final entry in infos) {
+          if (entry is! Map) continue;
+          final parsed = _parseFriendInfo(entry.cast<String, Object?>());
+          if (parsed == null) continue;
+          final u2 = parsed.$1;
+          final s = _friendSessions[u2];
+          if (s != null) {
+            _friendSessions[u2] = ChatSession(
+              id: s.id,
+              type: s.type,
+              name: parsed.$2.isNotEmpty ? parsed.$2 : s.name,
+              avatar: parsed.$3 ?? s.avatar,
+              lastMessage: s.lastMessage,
+              unreadCount: s.unreadCount,
+              lastReadTime: s.lastReadTime,
+            );
+          }
+        }
+        _emitSessionSnapshot();
+      }
+    } catch (e) {
+      // ignore: avoid_print
+      print('batch_friend_info failed: $e');
+    }
+  }
+
+  /// 从 friend_info 条目提取 (uin, nickname, avatar)。
+  /// 结构: {uin, baseinfo:{Uin, RoleInfo:{NickName}}, profile:{header:{url}}}。
+  static (int, String, String?)? _parseFriendInfo(Map<String, Object?> m) {
+    int? u;
+    final topUin = m['uin'] ?? m['Uin'];
+    if (topUin is num) u = topUin.toInt();
+    var nickname = m['NickName']?.toString() ?? '';
+    String? avatar = _friendAvatar(m);
+    final bi = m['baseinfo'];
+    if (bi is Map) {
+      final u2 = bi['Uin'] ?? bi['uin'];
+      if (u == null && u2 is num) u = u2.toInt();
+      if (nickname.isEmpty) {
+        final ri = bi['RoleInfo'];
+        if (ri is Map) {
+          final n = ri['NickName'] ?? ri['nickname'];
+          nickname = n?.toString() ?? '';
+        }
+      }
+    }
+    if (u == null) return null;
+    return (u, nickname, avatar);
   }
 
   /// 把 friend_list 各种可能结构归一化成 List<Map>。

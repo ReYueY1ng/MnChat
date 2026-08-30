@@ -12,6 +12,7 @@ import '../crypto/encoding.dart' show urlsafeB64Urlencode;
 import '../crypto/md5_sign.dart' show md5Sign, loginAuthKey;
 import '../crypto/xxtea.dart' show xxteaDecrypt, xxteaEncrypt, xxteaEncryptZip;
 import '../net/config.dart';
+import '../net/http_factory.dart';
 import '../net/msgpack.dart' show msgpackPack, msgpackUnpack;
 
 /// 认证结果。
@@ -64,11 +65,8 @@ class LoginClient {
 
   LoginClient({Dio? dio})
       : _dio = dio ??
-            Dio(BaseOptions(
-              headers: {'User-Agent': kUa},
-              connectTimeout: const Duration(seconds: 15),
-              receiveTimeout: const Duration(seconds: 15),
-            ));
+            (createDio()
+              ..options.headers = {'User-Agent': kUa});
 
   /// login_v3：payload → msgpack → zlib → XXTEA → url-safe base64。
   String _encode(Map<String, Object?> payload) {
@@ -157,7 +155,7 @@ class WsConnection {
           'lang': '0',
           'country': 'CN',
         }).query}');
-    final resp = await Dio().getUri(uri, options: Options(headers: {'User-Agent': kUa}));
+    final resp = await createDio().getUri(uri, options: Options(headers: {'User-Agent': kUa}));
     // Dio 默认自动解析 JSON → resp.data 已是 Map；但保留 String 分支兼容
     final Map<String, dynamic> data;
     final raw = resp.data;
