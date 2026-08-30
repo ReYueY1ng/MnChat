@@ -1,0 +1,18 @@
+# Flutter/Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+build/
+pubspec.lock
+.fvm/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.swp
+
+# Runtime
+*.log
+session.json
+config.yaml
