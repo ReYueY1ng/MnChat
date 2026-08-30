@@ -269,24 +269,52 @@ class ChatService {
   }
 
   /// 拉取好友离线/最近聊天记录（buddysvr chat_query）。
+  /// 优先 WS 长连接；失败自动降级 HTTP 后备（chatpush_rpc）。
   Future<void> requestFriendHistory(int uin2) async {
-    final conn = _conn;
-    if (conn == null) return;
+    final auth = _auth;
     try {
-      final rpc = await conn.sendRpc('buddysvr', 'chat_query', [uin2]);
-      final msglist = rpc.result;
-      if (msglist is List) {
-        final msgs = <ChatMessage>[];
-        for (final item in msglist) {
-          if (item is List) msgs.add(ChatMessage.fromChatQueryTriple(item));
+      final conn = _conn;
+      if (conn != null) {
+        try {
+          final rpc = await conn.sendRpc('buddysvr', 'chat_query', [uin2]);
+          if (rpc.result is List) {
+            _applyChatQueryResult(uin2, rpc.result as List);
+            return;
+          }
+        } catch (e) {
+          // WS 失败 → 落到 HTTP 后备
+          // ignore: avoid_print
+          print('chat_query WS failed for $uin2, falling back to HTTP: $e');
         }
-        _replaceHistory(ChatSessionType.friend, uin2, msgs);
+      }
+      if (auth != null) {
+        final seq = DateTime.now().microsecondsSinceEpoch % 100000;
+        final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
+        final resp = await _chatpush.rpcHttp(
+          uin: auth.uin,
+          s2: auth.s2,
+          s2t: auth.s2t,
+          message: ['buddysvr', 'chat_query', seq, msec, [uin2], <String, Object?>{}],
+        );
+        // 响应格式 [code?, ...]，chat_query 返回 [0, msglist]
+        if (resp.length >= 2 && resp[1] is List) {
+          _applyChatQueryResult(uin2, resp[1] as List);
+        } else if (resp.isNotEmpty && resp[0] is List) {
+          _applyChatQueryResult(uin2, resp[0] as List);
+        }
       }
     } catch (e) {
-      // 长连接不可用时查询失败，静默
       // ignore: avoid_print
       print('chat_query failed for $uin2: $e');
     }
+  }
+
+  void _applyChatQueryResult(int uin2, List<dynamic> msglist) {
+    final msgs = <ChatMessage>[];
+    for (final item in msglist) {
+      if (item is List) msgs.add(ChatMessage.fromChatQueryTriple(item));
+    }
+    _replaceHistory(ChatSessionType.friend, uin2, msgs);
   }
 
   /// 拉取群聊历史（send_cache_msg）。
@@ -362,23 +390,64 @@ class ChatService {
         _friendSessions.clear();
       }
       for (final m in items) {
-        final uin2 = (m['Uin'] ?? m['uin'] ?? 0);
-        if (uin2 is! num) continue;
-        final u = uin2.toInt();
-        if (u == myUin || u == 1000) continue;
-        final nickname = (m['NickName'] ?? m['nickname'] ?? m['Name'] ?? '').toString();
-        _contacts.add(Contact(uin: u, nickname: nickname));
-        _friendSessions[u] = ChatSession(
-          id: u,
+        final uin2 = _friendUin(m);
+        if (uin2 == 0) continue;
+        if (uin2 == myUin || uin2 == 1000) continue;
+        final nickname = _friendNickname(m);
+        _contacts.add(Contact(uin: uin2, nickname: nickname));
+        _friendSessions[uin2] = ChatSession(
+          id: uin2,
           type: ChatSessionType.friend,
           name: nickname,
-          avatar: m['IconUrl']?.toString() ?? m['HeadIconUrl']?.toString(),
+          avatar: _friendAvatar(m),
         );
       }
     } catch (e) {
       // ignore: avoid_print
       print('query_friend_list failed: $e');
     }
+  }
+
+  /// 从好友记录提取 uin（兼容嵌套 baseinfo 结构）。
+  static int _friendUin(Map<String, Object?> m) {
+    final outer = m['Uin'] ?? m['uin'];
+    if (outer is num) return outer.toInt();
+    final bi = m['baseinfo'];
+    if (bi is Map) {
+      final u = bi['Uin'] ?? bi['uin'];
+      if (u is num) return u.toInt();
+    }
+    return 0;
+  }
+
+  /// 从好友记录提取昵称（嵌套 baseinfo.RoleInfo.NickName）。
+  static String _friendNickname(Map<String, Object?> m) {
+    final direct = m['NickName'] ?? m['nickname'] ?? m['Name'];
+    if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+    final bi = m['baseinfo'];
+    if (bi is Map) {
+      final ri = bi['RoleInfo'];
+      if (ri is Map) {
+        final n = ri['NickName'] ?? ri['nickname'];
+        if (n != null && n.toString().isNotEmpty) return n.toString();
+      }
+    }
+    return '';
+  }
+
+  /// 从好友记录提取头像 URL（嵌套 profile.header.url）。
+  static String? _friendAvatar(Map<String, Object?> m) {
+    final direct = m['IconUrl'] ?? m['HeadIconUrl'] ?? m['headurl'];
+    final profile = m['profile'];
+    if (profile is Map) {
+      final header = profile['header'];
+      if (header is Map) {
+        final url = header['url'] ?? header['Url'];
+        if (url != null && url.toString().isNotEmpty) return url.toString();
+      }
+    }
+    if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+    return null;
   }
 
   /// 把 friend_list 各种可能结构归一化成 List<Map>。

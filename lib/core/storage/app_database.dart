@@ -32,6 +32,9 @@ class ChatSessions extends Table {
   IntColumn get unreadCount => integer()();
   IntColumn get lastUin => integer().nullable()();
   TextColumn get lastText => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {sessionKey};
 }
 
 @DriftDatabase(tables: [ChatMessages, ChatSessions])

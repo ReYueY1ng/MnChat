@@ -1064,7 +1064,7 @@ class $ChatSessionsTable extends ChatSessions
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => const {};
+  Set<GeneratedColumn> get $primaryKey => {sessionKey};
   @override
   ChatSessionRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';

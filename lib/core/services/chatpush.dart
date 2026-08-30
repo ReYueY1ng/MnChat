@@ -106,6 +106,42 @@ class ChatPushClient {
     return Uri.encodeComponent(b64);
   }
 
+  /// HTTP 后备 RPC（对齐反编译源码 managerbase.lua `chatpush_rpc`）。
+  ///
+  /// WS 长连接不可用时使用：POST `{lb}/minilb/rpc?uid&time&auth&loginauth&s2t`。
+  /// 关键差异（vs WS）：auth = md5(time + key + uin + extdata) **包含 extdata**。
+  ///
+  /// [args] 与 WS 通道一致，如 `['svc','method',seq,msec,args,{}]`。
+  /// 返回解码后的数组（chatpush_decrypt(JSON)）。
+  Future<List<dynamic>> rpcHttp({
+    required int uin,
+    required String s2,
+    required String s2t,
+    required List<dynamic> message,
+  }) async {
+    final timeVal = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final jsonBytes = utf8.encode(jsonEncode(message));
+    final enc = chatpushEncrypt(jsonBytes);
+    final b64 = base64Encode(enc);
+    final extdata = Uri.encodeComponent(b64);
+
+    final loginauth = md5Token(timeVal, s2, uin);
+    final auth = md5Sign([timeVal.toString(), chatpushAuthKey, uin.toString(), extdata]);
+
+    final url = '$_lbUrl/minilb/rpc'
+        '?uid=$uin&time=$timeVal&auth=$auth&loginauth=$loginauth&s2t=$s2t';
+    final resp = await _dio.post(url, data: extdata);
+    final text = resp.data.toString();
+    try {
+      final decrypted = chatpushDecrypt(base64Decode(text));
+      final decoded = jsonDecode(utf8.decode(decrypted));
+      if (decoded is List) return decoded;
+      return [decoded];
+    } catch (e) {
+      throw ChatPushError('rpcHttp decode failed: $e (raw=${text.substring(0, text.length > 60 ? 60 : text.length)})');
+    }
+  }
+
   // ── Gate 连接 ───────────────────────────────────────────────────────────
 
   /// 建立 WebSocket 长连接并启动接收循环。
