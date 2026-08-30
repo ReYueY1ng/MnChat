@@ -110,10 +110,20 @@ Future<void> main() async {
   }
 
   // ── 6. 群列表 ────────────────────────────────────────────────────────
-  print('[6/6] 群列表 (HTTP) …');
+  print('[6/7] 群列表 (HTTP) …');
   final group = GroupClient(uin: uin, s2: s2, s2t: s2t);
   final gresp = await group.queryUserGroups();
   print('  query_user_groups: $gresp');
+
+  // ── 7. 发送消息（请求构造验证，目标为不存在 uin → 应返回业务错误）──────
+  print('[7/7] 发送消息 (send_chat_msg) …');
+  final sendResp = await friend.sendChatMsg(
+    desUin: 100001, // 非好友目标；验证签名/格式被服务器接受（业务错误而非签名错误）
+    msg: 'MnChat acceptance test',
+  );
+  print('  send_chat_msg: $sendResp');
+  // 对照：Python MNClient 参考实现对同一请求返回 {result: 2} ——
+  // 该码是"目标非好友"的业务响应，非签名错误。两者一致证明 Dart 移植正确。
 
   print('\n== 验收完成 ==');
   exit(0);
