@@ -82,7 +82,10 @@ class FriendClient {
       cmd: 'send_chat_msg',
       params: params,
       // 注意: msg **必须参与签名**（穷举验证 cmd+msg 都入签名 →
-      // {"send_time":..,"result":0} 成功；排除 msg 签名 → result:2）
+      // {"send_time":..,"result":0} 成功；排除 msg 签名 → result:2）。
+      // 但 extend_data 是 **notAuth**（反编译源码 CreateFriendRequest.addparam
+      // 强制 extend_data.notAuth=true）→ 出现在 URL 但不参与签名。
+      notAuthKeys: {'extend_data'},
     );
     // URL 末尾追加 http_getRealNameMobileSum(msg) 的 mmsum/cthash（实名/内容校验）
     final sum = httpGetRealNameMobileSum(
