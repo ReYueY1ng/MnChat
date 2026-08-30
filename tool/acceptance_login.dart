@@ -19,10 +19,6 @@ import 'package:mnchat/core/services/chatpush.dart';
 import 'package:mnchat/core/services/friend.dart';
 import 'package:mnchat/core/services/group.dart';
 
-const _client = '''
-import 'package:dio/dio.dart';
-''';
-
 Future<(int, String)> _resolveCreds() async {
   final envUin = Platform.environment['MNC_UIN'];
   final envPwd = Platform.environment['MNC_PASSWD'];
