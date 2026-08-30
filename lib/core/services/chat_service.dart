@@ -155,6 +155,7 @@ class ChatService {
         host: host,
         token: token,
         uin: auth.uin,
+        authToken: auth.jwt, // 握手用（Lua container.conn.token = 登录 jwt）
         onPush: _handlePush,
         onRpc: _handleRpc,
       );

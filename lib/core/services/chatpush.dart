@@ -147,11 +147,14 @@ class ChatPushClient {
 
   /// 建立 WebSocket 长连接并启动接收循环。
   /// [onPush] 收到 msg_type==11 推送时回调；[onRpc] 收到 RPC 响应时回调。
+  /// 对齐 container.lua `onStateChange READYSTATE_OPEN`：连接打开后必须立即
+  /// 发送 `{21, conn.token}`（rotate-XOR 加密）作为握手认证，否则服务器秒断。
   Future<ChatPushConnection> connectGate({
     required String host,
     required String token,
     required int uin,
     int apiId = 110,
+    String? authToken, // 握手用（登录返回的 jwt；Lua = container.conn.token）
     void Function(ChatPushPush)? onPush,
     void Function(ChatPushRpcResult)? onRpc,
   }) async {
@@ -162,6 +165,7 @@ class ChatPushClient {
     final channel = WebSocketChannel.connect(uri);
     return ChatPushConnection(
       channel,
+      authToken: authToken,
       onPush: onPush,
       onRpc: onRpc,
     );
@@ -180,15 +184,40 @@ class ChatPushConnection {
   StreamSubscription? _sub;
   Timer? _heartbeat;
 
-  ChatPushConnection(this._channel, {this.onPush, this.onRpc}) {
+  ChatPushConnection(this._channel,
+      {this.authToken, this.onPush, this.onRpc}) {
     _seq = DateTime.now().microsecondsSinceEpoch % 100000;
     _sub = _channel.stream.listen(_onMessage, onDone: _onDone, onError: (_) {});
     _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => _sendHeartbeat());
+    // 连接打开 → 立即发 {21, authToken} 握手（container.lua:1290-1297）
+    _sendHandshake();
+  }
+
+  /// 登录返回的 jwt（Lua container.conn.token）。null 时跳过握手。
+  final String? authToken;
+
+  void _sendHandshake() {
+    final t = authToken;
+    if (t == null) return;
+    try {
+      _channel.sink.add(
+        chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[21, t]))),
+      );
+    } catch (_) {
+      // 连接未就绪时忽略（后续心跳/RPC 会重试建立）
+    }
   }
 
   int _nextSeq() {
     _seq = (_seq + 1) % 100000000;
     return _seq;
+  }
+
+  /// 服务器将 seq 序列化为 String，统一转 int（失败返回 -1）。
+  int _toInt(dynamic v) {
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? -1;
   }
 
   /// RPC 请求（JSON + rotate-XOR 编码），返回响应 Future。
@@ -222,12 +251,12 @@ class ChatPushConnection {
       return;
     }
     if (msg.isEmpty) return;
-    final msgType = msg[0] as int;
+    final msgType = msg[0] is int ? msg[0] as int : int.tryParse('${msg[0]}') ?? -1;
 
     if (msgType == 1 && msg.length >= 4) {
       // RPC 响应: [1, seq, code, result, other]
-      final seq = msg[1] as int? ?? -1;
-      final code = msg[2] as int? ?? -1;
+      final seq = _toInt(msg[1]);
+      final code = _toInt(msg[2]);
       final result = msg.length > 3 ? msg[3] : null;
       final other = msg.length > 4 ? msg[4] : null;
       final completer = _pending[seq];
@@ -241,7 +270,7 @@ class ChatPushConnection {
 
     if (msgType == 0 && msg.length >= 3) {
       // 心跳 ack: [0, seq, svrtime_delta] → 回 [1, seq]
-      final seq = msg[1] as int? ?? -1;
+      final seq = _toInt(msg[1]);
       final completer = _pending[seq];
       if (completer != null && !completer.isCompleted) {
         completer.complete(ChatPushRpcResult(seq, 0, msg[2], null));
