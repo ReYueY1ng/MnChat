@@ -12,6 +12,7 @@ import 'auth.dart';
 import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
+import 'profile.dart';
 
 /// 服务状态。
 enum ChatServiceState { unauthenticated, authenticating, connected, connectingChatPush, error }
@@ -270,39 +271,28 @@ class ChatService {
   }
 
   /// 拉取好友离线/最近聊天记录（buddysvr chat_query）。
-  /// 优先 WS 长连接；失败自动降级 HTTP 后备（chatpush_rpc）。
+  ///
+  /// 独立客户端**不走 WS RPC**：反编译源码 `buddymanager.lua` 中
+  /// `chat_query` 在 WS 打开时走 `cluster.buddysvr.chat_query`（游戏 cluster
+  /// 连接专属），chatpushconn 只是推送通道——WS 上发 RPC 永不响应（实测超时）。
+  /// 所以直接走 HTTP 后备 `chatpush_rpc`（POST /minilb/rpc）。
   Future<void> requestFriendHistory(int uin2) async {
     final auth = _auth;
+    if (auth == null) return;
     try {
-      final conn = _conn;
-      if (conn != null) {
-        try {
-          final rpc = await conn.sendRpc('buddysvr', 'chat_query', [uin2]);
-          if (rpc.result is List) {
-            _applyChatQueryResult(uin2, rpc.result as List);
-            return;
-          }
-        } catch (e) {
-          // WS 失败 → 落到 HTTP 后备
-          // ignore: avoid_print
-          print('chat_query WS failed for $uin2, falling back to HTTP: $e');
-        }
-      }
-      if (auth != null) {
-        final seq = DateTime.now().microsecondsSinceEpoch % 100000;
-        final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
-        final resp = await _chatpush.rpcHttp(
-          uin: auth.uin,
-          s2: auth.s2,
-          s2t: auth.s2t,
-          message: ['buddysvr', 'chat_query', seq, msec, [uin2], <String, Object?>{}],
-        );
-        // 响应格式 [code?, ...]，chat_query 返回 [0, msglist]
-        if (resp.length >= 2 && resp[1] is List) {
-          _applyChatQueryResult(uin2, resp[1] as List);
-        } else if (resp.isNotEmpty && resp[0] is List) {
-          _applyChatQueryResult(uin2, resp[0] as List);
-        }
+      final seq = DateTime.now().microsecondsSinceEpoch % 100000;
+      final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
+      final resp = await _chatpush.rpcHttp(
+        uin: auth.uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+        message: ['buddysvr', 'chat_query', seq, msec, [uin2], <String, Object?>{}],
+      );
+      // 响应格式 [code?, ...]，chat_query 返回 [0, msglist]
+      if (resp.length >= 2 && resp[1] is List) {
+        _applyChatQueryResult(uin2, resp[1] as List);
+      } else if (resp.isNotEmpty && resp[0] is List) {
+        _applyChatQueryResult(uin2, resp[0] as List);
       }
     } catch (e) {
       // ignore: avoid_print
@@ -455,68 +445,42 @@ class ChatService {
     return null;
   }
 
-  /// 批量拉取好友昵称/头像（buddysvr batch_friend_info）。
-  /// friend_list 仅含 {mark, uin, relation}；昵称头像需此 RPC（WS 通道）。
+  /// 批量拉取好友昵称/头像（/miniw/profile getProfileBatch3）。
+  /// friend_list 仅含 {mark, uin, relation}；昵称头像由此 HTTP 接口获取
+  /// （batch_friend_info 走游戏 cluster 连接，独立客户端无法使用）。
   Future<void> _fetchFriendInfos(List<Map<String, Object?>> items) async {
+    final auth = _auth;
+    if (auth == null) return;
     final uins = items.map(_friendUin).where((u) => u != 0).toList();
     if (uins.isEmpty) return;
-    final conn = _conn;
-    if (conn == null) return;
     try {
-      final rpc = await conn.sendRpc('buddysvr', 'batch_friend_info', [
-        uins,
-        false, // issimple
-      ]);
-      final infos = rpc.result;
-      if (infos is List) {
-        for (final entry in infos) {
-          if (entry is! Map) continue;
-          final parsed = _parseFriendInfo(entry.cast<String, Object?>());
-          if (parsed == null) continue;
-          final u2 = parsed.$1;
-          final s = _friendSessions[u2];
+      final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+      // 分批（每批 20），避免 URL 过长
+      bool updated = false;
+      for (var i = 0; i < uins.length; i += 20) {
+        final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
+        final infos = await profile.getProfileBatch3(batch);
+        for (final p in infos) {
+          final s = _friendSessions[p.uin];
           if (s != null) {
-            _friendSessions[u2] = ChatSession(
+            _friendSessions[p.uin] = ChatSession(
               id: s.id,
               type: s.type,
-              name: parsed.$2.isNotEmpty ? parsed.$2 : s.name,
-              avatar: parsed.$3 ?? s.avatar,
+              name: p.nickname.isNotEmpty ? p.nickname : s.name,
+              avatar: p.avatarUrl ?? s.avatar,
               lastMessage: s.lastMessage,
               unreadCount: s.unreadCount,
               lastReadTime: s.lastReadTime,
             );
+            updated = true;
           }
         }
-        _emitSessionSnapshot();
       }
+      if (updated) _emitSessionSnapshot();
     } catch (e) {
       // ignore: avoid_print
-      print('batch_friend_info failed: $e');
+      print('getProfileBatch3 failed: $e');
     }
-  }
-
-  /// 从 friend_info 条目提取 (uin, nickname, avatar)。
-  /// 结构: {uin, baseinfo:{Uin, RoleInfo:{NickName}}, profile:{header:{url}}}。
-  static (int, String, String?)? _parseFriendInfo(Map<String, Object?> m) {
-    int? u;
-    final topUin = m['uin'] ?? m['Uin'];
-    if (topUin is num) u = topUin.toInt();
-    var nickname = m['NickName']?.toString() ?? '';
-    String? avatar = _friendAvatar(m);
-    final bi = m['baseinfo'];
-    if (bi is Map) {
-      final u2 = bi['Uin'] ?? bi['uin'];
-      if (u == null && u2 is num) u = u2.toInt();
-      if (nickname.isEmpty) {
-        final ri = bi['RoleInfo'];
-        if (ri is Map) {
-          final n = ri['NickName'] ?? ri['nickname'];
-          nickname = n?.toString() ?? '';
-        }
-      }
-    }
-    if (u == null) return null;
-    return (u, nickname, avatar);
   }
 
   /// 把 friend_list 各种可能结构归一化成 List<Map>。
