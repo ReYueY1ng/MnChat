@@ -1,30 +1,29 @@
-// This is a basic Flutter widget test.
-//
-// To perform an interaction with a widget in your test, use the WidgetTester
-// utility in the flutter_test package. For example, you can send tap and scroll
-// gestures. You can also use WidgetTester to find child widgets in the widget
-// tree, read text, and verify that the values of widget properties are correct.
-
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-
-import 'package:mnchat/main.dart';
+import 'package:mnchat/core/models/messages.dart';
+import 'package:mnchat/core/protocol/lua_table.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
-    // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+  test('decodeLuaTable basic', () {
+    final r = decodeHttpResponse('{["ret"]=0,["name"]="x"}') as Map;
+    expect(r['ret'], 0);
+    expect(r['name'], 'x');
+  });
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+  test('ChatMessage from chat_query triple', () {
+    final m = ChatMessage.fromChatQueryTriple([10001, 1700000000, 'hello']);
+    expect(m.uin, 10001);
+    expect(m.text, 'hello');
+    expect(m.time, 1700000000);
+  });
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
-
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+  test('ChatMessage from group notify (ms -> sec)', () {
+    final m = ChatMessage.fromGroupNotify(
+      {'uin': 10002, 'text': 'hi', 'send_time': 1700000000000},
+      groupId: 55,
+    );
+    expect(m.uin, 10002);
+    expect(m.text, 'hi');
+    expect(m.time, 1700000000); // ms converted to sec
+    expect(m.groupId, 55);
   });
 }
