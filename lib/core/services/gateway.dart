@@ -21,38 +21,28 @@ Object? decodeGatewayResponse(String text) {
 String _rstripSlash(String s) => s.endsWith('/') ? s.substring(0, s.length - 1) : s;
 
 /// CreateFriendRequest URL 构造器 (friendservice.lua:259-296)。
-/// 排序后的 key=value 对（排除 notAuth 字段）拼接 + ROOM_AUTH_KEY 求 MD5。
+/// 与 Python MNClient `_build_friend_url` 完全对齐：
+/// all_params = {cmd} + 调用方 params；签名 = md5(排除 notAuth 的
+/// 排序后 key=value 拼接 + ROOM_AUTH_KEY)。**不自动注入任何字段**。
 String buildFriendRequestUrl({
   required String server,
   required String path,
-  required int uin,
-  required int apiId,
-  required String ver,
-  required String country,
-  required String lang,
-  required String s2,
-  required String s2t,
   required String cmd,
-  Map<String, String>? extraParams,
+  Map<String, String> params = const {},
   Set<String>? notAuthKeys,
 }) {
-  final params = <String, String>{
-    'apiid': '$apiId',
-    'country': country,
-    'lang': lang,
-    's2t': s2t,
-    'uin': '$uin',
-    'ver': ver,
-    'cmd': cmd,
-    ...?extraParams,
-  };
-  final sorted = params.keys.toList()..sort();
+  final allParams = <String, String>{'cmd': cmd, ...params};
+  final sorted = allParams.keys.toList()..sort();
+  // URL query: 排序后 urlencode（空格→+，与 Python urlencode 一致）
+  final query = sorted
+      .map((k) => '$k=${Uri.encodeQueryComponent(allParams[k]!)}')
+      .join('&');
+  // canonical（签名串）: 排除 notAuth 字段，用原始值（不 urlencode）
   final canonical = sorted
       .where((k) => !(notAuthKeys?.contains(k) ?? false))
-      .map((k) => '$k=${params[k]}')
+      .map((k) => '$k=${allParams[k]}')
       .join('&');
   final sign = md5Sign([canonical, roomAuthKey]);
-  final query = sorted.map((k) => '$k=${Uri.encodeQueryComponent(params[k]!)}').join('&');
   return '${_rstripSlash(server)}$path?$query&auth=$sign';
 }
 

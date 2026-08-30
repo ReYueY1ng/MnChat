@@ -158,7 +158,16 @@ class WsConnection {
           'country': 'CN',
         }).query}');
     final resp = await Dio().getUri(uri, options: Options(headers: {'User-Agent': kUa}));
-    final data = (jsonDecode(resp.data as String) as Map).cast<String, Object?>();
+    // Dio 默认自动解析 JSON → resp.data 已是 Map；但保留 String 分支兼容
+    final Map<String, dynamic> data;
+    final raw = resp.data;
+    if (raw is Map) {
+      data = raw.cast<String, dynamic>();
+    } else if (raw is String) {
+      data = (jsonDecode(raw) as Map).cast<String, dynamic>();
+    } else {
+      throw MiniAuthError('Unexpected WS config response type: ${raw.runtimeType}');
+    }
     return data['conn'] as String;
   }
 

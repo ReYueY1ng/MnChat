@@ -39,6 +39,7 @@ class FriendClient {
   Future<Map<String, Object?>> _get(String url) => _gw.get(url);
 
   /// 发送聊天消息 (cmd=send_chat_msg)。msg 标记 not_auth 不参与签名。
+  /// 参数集与 Python friend.py:404-448 完全一致。
   Future<Map<String, Object?>> sendChatMsg({
     required Object desUin,
     required String msg,
@@ -78,21 +79,15 @@ class FriendClient {
     final url = buildFriendRequestUrl(
       server: _gw.resolve('HttpFriend'),
       path: kFriendPath,
-      uin: uin,
-      apiId: int.parse(apiId),
-      ver: ver,
-      country: country,
-      lang: lang,
-      s2: s2,
-      s2t: s2t,
       cmd: 'send_chat_msg',
-      extraParams: params,
+      params: params,
       notAuthKeys: {'msg'},
     );
     return _get(url);
   }
 
-  /// 好友列表。
+  /// 好友列表 (cmd=query_friend_list)。与 Python friend.py:450-466 一致。
+  /// 注意：query_friend_list 的 params **不含 s2t**。
   Future<Map<String, Object?>> queryFriendList({String? relation}) async {
     final params = <String, String>{
       'uin': '$uin',
@@ -105,20 +100,14 @@ class FriendClient {
     final url = buildFriendRequestUrl(
       server: _gw.resolve('HttpFriend'),
       path: kFriendPath,
-      uin: uin,
-      apiId: int.parse(apiId),
-      ver: ver,
-      country: country,
-      lang: lang,
-      s2: s2,
-      s2t: s2t,
       cmd: 'query_friend_list',
-      extraParams: params,
+      params: params,
     );
     return _get(url);
   }
 
-  /// 查询最近一起玩过的伙伴。
+  /// 查询最近一起玩过的伙伴 (cmd=query_recent_partner)。
+  /// 与 Python friend.py:494-514 一致。
   Future<Map<String, Object?>> queryRecentPartner() async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final token = md5Token(now, s2, uin);
@@ -135,15 +124,8 @@ class FriendClient {
     final url = buildFriendRequestUrl(
       server: _gw.resolve('HttpFriend'),
       path: kFriendPath,
-      uin: uin,
-      apiId: int.parse(apiId),
-      ver: ver,
-      country: country,
-      lang: lang,
-      s2: s2,
-      s2t: s2t,
       cmd: 'query_recent_partner',
-      extraParams: params,
+      params: params,
     );
     return _get(url);
   }
