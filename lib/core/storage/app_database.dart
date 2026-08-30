@@ -42,7 +42,22 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 1;
+  int get schemaVersion => 2;
+
+  @override
+  MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) => m.createAll(),
+        // v1 表结构: chat_sessions 无主键 → v2 加主键。
+        // 本地聊天缓存可重建，直接 drop + recreate（含未读/最后消息）。
+        onUpgrade: (m, from, to) async {
+          if (from < 2) {
+            await m.deleteTable('chat_sessions');
+            await m.deleteTable('chat_messages');
+            await m.createTable(chatSessions);
+            await m.createTable(chatMessages);
+          }
+        },
+      );
 
   Future<void> insertMessage(ChatMessagesCompanion row) =>
       into(chatMessages).insert(row);
