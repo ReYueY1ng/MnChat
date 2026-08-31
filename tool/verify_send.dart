@@ -4,8 +4,6 @@ import 'dart:io';
 import 'package:mnchat/core/services/auth.dart';
 import 'package:mnchat/core/services/chatpush.dart';
 import 'package:mnchat/core/services/friend.dart';
-import 'package:mnchat/core/crypto/md5_sign.dart';
-import 'package:mnchat/core/net/http_factory.dart';
 
 Future<void> main() async {
   final uin = int.parse(Platform.environment['MNC_UIN']!);
@@ -36,7 +34,7 @@ Future<void> main() async {
   try {
     final q = await cp.rpcHttp(uin: uin, s2: s2, s2t: s2t,
       message: ['buddysvr', 'chat_query', seq, msec, [273640665], <String, Object?>{}]);
-    final s = jsonEncode(q ?? '');
+    final s = jsonEncode(q);
     print('chat_query(${s.length} chars): ${s.substring(0, s.length > 300 ? 300 : s.length)}');
   } catch (e) {
     print('chat_query ERR: $e');

@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:mnchat/core/services/auth.dart';
 import 'package:mnchat/core/services/chatpush.dart';
-import 'package:mnchat/core/services/friend.dart';
 
 Future<void> main() async {
   final uin = int.parse(Platform.environment['MNC_UIN']!);
@@ -19,7 +18,6 @@ Future<void> main() async {
   final (host, token) = await cp.alloc(uin: uin, s2: s2, s2t: s2t, jwt: auth.jwt);
   print('ChatPush alloc: $host');
 
-  var closed = false;
   final conn = await cp.connectGate(
     host: host, token: token, uin: uin,
     authToken: auth.jwt,
@@ -31,7 +29,6 @@ Future<void> main() async {
   stdout.writeln('==== 监听中：请从 273640665 给 $uin 发一条消息（60 秒）====');
   for (var i = 0; i < 60; i++) {
     await Future.delayed(const Duration(seconds: 1));
-    if (closed) { print('连接断开'); break; }
     if (i % 10 == 9) stdout.writeln('  ...${i + 1}s 连接正常');
   }
   stdout.writeln('监听结束');

@@ -643,6 +643,9 @@ class ChatService {
     final key = _sessionKey(type, id);
     _messagesCache[key] = msgs;
     _persistHistory(type, id, msgs);
+    // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配，
+    // 收到后重新 yield historyOf）
+    _eventCtrl.add(ChatEvent(type, id, msgs.last));
   }
 
   /// 持久化整段历史（先清空该会话旧消息再批量写入，避免重复）。

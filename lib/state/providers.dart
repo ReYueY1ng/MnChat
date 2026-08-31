@@ -87,6 +87,13 @@ class ActiveSession {
   final int id;
 
   const ActiveSession(this.type, this.id);
+
+  @override
+  bool operator ==(Object other) =>
+      other is ActiveSession && other.type == type && other.id == id;
+
+  @override
+  int get hashCode => Object.hash(type, id);
 }
 
 final activeSessionProvider = NotifierProvider<ActiveSessionNotifier, ActiveSession?>(
