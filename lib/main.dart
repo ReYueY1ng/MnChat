@@ -69,7 +69,11 @@ class MainShell extends ConsumerWidget {
           Expanded(
             child: active == null
                 ? const _EmptyChatPlaceholder()
-                : ChatPage(type: active.type, sessionId: active.id),
+                : ChatPage(
+                    key: ValueKey('${active.type.name}_${active.id}'),
+                    type: active.type,
+                    sessionId: active.id,
+                  ),
           ),
         ],
       ),

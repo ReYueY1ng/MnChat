@@ -19,6 +19,24 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   final _inputCtrl = TextEditingController();
   final _scrollCtrl = ScrollController();
   bool _sending = false;
+  bool _historyLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）
+    ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_historyLoaded) return;
+      _historyLoaded = true;
+      final service = ref.read(chatServiceProvider);
+      if (widget.type == ChatSessionType.friend) {
+        service.requestFriendHistory(widget.sessionId);
+      } else {
+        service.requestGroupHistory(widget.sessionId);
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -41,16 +59,6 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     final active = ActiveSession(widget.type, widget.sessionId);
     final history = ref.watch(messageHistoryProvider(active));
     final myUin = ref.watch(myUinProvider);
-
-    // 进入时标记已读 + 拉取历史
-    ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.type == ChatSessionType.friend) {
-        ref.read(chatServiceProvider).requestFriendHistory(widget.sessionId);
-      } else {
-        ref.read(chatServiceProvider).requestGroupHistory(widget.sessionId);
-      }
-    });
 
     final msgs = history.when(data: (m) => m, loading: () => [], error: (_, _) => []);
 
