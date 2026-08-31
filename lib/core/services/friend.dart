@@ -31,7 +31,7 @@ class FriendClient {
     this.ver = '1.58.0',
     this.country = 'CN',
     this.lang = '0',
-    this.pushChannel = '',
+    this.pushChannel = '1', // 真实客户端 get_push_chat_push_channel() 配置值（通常 1）
     this.gameSessionId = '',
     this.cid = '',
   }) : _gw = gateway ?? GatewayClient();

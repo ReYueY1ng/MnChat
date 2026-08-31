@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import '../models/messages.dart';
 import '../storage/app_database.dart';
@@ -273,11 +274,31 @@ class ChatService {
 
   // ── 消息读写 ───────────────────────────────────────────────────────────
 
+  /// 构造真实客户端风格的 extend_data：
+  /// `url_encode(base64(JSON{nickname, shareType:0, bubble, interCode}))`
+  /// （mainchatinterface.lua:114-123 原样复刻）。真实客户端总是携带，
+  /// 缺了它接收方可能无法正常渲染气泡/昵称。
+  String _buildExtendData() {
+    final auth = _auth;
+    final tShare = <String, Object?>{
+      'nickname': auth?.name ?? '',
+      'shareType': 0, // ShareType.TEXT
+      'bubble': 0,
+      'interCode': null,
+    };
+    final raw = base64Encode(utf8.encode(jsonEncode(tShare)));
+    return Uri.encodeQueryComponent(raw);
+  }
+
   /// 发送好友私聊消息。
   Future<Map<String, Object?>> sendFriendMessage(int desUin, String msg) async {
     final friend = _friend;
     if (friend == null) throw StateError('not logged in');
-    final resp = await friend.sendChatMsg(desUin: desUin, msg: msg);
+    final resp = await friend.sendChatMsg(
+      desUin: desUin,
+      msg: msg,
+      extendData: _buildExtendData(),
+    );
     return resp;
   }
 
