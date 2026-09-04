@@ -1,7 +1,7 @@
-// Widget 层验证：ChatPage 在收到消息后真的把气泡渲染上屏。
-// 这锁定"消息不显示"的 UI 根因修复 —— ActiveSession ==/hashCode 修复后，
-// messageHistoryProvider 能稳定跟随 eventStream，addLocalMessage 必须立即上屏。
+// Widget 层验证：ChatPage 使用 flutter_chat_ui Chat 组件后，
+// addLocalMessage 的消息通过桥接层自动上屏。
 import 'package:flutter/material.dart';
+import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/models/messages.dart';
@@ -29,21 +29,34 @@ void main() {
     );
   }
 
-  testWidgets('addLocalMessage 后消息气泡立即上屏', (tester) async {
+  testWidgets('ChatPage 渲染 Chat 组件', (tester) async {
     final service = ChatService(db: null);
     await tester.pumpWidget(harness(service));
     await tester.pump();
 
-    // 初始为空
-    expect(find.text('暂无消息'), findsOneWidget);
+    // Chat 组件必须在树中
+    expect(find.byType(Chat), findsOneWidget);
+
+    // 排空 ChatAnimatedList 初始滚动遗留的 250ms timer，避免 "Timer still pending"
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('addLocalMessage 后消息通过桥接层上屏', (tester) async {
+    final service = ChatService(db: null);
+    await tester.pumpWidget(harness(service));
+    await tester.pump();
 
     // 模拟发送成功后本地回显（等价 ChatPage._send 里 addLocalMessage）
     service.addLocalMessage(ChatSessionType.friend, 273640665, 'hello world');
+    // 桥接层是异步的（eventStream microtask），需要多次 pump
+    await tester.pump();
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    // 气泡必须渲染，不再显示"暂无消息"
-    expect(find.text('暂无消息'), findsNothing);
+    // 消息必须渲染
     expect(find.text('hello world'), findsOneWidget);
+
+    // 排空滚动 timer，避免 "Timer still pending"
+    await tester.pumpAndSettle();
   });
 }

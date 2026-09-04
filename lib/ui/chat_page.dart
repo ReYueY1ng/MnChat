@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_chat_core/flutter_chat_core.dart';
+import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../chat/message_adapter.dart';
 import '../core/models/messages.dart';
 import '../state/providers.dart';
-import 'widgets/avatar_view.dart';
 
 /// 聊天窗口（右侧）。
 class ChatPage extends ConsumerStatefulWidget {
@@ -23,9 +25,6 @@ class ChatPage extends ConsumerStatefulWidget {
 }
 
 class _ChatPageState extends ConsumerState<ChatPage> {
-  final _inputCtrl = TextEditingController();
-  final _scrollCtrl = ScrollController();
-  bool _sending = false;
   bool _historyLoaded = false;
 
   @override
@@ -46,23 +45,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   }
 
   @override
-  void dispose() {
-    _inputCtrl.dispose();
-    _scrollCtrl.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final active = ActiveSession(widget.type, widget.sessionId);
-    final history = ref.watch(messageHistoryProvider(active));
     final myUin = ref.watch(myUinProvider);
     final displayName = widget.name.isEmpty
         ? (widget.type == ChatSessionType.group ? '群' : '好友')
         : widget.name;
     final isWide = MediaQuery.of(context).size.width >= 700;
-
-    final msgs = history.when(data: (m) => m, loading: () => [], error: (_, _) => []);
 
     return Column(
       children: [
@@ -98,55 +86,28 @@ class _ChatPageState extends ConsumerState<ChatPage> {
           ),
         ),
         const Divider(height: 1),
-        // 消息列表
+        // 消息列表 + 输入区（flutter_chat_ui Chat 组件）
         Expanded(
-          child: msgs.isEmpty
-              ? Center(
-                  child: Text(
-                    '暂无消息',
-                    style: TextStyle(color: Theme.of(context).colorScheme.outline),
-                  ),
-                )
-              : ListView.builder(
-                  controller: _scrollCtrl,
-                  padding: const EdgeInsets.all(12),
-                  itemCount: msgs.length,
-                  itemBuilder: (context, i) => _MessageBubble(
-                    msg: msgs[i],
-                    isMine: msgs[i].uin == myUin,
-                    sessionName: displayName,
-                  ),
-                ),
-        ),
-        // 输入区
-        Material(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: _inputCtrl,
-                      minLines: 1,
-                      maxLines: 4,
-                      decoration: const InputDecoration(
-                        hintText: '输入消息…',
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                      ),
-                      onSubmitted: (_) => _send(),
+          child: Chat(
+            chatController: ref.watch(chatBridgeProvider).controllerFor(widget.type, widget.sessionId),
+            currentUserId: myUin.toString(),
+            resolveUser: _resolveUser,
+            onMessageSend: _send,
+            theme: ChatTheme.fromThemeData(Theme.of(context)),
+            builders: Builders(
+              textMessageBuilder: (context, message, index, {required isSentByMe, groupStatus}) =>
+                  SimpleTextMessage(
+                    message: message,
+                    index: index,
+                    constraints: BoxConstraints(
+                      maxWidth: MediaQuery.of(context).size.width * 0.62,
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  IconButton.filled(
-                    onPressed: _sending ? null : _send,
-                    icon: const Icon(Icons.send),
-                  ),
-                ],
+              composerBuilder: (context) => Composer(
+                hintText: '输入消息…',
+                sendButtonVisibilityMode: SendButtonVisibilityMode.disabled,
               ),
+              linkPreviewBuilder: (context, message, isSentByMe) => null,
             ),
           ),
         ),
@@ -154,150 +115,39 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     );
   }
 
-  Future<void> _send() async {
-    final text = _inputCtrl.text.trim();
-    if (text.isEmpty) return;
-    setState(() => _sending = true);
+  /// 解析用户信息：自己 → 昵称；好友会话对方 → 会话名；其余 → uin 字符串。
+  Future<User?> _resolveUser(UserID id) async {
+    final service = ref.read(chatServiceProvider);
+    final myUin = ref.read(myUinProvider);
+    if (id == myUin.toString()) {
+      return chatUserFor(myUin, nickname: service.myNickname);
+    }
+    if (widget.type == ChatSessionType.friend && id == widget.sessionId.toString()) {
+      return chatUserFor(widget.sessionId, nickname: widget.name);
+    }
+    return chatUserFor(int.tryParse(id) ?? 0);
+  }
+
+  /// 发送消息：trim/空值守卫 → 发送 → 本地乐观回显 → 失败弹 SnackBar。
+  Future<void> _send(String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
     try {
       final service = ref.read(chatServiceProvider);
       if (widget.type == ChatSessionType.friend) {
-        await service.sendFriendMessage(widget.sessionId, text);
+        await service.sendFriendMessage(widget.sessionId, trimmed);
       } else {
-        await service.sendGroupMessage(widget.sessionId, text);
+        await service.sendGroupMessage(widget.sessionId, trimmed);
       }
-      _inputCtrl.clear();
-      // 本地乐观消息：立即回显（不等服务端推送）
-      service.addLocalMessage(widget.type, widget.sessionId, text);
-      _scrollToBottom();
+      // 本地乐观消息：立即回显（ChatBridge 经 eventStream 增量 reconcile 上屏，
+      // 无需在此处手动操作 controller）
+      service.addLocalMessage(widget.type, widget.sessionId, trimmed);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red.shade400),
         );
       }
-    } finally {
-      if (mounted) setState(() => _sending = false);
     }
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollCtrl.hasClients) {
-        _scrollCtrl.animateTo(
-          _scrollCtrl.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
-  }
-}
-
-/// 单条消息气泡。
-class _MessageBubble extends StatelessWidget {
-  final ChatMessage msg;
-  final bool isMine;
-  final String sessionName;
-
-  const _MessageBubble({
-    required this.msg,
-    required this.isMine,
-    this.sessionName = '',
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
-    if (msg.isSystemMsg) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Text(
-              msg.text,
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: theme.colorScheme.outline),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // 对方消息带头像，自己消息不带
-    final leading = isMine
-        ? null
-        : Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: AvatarView(
-              avatarUrl: null,
-              name: sessionName,
-              radius: 18,
-            ),
-          );
-
-    return Align(
-      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          ?leading,
-          Flexible(
-            child: Container(
-              margin: const EdgeInsets.symmetric(vertical: 3),
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              constraints: BoxConstraints(
-                maxWidth: MediaQuery.of(context).size.width * 0.62,
-              ),
-              decoration: BoxDecoration(
-                color: isMine
-                    ? theme.colorScheme.primaryContainer
-                    : theme.colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(12),
-                  topRight: const Radius.circular(12),
-                  bottomLeft: Radius.circular(isMine ? 12 : 2),
-                  bottomRight: Radius.circular(isMine ? 2 : 12),
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment:
-                    isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    msg.text,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: isMine
-                          ? theme.colorScheme.onPrimaryContainer
-                          : theme.colorScheme.onSurface,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    _fmtClock(msg.time),
-                    style: theme.textTheme.labelSmall
-                        ?.copyWith(color: theme.colorScheme.outline, fontSize: 10),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _fmtClock(int ts) {
-    final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
   }
 }
