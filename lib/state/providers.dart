@@ -6,6 +6,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../chat/chat_bridge.dart';
 import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
@@ -18,6 +19,18 @@ final chatServiceProvider = Provider<ChatService>((ref) {
   final service = ChatService(db: db);
   ref.onDispose(service.dispose);
   return service;
+});
+
+/// ChatBridge 单例（flutter_chat_ui 迁移的桥接层）。
+///
+/// 持有每个会话的 [ChatController]，订阅 ChatService.eventStream 单一订阅，
+/// 把历史增量 reconcile 到控制器。Wave 5 会把 chat_page 切到 Chat widget 后
+/// 移除 messageHistoryProvider；本 provider 先并存。
+final chatBridgeProvider = Provider<ChatBridge>((ref) {
+  final service = ref.watch(chatServiceProvider);
+  final bridge = ChatBridge(service);
+  ref.onDispose(bridge.dispose);
+  return bridge;
 });
 
 /// AppDatabase 单例（main() 中用 drift_flutter 构建后 override）。
