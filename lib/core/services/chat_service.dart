@@ -97,8 +97,11 @@ class ChatService {
   List<Contact> get contacts => List.unmodifiable(_contacts);
 
   /// 会话消息历史（按时间升序）。key = sessionKey(type, id)。
+  /// 返回稳定升序副本（缓存以升序为规范，此处兜底保证对外契约）。
   List<ChatMessage> historyOf(ChatSessionType type, int id) =>
-      List.unmodifiable(_messagesCache[_sessionKey(type, id)] ?? []);
+      List.unmodifiable(
+        sortMessagesAscending(_messagesCache[_sessionKey(type, id)] ?? const []),
+      );
 
   static String _sessionKey(ChatSessionType type, int id) => '${type.name}_$id';
 
@@ -772,7 +775,8 @@ class ChatService {
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
     if (msgs.isEmpty) return;
     final key = _sessionKey(type, id);
-    _messagesCache[key] = msgs;
+    // 缓存以 time 升序为规范（离线/网络历史乱序到达时归位）。
+    _messagesCache[key] = sortMessagesAscending(msgs);
     _persistHistory(type, id, msgs);
     // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配，
     // 收到后重新 yield historyOf）

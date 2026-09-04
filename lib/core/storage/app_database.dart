@@ -81,7 +81,7 @@ class AppDatabase extends _$AppDatabase {
   Future<List<ChatMessageRecord>> messagesOf(String key, {int limit = 200}) {
     final query = select(chatMessages)
       ..where((t) => t.sessionKey.equals(key))
-      ..orderBy([(t) => OrderingTerm.desc(t.time)])
+      ..orderBy([(t) => OrderingTerm.asc(t.time)])
       ..limit(limit);
     return query.get();
   }

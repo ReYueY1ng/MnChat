@@ -127,6 +127,22 @@ class ChatMessage {
   String toString() => 'ChatMessage(uin=$uin time=$time "${text.length > 20 ? text.substring(0, 20) : text}")';
 }
 
+/// 消息按 [ChatMessage.time]（epoch 秒）升序稳定排序。
+/// 返回新列表，不修改入参；time 相等时保持原有相对顺序（稳定排序）。
+/// flutter_chat_ui 需要按时间升序的消息列表（修复 drift DESC 与内存缓存不一致）。
+List<ChatMessage> sortMessagesAscending(Iterable<ChatMessage> msgs) {
+  final indexed = <(int, ChatMessage)>[];
+  var i = 0;
+  for (final m in msgs) {
+    indexed.add((i++, m));
+  }
+  indexed.sort((a, b) {
+    final byTime = a.$2.time.compareTo(b.$2.time);
+    return byTime != 0 ? byTime : a.$1.compareTo(b.$1);
+  });
+  return [for (final e in indexed) e.$2];
+}
+
 /// 会话（好友 / 群）。
 class ChatSession {
   /// 会话 id（好友 = 对方 uin；群 = group_id）。
