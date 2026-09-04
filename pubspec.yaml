@@ -61,6 +61,14 @@ dev_dependencies:
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
+# Native assets build configuration (sqlite3 compiled from local source,
+# because the pre-built GitHub download is not reachable from this network).
+hooks:
+  user_defines:
+    sqlite3:
+      source: source
+      path: tool/sqlite3/sqlite3.c
+
 # The following section is specific to Flutter packages.
 flutter:
 

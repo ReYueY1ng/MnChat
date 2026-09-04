@@ -3,13 +3,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
 import '../state/providers.dart';
+import 'widgets/avatar_view.dart';
 
 /// 聊天窗口（右侧）。
 class ChatPage extends ConsumerStatefulWidget {
   final ChatSessionType type;
   final int sessionId;
+  final String name;
 
-  const ChatPage({super.key, required this.type, required this.sessionId});
+  const ChatPage({
+    super.key,
+    required this.type,
+    required this.sessionId,
+    required this.name,
+  });
 
   @override
   ConsumerState<ChatPage> createState() => _ChatPageState();
@@ -45,49 +52,48 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.dispose();
   }
 
-  String get _sessionName {
-    final sessions = ref.read(sessionListProvider).value;
-    if (sessions == null) return widget.type == ChatSessionType.group ? '群' : '好友';
-    for (final s in sessions.sessions) {
-      if (s.type == widget.type && s.id == widget.sessionId) return s.name;
-    }
-    return widget.type == ChatSessionType.group ? '群' : '好友';
-  }
-
   @override
   Widget build(BuildContext context) {
     final active = ActiveSession(widget.type, widget.sessionId);
     final history = ref.watch(messageHistoryProvider(active));
     final myUin = ref.watch(myUinProvider);
+    final displayName = widget.name.isEmpty
+        ? (widget.type == ChatSessionType.group ? '群' : '好友')
+        : widget.name;
+    final isWide = MediaQuery.of(context).size.width >= 700;
 
     final msgs = history.when(data: (m) => m, loading: () => [], error: (_, _) => []);
 
     return Column(
       children: [
-        // 标题栏
+        // 标题栏（SafeArea 防止被系统状态栏遮挡）
         Material(
           color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              children: [
-                Icon(widget.type == ChatSessionType.group ? Icons.group : Icons.person,
-                    size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    _sessionName,
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
+          child: SafeArea(
+            bottom: false,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                children: [
+                  // 窄屏显示返回按钮，宽屏用关闭
+                  IconButton(
+                    tooltip: isWide ? '关闭' : '返回',
+                    icon: Icon(isWide ? Icons.close : Icons.arrow_back),
+                    onPressed: () => ref.read(activeSessionProvider.notifier).close(),
                   ),
-                ),
-                IconButton(
-                  tooltip: '关闭',
-                  icon: const Icon(Icons.close),
-                  onPressed: () => ref.read(activeSessionProvider.notifier).close(),
-                ),
-              ],
+                  Icon(widget.type == ChatSessionType.group ? Icons.group : Icons.person,
+                      size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      displayName,
+                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -108,6 +114,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   itemBuilder: (context, i) => _MessageBubble(
                     msg: msgs[i],
                     isMine: msgs[i].uin == myUin,
+                    sessionName: displayName,
                   ),
                 ),
         ),
@@ -190,8 +197,13 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 class _MessageBubble extends StatelessWidget {
   final ChatMessage msg;
   final bool isMine;
+  final String sessionName;
 
-  const _MessageBubble({required this.msg, required this.isMine});
+  const _MessageBubble({
+    required this.msg,
+    required this.isMine,
+    this.sessionName = '',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -217,46 +229,67 @@ class _MessageBubble extends StatelessWidget {
       );
     }
 
+    // 对方消息带头像，自己消息不带
+    final leading = isMine
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: AvatarView(
+              avatarUrl: null,
+              name: sessionName,
+              radius: 18,
+            ),
+          );
+
     return Align(
       alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.6,
-        ),
-        decoration: BoxDecoration(
-          color: isMine
-              ? theme.colorScheme.primaryContainer
-              : theme.colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isMine ? 12 : 2),
-            bottomRight: Radius.circular(isMine ? 2 : 12),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              msg.text,
-              style: theme.textTheme.bodyMedium?.copyWith(
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          ?leading,
+          Flexible(
+            child: Container(
+              margin: const EdgeInsets.symmetric(vertical: 3),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width * 0.62,
+              ),
+              decoration: BoxDecoration(
                 color: isMine
-                    ? theme.colorScheme.onPrimaryContainer
-                    : theme.colorScheme.onSurface,
+                    ? theme.colorScheme.primaryContainer
+                    : theme.colorScheme.surfaceContainerHigh,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(12),
+                  topRight: const Radius.circular(12),
+                  bottomLeft: Radius.circular(isMine ? 12 : 2),
+                  bottomRight: Radius.circular(isMine ? 2 : 12),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment:
+                    isMine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    msg.text,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: isMine
+                          ? theme.colorScheme.onPrimaryContainer
+                          : theme.colorScheme.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    _fmtClock(msg.time),
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: theme.colorScheme.outline, fontSize: 10),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 2),
-            Text(
-              _fmtClock(msg.time),
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: theme.colorScheme.outline, fontSize: 10),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }

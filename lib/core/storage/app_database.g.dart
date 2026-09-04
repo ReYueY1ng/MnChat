@@ -1440,11 +1440,416 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
   }
 }
 
+class $FriendsTable extends Friends
+    with TableInfo<$FriendsTable, FriendRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $FriendsTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _uinMeta = const VerificationMeta('uin');
+  @override
+  late final GeneratedColumn<int> uin = GeneratedColumn<int>(
+    'uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _nicknameMeta = const VerificationMeta(
+    'nickname',
+  );
+  @override
+  late final GeneratedColumn<String> nickname = GeneratedColumn<String>(
+    'nickname',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _avatarMeta = const VerificationMeta('avatar');
+  @override
+  late final GeneratedColumn<String> avatar = GeneratedColumn<String>(
+    'avatar',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _isOnlineMeta = const VerificationMeta(
+    'isOnline',
+  );
+  @override
+  late final GeneratedColumn<bool> isOnline = GeneratedColumn<bool>(
+    'is_online',
+    aliasedName,
+    false,
+    type: DriftSqlType.bool,
+    requiredDuringInsert: true,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'CHECK ("is_online" IN (0, 1))',
+    ),
+  );
+  static const VerificationMeta _gameStatusMeta = const VerificationMeta(
+    'gameStatus',
+  );
+  @override
+  late final GeneratedColumn<String> gameStatus = GeneratedColumn<String>(
+    'game_status',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _updatedAtMeta = const VerificationMeta(
+    'updatedAt',
+  );
+  @override
+  late final GeneratedColumn<int> updatedAt = GeneratedColumn<int>(
+    'updated_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    uin,
+    nickname,
+    avatar,
+    isOnline,
+    gameStatus,
+    updatedAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'friends';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<FriendRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('uin')) {
+      context.handle(
+        _uinMeta,
+        uin.isAcceptableOrUnknown(data['uin']!, _uinMeta),
+      );
+    }
+    if (data.containsKey('nickname')) {
+      context.handle(
+        _nicknameMeta,
+        nickname.isAcceptableOrUnknown(data['nickname']!, _nicknameMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_nicknameMeta);
+    }
+    if (data.containsKey('avatar')) {
+      context.handle(
+        _avatarMeta,
+        avatar.isAcceptableOrUnknown(data['avatar']!, _avatarMeta),
+      );
+    }
+    if (data.containsKey('is_online')) {
+      context.handle(
+        _isOnlineMeta,
+        isOnline.isAcceptableOrUnknown(data['is_online']!, _isOnlineMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_isOnlineMeta);
+    }
+    if (data.containsKey('game_status')) {
+      context.handle(
+        _gameStatusMeta,
+        gameStatus.isAcceptableOrUnknown(data['game_status']!, _gameStatusMeta),
+      );
+    }
+    if (data.containsKey('updated_at')) {
+      context.handle(
+        _updatedAtMeta,
+        updatedAt.isAcceptableOrUnknown(data['updated_at']!, _updatedAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_updatedAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {uin};
+  @override
+  FriendRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return FriendRecord(
+      uin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}uin'],
+      )!,
+      nickname: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}nickname'],
+      )!,
+      avatar: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}avatar'],
+      ),
+      isOnline: attachedDatabase.typeMapping.read(
+        DriftSqlType.bool,
+        data['${effectivePrefix}is_online'],
+      )!,
+      gameStatus: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}game_status'],
+      ),
+      updatedAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}updated_at'],
+      )!,
+    );
+  }
+
+  @override
+  $FriendsTable createAlias(String alias) {
+    return $FriendsTable(attachedDatabase, alias);
+  }
+}
+
+class FriendRecord extends DataClass implements Insertable<FriendRecord> {
+  final int uin;
+  final String nickname;
+  final String? avatar;
+  final bool isOnline;
+  final String? gameStatus;
+  final int updatedAt;
+  const FriendRecord({
+    required this.uin,
+    required this.nickname,
+    this.avatar,
+    required this.isOnline,
+    this.gameStatus,
+    required this.updatedAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['uin'] = Variable<int>(uin);
+    map['nickname'] = Variable<String>(nickname);
+    if (!nullToAbsent || avatar != null) {
+      map['avatar'] = Variable<String>(avatar);
+    }
+    map['is_online'] = Variable<bool>(isOnline);
+    if (!nullToAbsent || gameStatus != null) {
+      map['game_status'] = Variable<String>(gameStatus);
+    }
+    map['updated_at'] = Variable<int>(updatedAt);
+    return map;
+  }
+
+  FriendsCompanion toCompanion(bool nullToAbsent) {
+    return FriendsCompanion(
+      uin: Value(uin),
+      nickname: Value(nickname),
+      avatar: avatar == null && nullToAbsent
+          ? const Value.absent()
+          : Value(avatar),
+      isOnline: Value(isOnline),
+      gameStatus: gameStatus == null && nullToAbsent
+          ? const Value.absent()
+          : Value(gameStatus),
+      updatedAt: Value(updatedAt),
+    );
+  }
+
+  factory FriendRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return FriendRecord(
+      uin: serializer.fromJson<int>(json['uin']),
+      nickname: serializer.fromJson<String>(json['nickname']),
+      avatar: serializer.fromJson<String?>(json['avatar']),
+      isOnline: serializer.fromJson<bool>(json['isOnline']),
+      gameStatus: serializer.fromJson<String?>(json['gameStatus']),
+      updatedAt: serializer.fromJson<int>(json['updatedAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'uin': serializer.toJson<int>(uin),
+      'nickname': serializer.toJson<String>(nickname),
+      'avatar': serializer.toJson<String?>(avatar),
+      'isOnline': serializer.toJson<bool>(isOnline),
+      'gameStatus': serializer.toJson<String?>(gameStatus),
+      'updatedAt': serializer.toJson<int>(updatedAt),
+    };
+  }
+
+  FriendRecord copyWith({
+    int? uin,
+    String? nickname,
+    Value<String?> avatar = const Value.absent(),
+    bool? isOnline,
+    Value<String?> gameStatus = const Value.absent(),
+    int? updatedAt,
+  }) => FriendRecord(
+    uin: uin ?? this.uin,
+    nickname: nickname ?? this.nickname,
+    avatar: avatar.present ? avatar.value : this.avatar,
+    isOnline: isOnline ?? this.isOnline,
+    gameStatus: gameStatus.present ? gameStatus.value : this.gameStatus,
+    updatedAt: updatedAt ?? this.updatedAt,
+  );
+  FriendRecord copyWithCompanion(FriendsCompanion data) {
+    return FriendRecord(
+      uin: data.uin.present ? data.uin.value : this.uin,
+      nickname: data.nickname.present ? data.nickname.value : this.nickname,
+      avatar: data.avatar.present ? data.avatar.value : this.avatar,
+      isOnline: data.isOnline.present ? data.isOnline.value : this.isOnline,
+      gameStatus: data.gameStatus.present
+          ? data.gameStatus.value
+          : this.gameStatus,
+      updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FriendRecord(')
+          ..write('uin: $uin, ')
+          ..write('nickname: $nickname, ')
+          ..write('avatar: $avatar, ')
+          ..write('isOnline: $isOnline, ')
+          ..write('gameStatus: $gameStatus, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(uin, nickname, avatar, isOnline, gameStatus, updatedAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is FriendRecord &&
+          other.uin == this.uin &&
+          other.nickname == this.nickname &&
+          other.avatar == this.avatar &&
+          other.isOnline == this.isOnline &&
+          other.gameStatus == this.gameStatus &&
+          other.updatedAt == this.updatedAt);
+}
+
+class FriendsCompanion extends UpdateCompanion<FriendRecord> {
+  final Value<int> uin;
+  final Value<String> nickname;
+  final Value<String?> avatar;
+  final Value<bool> isOnline;
+  final Value<String?> gameStatus;
+  final Value<int> updatedAt;
+  const FriendsCompanion({
+    this.uin = const Value.absent(),
+    this.nickname = const Value.absent(),
+    this.avatar = const Value.absent(),
+    this.isOnline = const Value.absent(),
+    this.gameStatus = const Value.absent(),
+    this.updatedAt = const Value.absent(),
+  });
+  FriendsCompanion.insert({
+    this.uin = const Value.absent(),
+    required String nickname,
+    this.avatar = const Value.absent(),
+    required bool isOnline,
+    this.gameStatus = const Value.absent(),
+    required int updatedAt,
+  }) : nickname = Value(nickname),
+       isOnline = Value(isOnline),
+       updatedAt = Value(updatedAt);
+  static Insertable<FriendRecord> custom({
+    Expression<int>? uin,
+    Expression<String>? nickname,
+    Expression<String>? avatar,
+    Expression<bool>? isOnline,
+    Expression<String>? gameStatus,
+    Expression<int>? updatedAt,
+  }) {
+    return RawValuesInsertable({
+      if (uin != null) 'uin': uin,
+      if (nickname != null) 'nickname': nickname,
+      if (avatar != null) 'avatar': avatar,
+      if (isOnline != null) 'is_online': isOnline,
+      if (gameStatus != null) 'game_status': gameStatus,
+      if (updatedAt != null) 'updated_at': updatedAt,
+    });
+  }
+
+  FriendsCompanion copyWith({
+    Value<int>? uin,
+    Value<String>? nickname,
+    Value<String?>? avatar,
+    Value<bool>? isOnline,
+    Value<String?>? gameStatus,
+    Value<int>? updatedAt,
+  }) {
+    return FriendsCompanion(
+      uin: uin ?? this.uin,
+      nickname: nickname ?? this.nickname,
+      avatar: avatar ?? this.avatar,
+      isOnline: isOnline ?? this.isOnline,
+      gameStatus: gameStatus ?? this.gameStatus,
+      updatedAt: updatedAt ?? this.updatedAt,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (uin.present) {
+      map['uin'] = Variable<int>(uin.value);
+    }
+    if (nickname.present) {
+      map['nickname'] = Variable<String>(nickname.value);
+    }
+    if (avatar.present) {
+      map['avatar'] = Variable<String>(avatar.value);
+    }
+    if (isOnline.present) {
+      map['is_online'] = Variable<bool>(isOnline.value);
+    }
+    if (gameStatus.present) {
+      map['game_status'] = Variable<String>(gameStatus.value);
+    }
+    if (updatedAt.present) {
+      map['updated_at'] = Variable<int>(updatedAt.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('FriendsCompanion(')
+          ..write('uin: $uin, ')
+          ..write('nickname: $nickname, ')
+          ..write('avatar: $avatar, ')
+          ..write('isOnline: $isOnline, ')
+          ..write('gameStatus: $gameStatus, ')
+          ..write('updatedAt: $updatedAt')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
   late final $ChatMessagesTable chatMessages = $ChatMessagesTable(this);
   late final $ChatSessionsTable chatSessions = $ChatSessionsTable(this);
+  late final $FriendsTable friends = $FriendsTable(this);
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -1452,6 +1857,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   List<DatabaseSchemaEntity> get allSchemaEntities => [
     chatMessages,
     chatSessions,
+    friends,
   ];
 }
 
@@ -2137,6 +2543,219 @@ typedef $$ChatSessionsTableProcessedTableManager =
       ChatSessionRecord,
       PrefetchHooks Function()
     >;
+typedef $$FriendsTableCreateCompanionBuilder = FriendsCompanion Function({
+  Value<int> uin,
+  required String nickname,
+  Value<String?> avatar,
+  required bool isOnline,
+  Value<String?> gameStatus,
+  required int updatedAt,
+});
+typedef $$FriendsTableUpdateCompanionBuilder = FriendsCompanion Function({
+  Value<int> uin,
+  Value<String> nickname,
+  Value<String?> avatar,
+  Value<bool> isOnline,
+  Value<String?> gameStatus,
+  Value<int> updatedAt,
+});
+
+class $$FriendsTableFilterComposer
+    extends Composer<_$AppDatabase, $FriendsTable> {
+  $$FriendsTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get uin => $composableBuilder(
+    column: $table.uin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get nickname => $composableBuilder(
+    column: $table.nickname,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get avatar => $composableBuilder(
+    column: $table.avatar,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<bool> get isOnline => $composableBuilder(
+    column: $table.isOnline,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get gameStatus => $composableBuilder(
+    column: $table.gameStatus,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$FriendsTableOrderingComposer
+    extends Composer<_$AppDatabase, $FriendsTable> {
+  $$FriendsTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get uin => $composableBuilder(
+    column: $table.uin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get nickname => $composableBuilder(
+    column: $table.nickname,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get avatar => $composableBuilder(
+    column: $table.avatar,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<bool> get isOnline => $composableBuilder(
+    column: $table.isOnline,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get gameStatus => $composableBuilder(
+    column: $table.gameStatus,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get updatedAt => $composableBuilder(
+    column: $table.updatedAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$FriendsTableAnnotationComposer
+    extends Composer<_$AppDatabase, $FriendsTable> {
+  $$FriendsTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get uin =>
+      $composableBuilder(column: $table.uin, builder: (column) => column);
+
+  GeneratedColumn<String> get nickname =>
+      $composableBuilder(column: $table.nickname, builder: (column) => column);
+
+  GeneratedColumn<String> get avatar =>
+      $composableBuilder(column: $table.avatar, builder: (column) => column);
+
+  GeneratedColumn<bool> get isOnline =>
+      $composableBuilder(column: $table.isOnline, builder: (column) => column);
+
+  GeneratedColumn<String> get gameStatus => $composableBuilder(
+    column: $table.gameStatus,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get updatedAt =>
+      $composableBuilder(column: $table.updatedAt, builder: (column) => column);
+}
+
+class $$FriendsTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $FriendsTable,
+          FriendRecord,
+          $$FriendsTableFilterComposer,
+          $$FriendsTableOrderingComposer,
+          $$FriendsTableAnnotationComposer,
+          $$FriendsTableCreateCompanionBuilder,
+          $$FriendsTableUpdateCompanionBuilder,
+          (
+            FriendRecord,
+            BaseReferences<_$AppDatabase, $FriendsTable, FriendRecord>,
+          ),
+          FriendRecord,
+          PrefetchHooks Function()
+        > {
+  $$FriendsTableTableManager(_$AppDatabase db, $FriendsTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$FriendsTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$FriendsTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$FriendsTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> uin = const Value.absent(),
+                Value<String> nickname = const Value.absent(),
+                Value<String?> avatar = const Value.absent(),
+                Value<bool> isOnline = const Value.absent(),
+                Value<String?> gameStatus = const Value.absent(),
+                Value<int> updatedAt = const Value.absent(),
+              }) => FriendsCompanion(
+                uin: uin,
+                nickname: nickname,
+                avatar: avatar,
+                isOnline: isOnline,
+                gameStatus: gameStatus,
+                updatedAt: updatedAt,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> uin = const Value.absent(),
+                required String nickname,
+                Value<String?> avatar = const Value.absent(),
+                required bool isOnline,
+                Value<String?> gameStatus = const Value.absent(),
+                required int updatedAt,
+              }) => FriendsCompanion.insert(
+                uin: uin,
+                nickname: nickname,
+                avatar: avatar,
+                isOnline: isOnline,
+                gameStatus: gameStatus,
+                updatedAt: updatedAt,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map((e) => (e.readTable(table), BaseReferences(db, table, e)))
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$FriendsTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $FriendsTable,
+      FriendRecord,
+      $$FriendsTableFilterComposer,
+      $$FriendsTableOrderingComposer,
+      $$FriendsTableAnnotationComposer,
+      $$FriendsTableCreateCompanionBuilder,
+      $$FriendsTableUpdateCompanionBuilder,
+      (
+        FriendRecord,
+        BaseReferences<_$AppDatabase, $FriendsTable, FriendRecord>,
+      ),
+      FriendRecord,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -2145,4 +2764,6 @@ class $AppDatabaseManager {
       $$ChatMessagesTableTableManager(_db, _db.chatMessages);
   $$ChatSessionsTableTableManager get chatSessions =>
       $$ChatSessionsTableTableManager(_db, _db.chatSessions);
+  $$FriendsTableTableManager get friends =>
+      $$FriendsTableTableManager(_db, _db.friends);
 }

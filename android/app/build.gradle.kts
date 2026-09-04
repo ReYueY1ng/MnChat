@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // Termux can only produce arm64-v8a (no x86_64 host toolchain support).
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     buildTypes {
@@ -34,6 +38,10 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            // Disable shrinking/minification - avoids JVM crashes on Termux and
+            // Termux aapt2 cannot handle resource optimization.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }

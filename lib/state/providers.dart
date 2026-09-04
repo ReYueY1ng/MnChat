@@ -10,6 +10,7 @@ import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
+import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
 
 /// ChatService 单例（注入本地 SQLite 用于持久化；main() 中 override databaseProvider）。
 final chatServiceProvider = Provider<ChatService>((ref) {
@@ -22,6 +23,9 @@ final chatServiceProvider = Provider<ChatService>((ref) {
 /// AppDatabase 单例（main() 中用 drift_flutter 构建后 override）。
 final databaseProvider = Provider<AppDatabase>(
     (ref) => throw UnimplementedError('AppDatabase must be created in main()'));
+
+/// 应用设置存储（自动登录凭据等）单例。
+final settingsProvider = Provider<SettingsStore>((ref) => SettingsStore());
 
 // ── 认证状态 ─────────────────────────────────────────────────────────────
 
@@ -68,6 +72,12 @@ class AuthNotifier extends Notifier<AuthState> {
     try {
       final auth = await service.login(uin: uin, password: password);
       state = AuthState(isLoggedIn: true, auth: auth);
+      // 自动登录开启时保存凭据，下次启动免登录
+      final settings = ref.read(settingsProvider);
+      final autoLogin = await settings.getBool(SettingsKeys.autoLogin);
+      if (autoLogin) {
+        await settings.saveCredentials(uin, password);
+      }
       return true;
     } catch (e) {
       state = AuthState(error: e.toString());
@@ -75,7 +85,21 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  /// 启动自动登录：设置开启且有已存凭据 → 登录。返回是否发起了登录。
+  Future<bool> autoLogin() async {
+    if (state.isLoggedIn || state.isBusy) return false;
+    final settings = ref.read(settingsProvider);
+    final enabled = await settings.getBool(SettingsKeys.autoLogin);
+    if (!enabled) return false;
+    final creds = await settings.loadCredentials();
+    if (creds == null) return false;
+    await login(uin: creds.uin, password: creds.password);
+    return true;
+  }
+
   void logout() {
+    final service = ref.read(chatServiceProvider);
+    service.reset();
     state = const AuthState();
   }
 }
@@ -133,6 +157,62 @@ final contactsProvider = StreamProvider<List<Contact>>((ref) {
   final service = ref.watch(chatServiceProvider);
   return service.sessionStream.map((snap) => snap.contacts);
 });
+
+/// 会话排序方式。
+enum SessionSortMode {
+  time('time', '按时间'),
+  name('name', '按名称'),
+  unread('unread', '按未读');
+
+  const SessionSortMode(this.key, this.label);
+  final String key;
+  final String label;
+
+  static SessionSortMode fromKey(String? k) => SessionSortMode.values.firstWhere(
+        (m) => m.key == k,
+        orElse: () => SessionSortMode.time,
+      );
+}
+
+/// 会话排序方式（持久化到设置）。
+final sessionSortModeProvider = NotifierProvider<SessionSortModeNotifier, SessionSortMode>(
+  SessionSortModeNotifier.new,
+);
+
+class SessionSortModeNotifier extends Notifier<SessionSortMode> {
+  @override
+  SessionSortMode build() {
+    // 初始化：从设置读取
+    ref.read(settingsProvider).getString(SettingsKeys.sortMode).then((k) {
+      final m = SessionSortMode.fromKey(k);
+      if (m != state) state = m;
+    });
+    return SessionSortMode.time;
+  }
+
+  Future<void> setMode(SessionSortMode mode) async {
+    state = mode;
+    await ref.read(settingsProvider).setString(SettingsKeys.sortMode, mode.key);
+  }
+}
+
+/// 新消息通知开关（运行时即时生效，持久化到设置）。
+final notifyEnabledProvider = NotifierProvider<NotifyEnabledNotifier, bool>(NotifyEnabledNotifier.new);
+
+class NotifyEnabledNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    ref.read(settingsProvider).getBool(SettingsKeys.notifyEnabled, fallback: true).then((v) {
+      if (v != state) state = v;
+    });
+    return true;
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    await ref.read(settingsProvider).setBool(SettingsKeys.notifyEnabled, value);
+  }
+}
 
 /// 已登录用户 uin（供聊天页判断消息方向）。
 final myUinProvider = Provider<int>((ref) {

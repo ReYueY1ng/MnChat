@@ -19,7 +19,11 @@ void main() {
       container: container,
       child: const MaterialApp(
         home: Scaffold(
-          body: ChatPage(type: ChatSessionType.friend, sessionId: 273640665),
+          body: ChatPage(
+            type: ChatSessionType.friend,
+            sessionId: 273640665,
+            name: '测试好友',
+          ),
         ),
       ),
     );

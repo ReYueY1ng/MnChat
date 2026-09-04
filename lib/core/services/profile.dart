@@ -29,7 +29,10 @@ class PlayerProfile {
 
   /// 从 getProfileBatch3 响应项解析。
   /// 结构（LuaTable）: {profile: {uin, RoleInfo: {NickName, ...},
-  ///        header2: {url}}, uin}
+  ///        header: {url}, header2: {url}, header3: {url}}, uin}
+  ///
+  /// 头像字段优先级：`header3` → `header2` → `header`。取不到则返回 null，
+  /// 由 UI 回退到首字母占位。
   static PlayerProfile? fromItem(Map<String, Object?> item) {
     final profile = item['profile'];
     if (profile is! Map) return null;
@@ -45,14 +48,21 @@ class PlayerProfile {
       nickname = (ri.cast<String, Object?>())['NickName']?.toString() ?? '';
     }
 
-    String? avatar;
-    final h2 = p['header2'];
-    if (h2 is Map) {
-      final url = (h2.cast<String, Object?>())['url'];
-      if (url != null && url.toString().isNotEmpty) avatar = url.toString();
-    }
+    final avatar = _pickAvatar(p);
 
     return PlayerProfile(uin: uin2, nickname: nickname, avatarUrl: avatar);
+  }
+
+  /// 按 header3 → header2 → header 顺序取头像 URL。
+  static String? _pickAvatar(Map<String, Object?> p) {
+    for (final key in ['header3', 'header2', 'header']) {
+      final h = p[key];
+      if (h is Map) {
+        final url = (h.cast<String, Object?>())['url'];
+        if (url != null && url.toString().isNotEmpty) return url.toString();
+      }
+    }
+    return null;
   }
 
   static int _firstInt(Map<String, Object?> m, List<String> keys) {
@@ -123,6 +133,48 @@ class ProfileClient {
         final p = PlayerProfile.fromItem(item.cast<String, Object?>());
         if (p != null) out.add(p);
       }
+    }
+    return out;
+  }
+
+  /// 批量拉取玩家**DIY 自定义头像**（游戏内主界面头像来源）。
+  ///
+  /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`:
+  ///   {HttpMap}miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list={uins}&{sign}
+  /// 响应结构: `{code:0, data:{ "<uin>": {use_diy, diy_header:{pre_url, pass_url, aduit_fail}, ...} }}`
+  /// 返回 Map<uin, DIY头像URL>（仅 use_diy==1 且 pass_url/pre_url 非空）。
+  Future<Map<int, String?>> getPersonCenterHeadInfo(List<int> uins) async {
+    final out = <int, String?>{};
+    if (uins.isEmpty) return out;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final base = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
+    final sign = httpGetS1Map(now, s2, uin, s2t);
+    final uinList = uins.map((u) => '$u').join(',');
+    final url =
+        '$base/miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list=$uinList&$sign';
+
+    final resp = await _dio.get(url);
+    final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
+    final decoded = decodeHttpResponse(text);
+
+    final data = decoded is Map ? decoded['data'] : null;
+    if (data is! Map) return out;
+
+    for (final e in data.entries) {
+      final u = int.tryParse('${e.key}');
+      if (u == null || e.value is! Map) continue;
+      final info = (e.value as Map).cast<String, Object?>();
+      // 未开启 DIY 头像则跳过
+      if (info['use_diy'] != 1) continue;
+      final diy = info['diy_header'];
+      if (diy is! Map) continue;
+      final dh = diy.cast<String, Object?>();
+      // pass_url=审核通过；pre_url=审核中（默认显示 pass，fallback pre）
+      final pass = dh['pass_url']?.toString();
+      final pre = dh['pre_url']?.toString();
+      out[u] = (pass != null && pass.isNotEmpty)
+          ? pass
+          : (pre != null && pre.isNotEmpty ? pre : null);
     }
     return out;
   }

@@ -58,9 +58,9 @@ class ChatService {
   bool _shouldReconnect = false;
 
   // ── 事件 ───────────────────────────────────────────────────────────────
-  final StreamController<ChatServiceState> _stateCtrl = StreamController.broadcast();
-  final StreamController<ChatEvent> _eventCtrl = StreamController.broadcast();
-  final StreamController<SessionSnapshot> _sessionCtrl = StreamController.broadcast();
+  final _stateCtrl = StreamController<ChatServiceState>.broadcast();
+  final _eventCtrl = StreamController<ChatEvent>.broadcast();
+  final _sessionCtrl = StreamController<SessionSnapshot>.broadcast();
 
   // ── 会话缓存 ───────────────────────────────────────────────────────────
   final Map<int, ChatSession> _friendSessions = {};
@@ -399,6 +399,38 @@ class ChatService {
           _messagesCache[key] = msgRows.map(chatMessageFromRecord).toList();
         }
       }
+      // 恢复好友信息缓存（昵称/头像/在线/游玩状态）
+      final friendRows = await db.allFriends();
+      if (friendRows.isNotEmpty) {
+        _contacts.clear();
+        for (final r in friendRows) {
+          _contacts.add(friendFromRecord(r));
+          // 若会话尚未恢复（无历史），用好友缓存补建会话，保证列表完整
+          final existing = _friendSessions[r.uin];
+          if (existing == null) {
+            _friendSessions[r.uin] = ChatSession(
+              id: r.uin,
+              type: ChatSessionType.friend,
+              name: r.nickname.isNotEmpty ? r.nickname : '$r.uin',
+              avatar: r.avatar,
+              isOnline: r.isOnline,
+              gameStatus: r.gameStatus,
+            );
+          } else {
+            _friendSessions[r.uin] = ChatSession(
+              id: existing.id,
+              type: existing.type,
+              name: r.nickname.isNotEmpty ? r.nickname : existing.name,
+              avatar: r.avatar ?? existing.avatar,
+              isOnline: r.isOnline,
+              gameStatus: r.gameStatus,
+              lastMessage: existing.lastMessage,
+              unreadCount: existing.unreadCount,
+              lastReadTime: existing.lastReadTime,
+            );
+          }
+        }
+      }
       _emitSessionSnapshot();
     } catch (e) {
       // ignore: avoid_print
@@ -432,13 +464,39 @@ class ChatService {
           type: ChatSessionType.friend,
           name: displayName,
           avatar: _friendAvatar(m),
+          isOnline: _friendOnline(m),
+          gameStatus: _friendGameStatus(m),
         );
       }
       // 批量拉取昵称/头像（buddysvr batch_friend_info，走 WS；HTTP chatpush 不支持）
       unawaited(_fetchFriendInfos(items));
+      // 保存好友信息缓存（下次启动免等待网络拉取）
+      await _saveFriendCache();
     } catch (e) {
       // ignore: avoid_print
       print('query_friend_list failed: $e');
+    }
+  }
+
+  /// 把内存好友信息写入 SQLite（昵称/头像/在线/游玩状态）。
+  Future<void> _saveFriendCache() async {
+    final db = _db;
+    if (db == null || _contacts.isEmpty) return;
+    try {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final records = _contacts.map((c) {
+        final s = _friendSessions[c.uin];
+        return friendToRecord(
+          c,
+          updatedAt: now,
+          isOnline: s?.isOnline ?? false,
+          gameStatus: s?.gameStatus,
+        );
+      }).toList();
+      await db.replaceFriends(records);
+    } catch (e) {
+      // ignore: avoid_print
+      print('save friend cache failed: $e');
     }
   }
 
@@ -469,24 +527,68 @@ class ChatService {
     return '';
   }
 
-  /// 从好友记录提取头像 URL（嵌套 profile.header.url）。
+  /// 从好友记录提取头像 URL（嵌套 profile.header3/header2/header.url）。
   static String? _friendAvatar(Map<String, Object?> m) {
     final direct = m['IconUrl'] ?? m['HeadIconUrl'] ?? m['headurl'];
     final profile = m['profile'];
     if (profile is Map) {
-      final header = profile['header'];
-      if (header is Map) {
-        final url = header['url'] ?? header['Url'];
-        if (url != null && url.toString().isNotEmpty) return url.toString();
+      // 优先级：header3 → header2 → header
+      for (final key in ['header3', 'header2', 'header']) {
+        final header = profile[key];
+        if (header is Map) {
+          final url = header['url'] ?? header['Url'];
+          if (url != null && url.toString().isNotEmpty) return url.toString();
+        }
       }
     }
     if (direct != null && direct.toString().isNotEmpty) return direct.toString();
     return null;
   }
 
+  /// 好友是否在线（query_friend_list 的 `online` 字段：1=在线）。
+  static bool _friendOnline(Map<String, Object?> m) {
+    final v = m['online'];
+    if (v is num) return v.toInt() == 1;
+    if (v is String) return v == '1' || v.toLowerCase() == 'true';
+    // 嵌套 baseinfo.online
+    final bi = m['baseinfo'];
+    if (bi is Map) {
+      final b = bi['online'];
+      if (b is num) return b.toInt() == 1;
+      if (b is String) return b == '1' || b.toLowerCase() == 'true';
+    }
+    return false;
+  }
+
+  /// 好友游玩状态文本（statusinfo[1]: "ingame"/"inteam"；[3] 为游戏详情）。
+  /// 返回如「游戏中」「组队中」，未知返回 null。
+  static String? _friendGameStatus(Map<String, Object?> m) {
+    Object? si = m['statusinfo'];
+    if (si == null) {
+      final bi = m['baseinfo'];
+      if (bi is Map) si = bi['statusinfo'];
+    }
+    if (si is List && si.isNotEmpty) {
+      final kind = si[0]?.toString();
+      if (kind == 'ingame') return '游戏中';
+      if (kind == 'inteam') return '组队中';
+    }
+    if (si is String) {
+      final lower = si.toLowerCase();
+      if (lower.contains('ingame')) return '游戏中';
+      if (lower.contains('inteam')) return '组队中';
+      // "online" 视为在线但无游玩状态
+    }
+    return null;
+  }
+
   /// 批量拉取好友昵称/头像（/miniw/profile getProfileBatch3）。
   /// friend_list 仅含 {mark, uin, relation}；昵称头像由此 HTTP 接口获取
   /// （batch_friend_info 走游戏 cluster 连接，独立客户端无法使用）。
+  ///
+  /// 头像优先级（与游戏主界面一致）：
+  ///   DIY 自定义头像 getPersonCenterHeadInfo(diy_header.pass/pre_url)
+  ///   → getProfileBatch3 的 header3 → header2 → header → 首字母占位。
   Future<void> _fetchFriendInfos(List<Map<String, Object?>> items) async {
     final auth = _auth;
     if (auth == null) return;
@@ -494,7 +596,9 @@ class ChatService {
     if (uins.isEmpty) return;
     try {
       final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
-      // 分批（每批 20），避免 URL 过长
+      // ① 先拉 DIY 自定义头像（游戏主界面头像来源）
+      final diyAvatars = await profile.getPersonCenterHeadInfo(uins);
+      // ② 再拉普通资料（昵称 + header3/2/1 兜底头像）
       bool updated = false;
       for (var i = 0; i < uins.length; i += 20) {
         final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
@@ -502,11 +606,14 @@ class ChatService {
         for (final p in infos) {
           final s = _friendSessions[p.uin];
           if (s != null) {
+            final avatar = diyAvatars[p.uin] ?? p.avatarUrl ?? s.avatar;
             _friendSessions[p.uin] = ChatSession(
               id: s.id,
               type: s.type,
               name: p.nickname.isNotEmpty ? p.nickname : s.name,
-              avatar: p.avatarUrl ?? s.avatar,
+              avatar: avatar,
+              isOnline: s.isOnline, // 保留好友列表已有的在线状态
+              gameStatus: s.gameStatus,
               lastMessage: s.lastMessage,
               unreadCount: s.unreadCount,
               lastReadTime: s.lastReadTime,
@@ -515,10 +622,13 @@ class ChatService {
           }
         }
       }
-      if (updated) _emitSessionSnapshot();
+      if (updated) {
+        _emitSessionSnapshot();
+        await _saveFriendCache(); // 头像/昵称更新持久化
+      }
     } catch (e) {
       // ignore: avoid_print
-      print('getProfileBatch3 failed: $e');
+      print('getProfileBatch3/getPersonCenterHeadInfo failed: $e');
     }
   }
 
@@ -703,13 +813,27 @@ class ChatService {
 
   // ── 清理 ──────────────────────────────────────────────────────────────
 
-  Future<void> dispose() async {
+  /// 登出时调用：关闭连接、清空缓存，保留控制器以支持重新登录。
+  Future<void> reset() async {
     _shouldReconnect = false;
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await _conn?.close();
-    await _stateCtrl.close();
-    await _eventCtrl.close();
-    await _sessionCtrl.close();
+    _conn = null;
+    _auth = null;
+    _friend = null;
+    _group = null;
+    _friendSessions.clear();
+    _groupSessions.clear();
+    _contacts.clear();
+    _messagesCache.clear();
+    _state = ChatServiceState.unauthenticated;
+    _lastError = null;
+    _setState(ChatServiceState.unauthenticated);
+  }
+
+  Future<void> dispose() async {
+    await reset();
   }
 
   // ── 内部 ──────────────────────────────────────────────────────────────
@@ -718,9 +842,4 @@ class ChatService {
     _state = s;
     if (!_stateCtrl.isClosed) _stateCtrl.add(s);
   }
-}
-
-void unawaited(Future<void> future) {
-  // ignore: discarded_futures
-  future;
 }

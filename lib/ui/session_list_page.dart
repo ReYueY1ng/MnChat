@@ -3,8 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
 import '../state/providers.dart';
+import 'settings_page.dart';
+import 'widgets/avatar_view.dart';
 
-/// 会话列表页（左侧栏）。
+/// 会话列表页（左侧栏 / 手机单页）。
+/// 顶部用 AppBar（自动处理状态栏 SafeArea），操作按钮在 Drawer 侧边栏菜单。
 class SessionListPage extends ConsumerWidget {
   final List<ChatSession> sessions;
 
@@ -14,71 +17,147 @@ class SessionListPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider);
     final active = ref.watch(activeSessionProvider);
+    final sortMode = ref.watch(sessionSortModeProvider);
+    final theme = Theme.of(context);
 
-    return Column(
-      children: [
-        // 顶部标题栏
-        Material(
-          color: Theme.of(context).colorScheme.surfaceContainerHighest,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
+    // 排序（time 模式对齐游戏：未读优先 → 最后消息时间倒序）
+    final sorted = [...sessions]..sort((a, b) => switch (sortMode) {
+          SessionSortMode.name => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          SessionSortMode.unread => b.unreadCount.compareTo(a.unreadCount),
+          SessionSortMode.time => () {
+              // 未读会话置前（二元，同游戏 unReadStat），再按时间倒序
+              final au = a.unreadCount > 0 ? 0 : 1;
+              final bu = b.unreadCount > 0 ? 0 : 1;
+              if (au != bu) return au.compareTo(bu);
+              return (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0);
+            }(),
+        });
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          '会话',
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+      ),
+      drawer: _buildDrawer(context, ref, auth),
+      body: sorted.isEmpty
+          ? const _EmptySessions()
+          : ListView.separated(
+              itemCount: sorted.length,
+              separatorBuilder: (_, _) => Divider(
+                  height: 1,
+                  indent: 72,
+                  color: theme.colorScheme.outlineVariant),
+              itemBuilder: (context, i) {
+                final s = sorted[i];
+                final isActive = active != null &&
+                    active.type == s.type &&
+                    active.id == s.id;
+                return _SessionTile(
+                  session: s,
+                  isActive: isActive,
+                  onTap: () => ref
+                      .read(activeSessionProvider.notifier)
+                      .open(s.type, s.id),
+                );
+              },
+            ),
+    );
+  }
+
+  /// 侧边栏菜单：账号信息 / 排序 / 刷新 / 设置 / 退出登录。
+  Drawer _buildDrawer(BuildContext context, WidgetRef ref, authState) {
+    final theme = Theme.of(context);
+    final sortMode = ref.watch(sessionSortModeProvider);
+    return Drawer(
+      child: SafeArea(
+        child: ListView(
+          padding: EdgeInsets.zero,
+          children: [
+            // 头部：账号信息 + 状态
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+              child: Row(
+                children: [
+                  AvatarView(
+                    avatarUrl: null,
+                    name: authState.auth?.name ?? '',
+                    radius: 28,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          authState.auth?.name ?? '未登录',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          'Uin: ${authState.auth?.uin ?? '-'}',
+                          style: theme.textTheme.bodySmall
+                              ?.copyWith(color: theme.colorScheme.outline),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            // 排序
+            ExpansionTile(
+              leading: const Icon(Icons.sort),
+              title: const Text('排序方式'),
+              subtitle: Text(sortMode.label),
               children: [
-                const Expanded(
-                  child: Text('会话', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                ),
-                IconButton(
-                  tooltip: '刷新',
-                  icon: const Icon(Icons.refresh),
-                  onPressed: () => ref.read(chatServiceProvider).loadSessions(),
-                ),
-                IconButton(
-                  tooltip: '退出登录',
-                  icon: const Icon(Icons.logout),
-                  onPressed: () => ref.read(authProvider.notifier).logout(),
-                ),
+                for (final m in SessionSortMode.values)
+                  RadioListTile<SessionSortMode>(
+                    dense: true,
+                    title: Text(m.label),
+                    value: m,
+                    groupValue: sortMode,
+                    onChanged: (v) {
+                      if (v == null) return;
+                      ref.read(sessionSortModeProvider.notifier).setMode(v);
+                      Navigator.of(context).pop();
+                    },
+                  ),
               ],
             ),
-          ),
-        ),
-        // 用户信息条
-        ListTile(
-          dense: true,
-          leading: CircleAvatar(
-            backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-            child: Text(
-              auth.auth?.name.isNotEmpty == true ? auth.auth!.name.characters.first : '?',
-              style: TextStyle(color: Theme.of(context).colorScheme.onPrimaryContainer),
+            ListTile(
+              leading: const Icon(Icons.refresh),
+              title: const Text('刷新会话'),
+              onTap: () {
+                Navigator.of(context).pop();
+                ref.read(chatServiceProvider).loadSessions();
+              },
             ),
-          ),
-          title: Text(auth.auth?.name ?? ''),
-          subtitle: Text('Uin: ${auth.auth?.uin ?? '-'}',
-              style: Theme.of(context).textTheme.bodySmall),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('设置'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsPage()),
+                );
+              },
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(Icons.logout, color: theme.colorScheme.error),
+              title: Text('退出登录',
+                  style: TextStyle(color: theme.colorScheme.error)),
+              onTap: () {
+                Navigator.of(context).pop();
+                ref.read(authProvider.notifier).logout();
+              },
+            ),
+          ],
         ),
-        const Divider(height: 1),
-        // 会话列表
-        Expanded(
-          child: sessions.isEmpty
-              ? const _EmptySessions()
-              : ListView.separated(
-                  itemCount: sessions.length,
-                  separatorBuilder: (_, _) => const Divider(height: 1),
-                  itemBuilder: (context, i) {
-                    final s = sessions[i];
-                    final isActive = active != null &&
-                        active.type == s.type &&
-                        active.id == s.id;
-                    return _SessionTile(
-                      session: s,
-                      isActive: isActive,
-                      onTap: () => ref
-                          .read(activeSessionProvider.notifier)
-                          .open(s.type, s.id),
-                    );
-                  },
-                ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -100,27 +179,72 @@ class _SessionTile extends StatelessWidget {
     final last = session.lastMessage;
     final timeText = last != null ? _fmtTime(last.time) : '';
 
+    // 好友会话：显示在线/游玩状态；群会话：仅最后消息
+    final isFriend = session.type == ChatSessionType.friend;
+    final statusText = isFriend
+        ? (session.gameStatus != null && session.gameStatus!.isNotEmpty
+            ? session.gameStatus!
+            : (session.isOnline ? '在线' : '离线'))
+        : null;
+
     return ListTile(
       selected: isActive,
       selectedTileColor: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
-      leading: CircleAvatar(
-        backgroundColor: session.type == ChatSessionType.group
-            ? theme.colorScheme.tertiaryContainer
-            : theme.colorScheme.primaryContainer,
-        child: Icon(
-          session.type == ChatSessionType.group ? Icons.group : Icons.person,
-          color: session.type == ChatSessionType.group
-              ? theme.colorScheme.onTertiaryContainer
-              : theme.colorScheme.onPrimaryContainer,
-        ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: AvatarView(
+        avatarUrl: session.avatar,
+        name: session.name,
+        type: session.type,
+        radius: 24,
       ),
       title: Text(session.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-      subtitle: Text(
-        last?.text ?? '暂无消息',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: theme.textTheme.bodySmall,
-      ),
+      subtitle: isFriend
+          // 好友：在线绿点 + 状态 + 最后消息（两行紧凑显示）
+          ? Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: session.isOnline
+                        ? Colors.green.shade400
+                        : theme.colorScheme.outlineVariant,
+                  ),
+                ),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    statusText ?? '',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: session.isOnline
+                          ? Colors.green.shade400
+                          : theme.colorScheme.outline,
+                    ),
+                  ),
+                ),
+                if (last != null) ...[
+                  const Text(' · ', style: TextStyle(fontSize: 11)),
+                  Flexible(
+                    child: Text(
+                      last.text,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall,
+                    ),
+                  ),
+                ],
+              ],
+            )
+          : Text(
+              last?.text ?? '暂无消息',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: theme.textTheme.bodySmall,
+            ),
       trailing: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         crossAxisAlignment: CrossAxisAlignment.end,
@@ -151,11 +275,12 @@ class _EmptySessions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.inbox_outlined, size: 48, color: Theme.of(context).colorScheme.outline),
+          Icon(Icons.inbox_outlined, size: 48, color: theme.colorScheme.outline),
           const SizedBox(height: 8),
           const Text('暂无会话\n下拉刷新或点击刷新按钮'),
           const SizedBox(height: 8),

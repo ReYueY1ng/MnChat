@@ -1,17 +1,24 @@
-# mnchat
+# MnChat
 
-A new Flutter project.
+迷你世界（Mini World）外部聊天客户端 — Flutter/Dart 实现。
 
-## Getting Started
+## 功能
 
-This project is a starting point for a Flutter application.
+- **HTTP 登录**：`login_v3` 协议 + WebSocket 心跳取 s2/s2t 令牌
+- **好友聊天**：实时推送 + 离线历史拉取（buddysvr chat_query）
+- **群聊**：实时推送 + 缓存历史
+- **离线缓存**：Drift SQLite 本地持久化，启动恢复
+- **协议**：XXTEA + rotate-XOR 加密、LuaTable 响应解析、msgpack 编解码
 
-A few resources to get you started if this is your first Flutter project:
+## 技术栈
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+- Flutter 3.47 (FVM)
+- Riverpod 3.x 状态管理
+- Drift 离线存储
+- Dio + WebSocket 通信
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## 已知限制
+
+- 仅支持口令登录，不支持微信/QQ 登录
+- 头像暂用首字占位（批量拉取接口存在但依赖好友列表接口稳定）
+- 生产服务器需直连（已禁用系统代理）

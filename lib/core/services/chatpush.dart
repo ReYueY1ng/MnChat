@@ -4,6 +4,7 @@
 library;
 
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
@@ -179,7 +180,8 @@ class ChatPushConnection {
   final void Function(ChatPushRpcResult)? onRpc;
 
   final Map<int, Completer<ChatPushRpcResult>> _pending = {};
-  final Set<String> _recvedOk = {};
+    final Set<String> _recvedOk = LinkedHashSet();
+    static const int _kMaxRecvedOk = 1000;
   int _seq = 0;
   StreamSubscription? _sub;
   Timer? _heartbeat;
@@ -283,15 +285,17 @@ class ChatPushConnection {
     // 帧结构 (0-indexed): [0]=msg_type, [1]=servicename, [2]=methodname,
     //                     [3]=seq, [4]=ts, [5]=args_or_result
     // Lua (1-indexed): msg_type, msgseq = msg[1], msg[4] → 对应 [0] 和 [3]
-    if (msgType == 11 && msg.length >= 2) {
-      final msgSeq = msg.length > 3 ? '${msg[3]}' : '';
-      // 回 ack {msg_type, msgseq} 告诉服务器已收到
-      _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[11, msgSeq]))));
-      final baseSeq = msgSeq.split('_').isEmpty ? '' : msgSeq.split('_').first;
-      if (baseSeq.isNotEmpty) {
-        if (_recvedOk.contains(baseSeq)) return;
-        _recvedOk.add(baseSeq);
-      }
+      if (msgType == 11 && msg.length >= 2) {
+        final msgSeq = msg.length > 3 ? '${msg[3]}' : '';
+        _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[11, msgSeq]))));
+        final baseSeq = msgSeq.split('_').isEmpty ? '' : msgSeq.split('_').first;
+        if (baseSeq.isNotEmpty) {
+          if (_recvedOk.contains(baseSeq)) return;
+          _recvedOk.add(baseSeq);
+          if (_recvedOk.length > _kMaxRecvedOk) {
+            _truncateRecvedOk();
+          }
+        }
       if (msg.length >= 6) {
         final service = msg[1]?.toString() ?? '';
         final methodName = msg[2]?.toString() ?? '';
@@ -307,6 +311,14 @@ class ChatPushConnection {
     for (final c in _pending.values) {
       if (!c.isCompleted) c.completeError(ChatPushError('connection closed'));
     }
+  }
+
+  void _truncateRecvedOk() {
+    if (_recvedOk.length <= _kMaxRecvedOk) return;
+    final all = _recvedOk.toList();
+    // Keep only the newest _kMaxRecvedOk entries (LinkedHashSet preserves insertion order).
+    _recvedOk.clear();
+    _recvedOk.addAll(all.sublist(all.length - _kMaxRecvedOk));
   }
 
   Future<void> close() async {

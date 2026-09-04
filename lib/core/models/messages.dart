@@ -140,6 +140,12 @@ class ChatSession {
   /// 头像（无真实头像 url 时可为空，UI 用首字渲染）。
   final String? avatar;
 
+  /// 好友是否在线（query_friend_list 的 `online` 字段，仅好友会话有效）。
+  final bool isOnline;
+
+  /// 游玩状态文本（如「游戏中」「组队中」，来自 statusinfo；无则 null）。
+  final String? gameStatus;
+
   /// 最后一条消息。
   final ChatMessage? lastMessage;
 
@@ -154,12 +160,16 @@ class ChatSession {
     required this.type,
     required this.name,
     this.avatar,
+    this.isOnline = false,
+    this.gameStatus,
     this.lastMessage,
     this.unreadCount = 0,
     this.lastReadTime = 0,
   });
 
   ChatSession copyWith({
+    bool? isOnline,
+    String? gameStatus,
     ChatMessage? lastMessage,
     int? unreadCount,
     int? lastReadTime,
@@ -170,6 +180,8 @@ class ChatSession {
         type: type,
         name: name ?? this.name,
         avatar: avatar,
+        isOnline: isOnline ?? this.isOnline,
+        gameStatus: gameStatus ?? this.gameStatus,
         lastMessage: lastMessage ?? this.lastMessage,
         unreadCount: unreadCount ?? this.unreadCount,
         lastReadTime: lastReadTime ?? this.lastReadTime,
@@ -180,6 +192,8 @@ class ChatSession {
         'type': type.name,
         'name': name,
         'avatar': avatar,
+        'is_online': isOnline,
+        'game_status': gameStatus,
         'last_message': lastMessage?.toJson(),
         'unread_count': unreadCount,
         'last_read_time': lastReadTime,
@@ -193,6 +207,8 @@ class ChatSession {
         ),
         name: json['name']?.toString() ?? '',
         avatar: json['avatar']?.toString(),
+        isOnline: json['is_online'] as bool? ?? false,
+        gameStatus: json['game_status']?.toString(),
         lastMessage: json['last_message'] is Map
             ? ChatMessage.fromJson((json['last_message'] as Map).cast<String, Object?>())
             : null,

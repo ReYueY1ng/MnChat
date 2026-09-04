@@ -1,9 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 
-/// 登录页：uin + 密码 → login_v3。
+/// 登录页：uin + 密码 → login_v3。支持"下次自动登录"。
 class LoginPage extends ConsumerStatefulWidget {
   const LoginPage({super.key});
 
@@ -16,6 +17,24 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   final _pwdCtrl = TextEditingController();
   final _formKey = GlobalKey<FormState>();
   bool _showPwd = false;
+  bool _autoLogin = false;
+  bool _autoLoginLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAutoLoginPref();
+  }
+
+  Future<void> _loadAutoLoginPref() async {
+    final settings = ref.read(settingsProvider);
+    final v = await settings.getBool(SettingsKeys.autoLogin);
+    if (!mounted) return;
+    setState(() {
+      _autoLogin = v;
+      _autoLoginLoaded = true;
+    });
+  }
 
   @override
   void dispose() {
@@ -32,12 +51,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         .read(authProvider.notifier)
         .login(uin: uin, password: _pwdCtrl.text);
     if (!ok && mounted) {
-      // 登录失败：authProvider 已记录 error，提示
       final error = ref.read(authProvider).error;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error ?? '登录失败'), backgroundColor: Colors.red.shade400),
       );
     }
+    // 登录成功：authProvider 已按 _autoLogin 保存凭据（见 AuthNotifier.login）
   }
 
   @override
@@ -48,11 +67,12 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 400),
+            constraints: const BoxConstraints(maxWidth: 420),
             child: Card(
               elevation: 2,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               child: Padding(
                 padding: const EdgeInsets.all(28),
                 child: Form(
@@ -81,7 +101,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         decoration: const InputDecoration(
                           labelText: 'Uin / 迷你号',
                           prefixIcon: Icon(Icons.tag),
-                          border: OutlineInputBorder(),
                         ),
                         validator: (v) =>
                             (v == null || v.trim().isEmpty || int.tryParse(v.trim()) == null)
@@ -95,7 +114,6 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         decoration: InputDecoration(
                           labelText: '密码',
                           prefixIcon: const Icon(Icons.lock_outline),
-                          border: const OutlineInputBorder(),
                           suffixIcon: IconButton(
                             icon: Icon(_showPwd ? Icons.visibility_off : Icons.visibility),
                             onPressed: () => setState(() => _showPwd = !_showPwd),
@@ -104,7 +122,23 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                         validator: (v) => (v == null || v.isEmpty) ? '请输入密码' : null,
                         onFieldSubmitted: (_) => _submit(),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 8),
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                        dense: true,
+                        title: const Text('下次自动登录'),
+                        value: _autoLogin,
+                        onChanged: _autoLoginLoaded
+                            ? (v) async {
+                                setState(() => _autoLogin = v ?? false);
+                                await ref
+                                    .read(settingsProvider)
+                                    .setBool(SettingsKeys.autoLogin, v ?? false);
+                              }
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
                       FilledButton.icon(
                         onPressed: auth.isBusy ? null : _submit,
                         icon: auth.isBusy

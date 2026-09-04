@@ -37,24 +37,40 @@ class ChatSessions extends Table {
   Set<Column> get primaryKey => {sessionKey};
 }
 
-@DriftDatabase(tables: [ChatMessages, ChatSessions])
+/// 好友信息缓存：启动时先显示本地快照，再网络刷新（query_friend_list）。
+@DataClassName('FriendRecord')
+class Friends extends Table {
+  IntColumn get uin => integer()();
+  TextColumn get nickname => text()();
+  TextColumn get avatar => text().nullable()();
+  BoolColumn get isOnline => boolean()();
+  TextColumn get gameStatus => text().nullable()();
+  IntColumn get updatedAt => integer()();
+
+  @override
+  Set<Column> get primaryKey => {uin};
+}
+
+@DriftDatabase(tables: [ChatMessages, ChatSessions, Friends])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 2;
+  int get schemaVersion => 3;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) => m.createAll(),
-        // v1 表结构: chat_sessions 无主键 → v2 加主键。
-        // 本地聊天缓存可重建，直接 drop + recreate（含未读/最后消息）。
+        // v1→v2: chat_sessions 无主键 → 加主键；v2→v3: 新增 friends 好友信息缓存表。
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.deleteTable('chat_sessions');
             await m.deleteTable('chat_messages');
             await m.createTable(chatSessions);
             await m.createTable(chatMessages);
+          }
+          if (from < 3) {
+            await m.createTable(friends);
           }
         },
       );
@@ -89,4 +105,14 @@ class AppDatabase extends _$AppDatabase {
   Future<void> markRead(String key) =>
       (update(chatSessions)..where((t) => t.sessionKey.equals(key)))
           .write(const ChatSessionsCompanion(unreadCount: Value(0)));
+
+  /// 好友信息缓存：全量覆盖保存（每次 query_friend_list 成功后调用）。
+  Future<void> replaceFriends(List<FriendRecord> records) async {
+    await transaction(() async {
+      await delete(friends).go();
+      await batch((b) => b.insertAll(friends, records));
+    });
+  }
+
+  Future<List<FriendRecord>> allFriends() => select(friends).get();
 }

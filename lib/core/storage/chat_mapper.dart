@@ -93,3 +93,29 @@ int _idFromSessionKey(String key) {
   if (idx < 0) return 0;
   return int.tryParse(key.substring(idx + 1)) ?? 0;
 }
+
+/// Contact → FriendRecord（入库用，记录拉取时间）。
+FriendRecord friendToRecord(
+  Contact c, {
+  required int updatedAt,
+  bool isOnline = false,
+  String? gameStatus,
+}) {
+  return FriendRecord(
+    uin: c.uin,
+    nickname: c.nickname,
+    avatar: c.avatar,
+    isOnline: isOnline,
+    gameStatus: gameStatus,
+    updatedAt: updatedAt,
+  );
+}
+
+/// FriendRecord → Contact。
+Contact friendFromRecord(FriendRecord r) {
+  return Contact(
+    uin: r.uin,
+    nickname: r.nickname,
+    avatar: r.avatar,
+  );
+}
