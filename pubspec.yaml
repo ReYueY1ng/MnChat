@@ -46,6 +46,8 @@ dependencies:
   path: ^1.9.1
   drift_dev: ^2.34.5
   build_runner: ^2.16.0
+  flutter_chat_ui: ^2.11.1
+  flutter_chat_core: ^2.9.0
 
 dev_dependencies:
   flutter_test:
