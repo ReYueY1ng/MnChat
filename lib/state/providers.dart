@@ -24,8 +24,7 @@ final chatServiceProvider = Provider<ChatService>((ref) {
 /// ChatBridge 单例（flutter_chat_ui 迁移的桥接层）。
 ///
 /// 持有每个会话的 [ChatController]，订阅 ChatService.eventStream 单一订阅，
-/// 把历史增量 reconcile 到控制器。Wave 5 会把 chat_page 切到 Chat widget 后
-/// 移除 messageHistoryProvider；本 provider 先并存。
+/// 把历史增量 reconcile 到控制器。已取代 messageHistoryProvider 的消息显示链路。
 final chatBridgeProvider = Provider<ChatBridge>((ref) {
   final service = ref.watch(chatServiceProvider);
   final bridge = ChatBridge(service);
@@ -151,18 +150,6 @@ class ActiveSessionNotifier extends Notifier<ActiveSession?> {
 final sessionListProvider = StreamProvider<SessionSnapshot>((ref) {
   final service = ref.watch(chatServiceProvider);
   return service.sessionStream;
-});
-
-/// 指定会话的消息历史。
-final messageHistoryProvider =
-    StreamProvider.family<List<ChatMessage>, ActiveSession>((ref, key) async* {
-  final service = ref.watch(chatServiceProvider);
-  yield service.historyOf(key.type, key.id);
-  await for (final event in service.eventStream) {
-    if (event.sessionType == key.type && event.sessionId == key.id) {
-      yield service.historyOf(key.type, key.id);
-    }
-  }
 });
 
 /// 联系人列表。
