@@ -6,6 +6,7 @@ library;
 
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 
+import '../core/chat_emoji.dart' show decodeEmojiCodes;
 import '../core/models/messages.dart';
 
 /// 会话存储 key，格式 `'${type.name}_$id'`（`friend_123` / `group_456`）。
@@ -33,9 +34,11 @@ String chatMessageId({
 
 /// ChatMessage → flutter_chat_core 的 [Message]。
 ///
-/// - 系统消息（`who == 1000` → [ChatMessage.isSystemMsg]）映射为
-///   [Message.system]，authorId 固定为 `'system'`；
-/// - 其余映射为 [Message.text]，authorId 为发送者 uin 的字符串。
+/// - 系统消息（[ChatMessage.isSystemMsg] / [ChatMsgType.system]）→ [Message.system]，
+///   authorId 固定为 `'system'`；
+/// - share / custom 类型 → [Message.custom]，用 `metadata` 承载应用数据
+///   （`text` + `extend`），UI 侧用 [Message.custom] 的 builder 渲染；
+/// - 其余 → [Message.text]，authorId 为发送者 uin 的字符串。
 ///
 /// `m.time` 为 epoch **秒**，flutter_chat_core 的 [EpochDateTimeConverter]
 /// 以**毫秒**为准，故 ×1000 并构造 UTC DateTime。不设置
@@ -53,12 +56,44 @@ Message chatMessageToMessage(
     text: m.text,
   );
   final createdAt = DateTime.fromMillisecondsSinceEpoch(m.time * 1000, isUtc: true);
+  // 显示文本：把表情码 #A1xx 解码为 Unicode 表情（id 仍用原始 text 保证稳定）。
+  final text = decodeEmojiCodes(m.text);
 
-  if (m.isSystemMsg) {
-    return Message.system(id: id, authorId: 'system', createdAt: createdAt, text: m.text);
+  if (m.isSystemMsg || m.type == ChatMsgType.system) {
+    return Message.system(id: id, authorId: 'system', createdAt: createdAt, text: text);
   }
-  return Message.text(id: id, authorId: m.uin.toString(), createdAt: createdAt, text: m.text);
+  switch (m.type) {
+    case ChatMsgType.share:
+      return Message.custom(
+        id: id,
+        authorId: m.uin.toString(),
+        createdAt: createdAt,
+        metadata: {'type': 'share', 'text': text, 'extend': m.extendData},
+      );
+    case ChatMsgType.custom:
+      return Message.custom(
+        id: id,
+        authorId: m.uin.toString(),
+        createdAt: createdAt,
+        metadata: {'type': 'custom', 'text': text, 'extend': m.extendData},
+      );
+    case ChatMsgType.text:
+    case ChatMsgType.system:
+      return Message.text(
+        id: id,
+        authorId: m.uin.toString(),
+        createdAt: createdAt,
+        text: text,
+        // 保留原始文本（含 #A1xx 表情码），供气泡行内渲染真实游戏贴图；
+        // text 字段则用解码后的 Unicode（会话/通知预览友好）。
+        metadata: {'raw': m.text},
+      );
+  }
 }
+
+/// 从 [CustomMessage.metadata] 提取原始文本（share/custom 消息的正文）。
+String customMessageText(CustomMessage message) =>
+    message.metadata?['text']?.toString() ?? '';
 
 /// uin → flutter_chat_core 的 [User]。
 ///
