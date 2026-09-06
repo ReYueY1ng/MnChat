@@ -2,7 +2,7 @@
 /// 移植自 MNClient `crypto/xxtea.py` (109 行)，逐行对照。
 library;
 
-import 'dart:io';
+import 'package:archive/archive.dart';
 import 'dart:typed_data';
 
 const int kDelta = 0x9E3779B9;
@@ -125,10 +125,11 @@ Uint8List xxteaDecryptUnzip(List<int> data) {
   return _zlibDecompress(unpacked);
 }
 
-// -- zlib via dart:io ZLibCodec (native, no extra deps).
+// -- zlib via package:archive (native and web).
 
 Uint8List _zlibCompress(List<int> data) =>
-    Uint8List.fromList(ZLibCodec(level: 6).encode(data));
+    ZLibEncoder().encodeBytes(data);
+    
 
 Uint8List _zlibDecompress(List<int> data) =>
-    Uint8List.fromList(ZLibCodec().decode(data));
+    ZLibDecoder().decodeBytes(data);
