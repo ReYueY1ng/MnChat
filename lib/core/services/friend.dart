@@ -140,4 +140,89 @@ class FriendClient {
     );
     return _get(url);
   }
+
+  /// 发送好友申请 (cmd=apply_friend)。[from] 为来源统计：0=扫码/1=迷你号/5=其他。
+  /// 对齐反编译源码 friendservice.lua ReqAddFriendSync (2171+)，含 token 签名。
+  Future<Map<String, Object?>> applyFriend({
+    required Object desUin,
+    String from = '5',
+    String? rpExt,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    final params = <String, String>{
+      'apiid': apiId,
+      'country': country,
+      'des_uin': '$desUin',
+      'from': from,
+      'lang': lang,
+      'pushchannel': pushChannel,
+      's2t': s2t,
+      'src_uin': '$uin',
+      'time': '$now',
+      'token': token,
+      'uin': '$uin',
+      'ver': ver,
+      'game_session_id': gameSessionId,
+      'cid': cid,
+    };
+    if (rpExt != null) params['rp_ext'] = rpExt;
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'apply_friend',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  /// 通过好友申请 (cmd=accept_apply)。对齐 friendservice.lua ReqAgreeAddFriend (2304+)。
+  Future<Map<String, Object?>> acceptApply({required Object desUin}) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    final params = <String, String>{
+      'apiid': apiId,
+      'country': country,
+      'des_uin': '$desUin',
+      'lang': lang,
+      'pushchannel': pushChannel,
+      's2t': s2t,
+      'src_uin': '$uin',
+      'time': '$now',
+      'token': token,
+      'uin': '$uin',
+      'ver': ver,
+      'game_session_id': gameSessionId,
+      'cid': cid,
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'accept_apply',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  /// 拒绝好友申请 (cmd=reject_apply)。对齐 friendservice.lua ReqRejectAddFriend (2406+)。
+  Future<Map<String, Object?>> rejectApply({required Object desUin}) async {
+    final params = <String, String>{
+      'apiid': apiId,
+      'country': country,
+      'des_uin': '$desUin',
+      'lang': lang,
+      'pushchannel': pushChannel,
+      'src_uin': '$uin',
+      'ver': ver,
+      'game_session_id': gameSessionId,
+      'cid': cid,
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'reject_apply',
+      params: params,
+    );
+    return _get(url);
+  }
 }

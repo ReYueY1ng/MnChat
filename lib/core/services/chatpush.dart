@@ -6,8 +6,10 @@ library;
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
+import 'dart:math';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show VoidCallback, kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../crypto/chatpush_cipher.dart' show chatpushDecrypt, chatpushEncrypt;
@@ -57,7 +59,8 @@ class ChatPushClient {
   static const String kProdLb = 'https://chatpush.mini1.cn:19602';
 
   ChatPushClient({int env = 0, String? lbUrl, Dio? dio})
-      : _lbUrl = lbUrl ?? kChatpushLbUrls[env] ?? kProdLb,
+      : _lbUrl = lbUrl ??
+            (kIsWeb ? backendChatpush(env) : (kChatpushLbUrls[env] ?? kProdLb)),
         _dio = dio ?? createDio();
 
   // ── alloc ─────────────────────────────────────────────────────────────
@@ -156,19 +159,23 @@ class ChatPushClient {
     required int uin,
     int apiId = 110,
     String? authToken, // 握手用（登录返回的 jwt；Lua = container.conn.token）
+    bool reconnect = false, // 重连时 true → URL 追加 &reconnect=1（对齐原版，保留在线态）
     void Function(ChatPushPush)? onPush,
     void Function(ChatPushRpcResult)? onRpc,
+    VoidCallback? onClosed,
   }) async {
     final timeVal = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final auth = md5Sign([timeVal.toString(), chatpushAuthKey, uin.toString()]);
+    final reconnectParam = reconnect ? '&reconnect=1' : '';
     final uri = Uri.parse(
-        'ws://$host/minigate/gate?uid=$uin&token=$token&time=$timeVal&auth=$auth&cltversion=$kCltVersion&apiid=$apiId');
+        'ws://$host/minigate/gate?uid=$uin&token=$token&time=$timeVal&auth=$auth&cltversion=$kCltVersion&apiid=$apiId$reconnectParam');
     final channel = WebSocketChannel.connect(uri);
     return ChatPushConnection(
       channel,
       authToken: authToken,
       onPush: onPush,
       onRpc: onRpc,
+      onClosed: onClosed,
     );
   }
 }
@@ -179,6 +186,11 @@ class ChatPushConnection {
   final void Function(ChatPushPush)? onPush;
   final void Function(ChatPushRpcResult)? onRpc;
 
+  /// 连接关闭/断开时回调（供上层触发自动重连）。
+  final VoidCallback? onClosed;
+
+  bool _closed = false;
+
   final Map<int, Completer<ChatPushRpcResult>> _pending = {};
     final Set<String> _recvedOk = LinkedHashSet();
     static const int _kMaxRecvedOk = 1000;
@@ -187,13 +199,19 @@ class ChatPushConnection {
   Timer? _heartbeat;
 
   ChatPushConnection(this._channel,
-      {this.authToken, this.onPush, this.onRpc}) {
+      {this.authToken, this.onPush, this.onRpc, this.onClosed}) {
     _seq = DateTime.now().microsecondsSinceEpoch % 100000;
     _sub = _channel.stream.listen(_onMessage, onDone: _onDone, onError: (_) {});
-    _heartbeat = Timer.periodic(const Duration(seconds: 30), (_) => _sendHeartbeat());
+    _heartbeat = Timer.periodic(const Duration(seconds: 10), (_) => _sendHeartbeat());
     // 连接打开 → 立即发 {21, authToken} 握手（container.lua:1290-1297）
     _sendHandshake();
   }
+
+  /// 是否已断开。
+  bool get isClosed => _closed;
+
+  /// 强制发一次心跳（保活/重置服务器侧活跃状态）。
+  void ping() => _sendHeartbeat();
 
   /// 登录返回的 jwt（Lua container.conn.token）。null 时跳过握手。
   final String? authToken;
@@ -223,12 +241,17 @@ class ChatPushConnection {
   }
 
   /// RPC 请求（JSON + rotate-XOR 编码），返回响应 Future。
-  Future<ChatPushRpcResult> sendRpc(
-      String svc, String method, List<dynamic> args,
-      {Duration timeout = const Duration(seconds: 15)}) async {
+  Future<ChatPushRpcResult> sendRpc(String svc, String method, List<dynamic> args,
+      {Duration timeout = const Duration(seconds: 15), Map<String, Object?>? commParam}) async {
     final seq = _nextSeq();
     final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
-    final msg = <dynamic>[0, svc, method, seq, msec, args, <String, Object?>{}];
+    final comm = commParam ?? <String, Object?>{
+      'session_id': _randId(),
+      'log_id': _randId(),
+      'scene_id': '0',
+      'game_session_id': '',
+    };
+    final msg = <dynamic>[0, svc, method, seq, msec, args, comm];
     final completer = Completer<ChatPushRpcResult>();
     _pending[seq] = completer;
     _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(msg))));
@@ -237,6 +260,12 @@ class ChatPushConnection {
     } finally {
       _pending.remove(seq);
     }
+  }
+
+  /// 随机 32 位 hex（对齐游戏 log_id/session_id 等）。
+  String _randId() {
+    final rnd = Random();
+    return List.generate(32, (_) => rnd.nextInt(16).toRadixString(16)).join();
   }
 
   void _sendHeartbeat() {
@@ -256,11 +285,24 @@ class ChatPushConnection {
     final msgType = msg[0] is int ? msg[0] as int : int.tryParse('${msg[0]}') ?? -1;
 
     if (msgType == 1 && msg.length >= 4) {
-      // RPC 响应: [1, seq, code, result, other]
-      final seq = _toInt(msg[1]);
-      final code = _toInt(msg[2]);
-      final result = msg.length > 3 ? msg[3] : null;
-      final other = msg.length > 4 ? msg[4] : null;
+      // 两种 RPC 响应形态：
+      //  a) [1, seq, code, result, other]（seq 在 index 1）
+      //  b) [1, service, method, seq, ts, result]（buddy 等 usechatpush 方法，seq 在 index 3）
+      int seq;
+      int code;
+      dynamic result;
+      dynamic other;
+      if (msg[1] is num) {
+        seq = _toInt(msg[1]);
+        code = _toInt(msg[2]);
+        result = msg.length > 3 ? msg[3] : null;
+        other = msg.length > 4 ? msg[4] : null;
+      } else {
+        seq = _toInt(msg[3]);
+        code = 0;
+        result = msg.length > 5 ? msg[5] : (msg.length > 4 ? msg[4] : null);
+        other = null;
+      }
       final completer = _pending[seq];
       if (completer != null && !completer.isCompleted) {
         completer.complete(ChatPushRpcResult(seq, code, result, other));
@@ -307,10 +349,12 @@ class ChatPushConnection {
   }
 
   void _onDone() {
+    _closed = true;
     _heartbeat?.cancel();
     for (final c in _pending.values) {
       if (!c.isCompleted) c.completeError(ChatPushError('connection closed'));
     }
+    onClosed?.call();
   }
 
   void _truncateRecvedOk() {
