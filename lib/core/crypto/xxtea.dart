@@ -3,17 +3,14 @@
 library;
 
 import 'package:archive/archive.dart';
+
 import 'dart:typed_data';
 
-const int kDelta = 0x9E3779B9;
-/// Standard XXTEA round constant.
+import 'protocol_keys.dart';
 
-final Uint8List _key = Uint8List.fromList(
-  List<int>.generate(16, (i) => [0xb4, 0x8e, 0x6e, 0xf4, 0x4e, 0xd1, 0x3e, 0xee,
-    0x60, 0x61, 0x41, 0x75, 0x0e, 0x72, 0x9c, 0xf4][i]),
-);
-/// Default 16-byte XXTEA key used by Mini World
-/// (`b48e6ef44ed13eee606141750e729cf4`).
+const int kDelta = 0x9E3779B9;
+
+/// Standard XXTEA round constant.
 
 /// Pack [data] with a 4-byte big-endian length prefix, padded to 4-byte boundary.
 Uint8List _pack(List<int> data) {
@@ -39,10 +36,22 @@ Uint8List _unpack(List<int> data) {
 Uint8List _xxteaEncrypt(Uint8List data, Uint8List key) {
   final n = data.length ~/ 4;
   if (n < 2) return data;
-  final v = List<int>.generate(n, (i) =>
-      (data[i * 4]) | (data[i * 4 + 1] << 8) | (data[i * 4 + 2] << 16) | (data[i * 4 + 3] << 24));
-  final k = List<int>.generate(4, (i) =>
-      (key[i * 4] & 0xFF) | (key[i * 4 + 1] << 8) | (key[i * 4 + 2] << 16) | (key[i * 4 + 3] << 24));
+  final v = List<int>.generate(
+    n,
+    (i) =>
+        (data[i * 4]) |
+        (data[i * 4 + 1] << 8) |
+        (data[i * 4 + 2] << 16) |
+        (data[i * 4 + 3] << 24),
+  );
+  final k = List<int>.generate(
+    4,
+    (i) =>
+        (key[i * 4] & 0xFF) |
+        (key[i * 4 + 1] << 8) |
+        (key[i * 4 + 2] << 16) |
+        (key[i * 4 + 3] << 24),
+  );
   final rounds = 6 + 52 ~/ n;
   var z = v[n - 1];
   var total = 0;
@@ -51,13 +60,15 @@ Uint8List _xxteaEncrypt(Uint8List data, Uint8List key) {
     final e = (total >> 2) & 3;
     for (var p = 0; p < n - 1; p++) {
       final y = v[p + 1];
-      final mx = ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
+      final mx =
+          ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
           ((total ^ y) + (k[(p & 3) ^ e] ^ z));
       v[p] = (v[p] + mx) & 0xFFFFFFFF;
       z = v[p];
     }
     final y = v[0];
-    final mx = ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
+    final mx =
+        ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
         ((total ^ y) + (k[((n - 1) & 3) ^ e] ^ z));
     v[n - 1] = (v[n - 1] + mx) & 0xFFFFFFFF;
     z = v[n - 1];
@@ -69,10 +80,22 @@ Uint8List _xxteaEncrypt(Uint8List data, Uint8List key) {
 Uint8List _xxteaDecrypt(Uint8List data, Uint8List key) {
   final n = data.length ~/ 4;
   if (n < 2) return data;
-  final v = List<int>.generate(n, (i) =>
-      (data[i * 4]) | (data[i * 4 + 1] << 8) | (data[i * 4 + 2] << 16) | (data[i * 4 + 3] << 24));
-  final k = List<int>.generate(4, (i) =>
-      (key[i * 4] & 0xFF) | (key[i * 4 + 1] << 8) | (key[i * 4 + 2] << 16) | (key[i * 4 + 3] << 24));
+  final v = List<int>.generate(
+    n,
+    (i) =>
+        (data[i * 4]) |
+        (data[i * 4 + 1] << 8) |
+        (data[i * 4 + 2] << 16) |
+        (data[i * 4 + 3] << 24),
+  );
+  final k = List<int>.generate(
+    4,
+    (i) =>
+        (key[i * 4] & 0xFF) |
+        (key[i * 4 + 1] << 8) |
+        (key[i * 4 + 2] << 16) |
+        (key[i * 4 + 3] << 24),
+  );
   final rounds = 6 + 52 ~/ n;
   var y = v[0];
   var total = (rounds * kDelta) & 0xFFFFFFFF;
@@ -80,13 +103,15 @@ Uint8List _xxteaDecrypt(Uint8List data, Uint8List key) {
     final e = (total >> 2) & 3;
     for (var p = n - 1; p > 0; p--) {
       final z = v[p - 1];
-      final mx = ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
+      final mx =
+          ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
           ((total ^ y) + (k[(p & 3) ^ e] ^ z));
       v[p] = (v[p] - mx) & 0xFFFFFFFF;
       y = v[p];
     }
     final z = v[n - 1];
-    final mx = ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
+    final mx =
+        ((z >> 5 ^ y << 2) + (y >> 3 ^ z << 4)) ^
         ((total ^ y) + (k[(0 & 3) ^ e] ^ z));
     v[0] = (v[0] - mx) & 0xFFFFFFFF;
     y = v[0];
@@ -108,28 +133,26 @@ Uint8List _wordsToBytes(List<int> words) {
 }
 
 /// Encrypt [data] using XXTEA with the shared key (auto-packs).
-Uint8List xxteaEncrypt(List<int> data) => _xxteaEncrypt(_pack(data), _key);
+Uint8List xxteaEncrypt(List<int> data) => _xxteaEncrypt(_pack(data), xxteaKey);
 
 /// Decrypt XXTEA-encrypted [data] and unpack the length prefix.
-Uint8List xxteaDecrypt(List<int> data) => _unpack(_xxteaDecrypt(Uint8List.fromList(data), _key));
+Uint8List xxteaDecrypt(List<int> data) =>
+    _unpack(_xxteaDecrypt(Uint8List.fromList(data), xxteaKey));
 
 /// Compress [data] with zlib, then encrypt using XXTEA.
 Uint8List xxteaEncryptZip(List<int> data) {
   final zlibCompressed = _zlibCompress(data);
-  return _xxteaEncrypt(_pack(zlibCompressed), _key);
+  return _xxteaEncrypt(_pack(zlibCompressed), xxteaKey);
 }
 
 /// Decrypt XXTEA-encrypted [data], unpack, and decompress with zlib.
 Uint8List xxteaDecryptUnzip(List<int> data) {
-  final unpacked = _unpack(_xxteaDecrypt(Uint8List.fromList(data), _key));
+  final unpacked = _unpack(_xxteaDecrypt(Uint8List.fromList(data), xxteaKey));
   return _zlibDecompress(unpacked);
 }
 
 // -- zlib via package:archive (native and web).
 
-Uint8List _zlibCompress(List<int> data) =>
-    ZLibEncoder().encodeBytes(data);
-    
+Uint8List _zlibCompress(List<int> data) => ZLibEncoder().encodeBytes(data);
 
-Uint8List _zlibDecompress(List<int> data) =>
-    ZLibDecoder().decodeBytes(data);
+Uint8List _zlibDecompress(List<int> data) => ZLibDecoder().decodeBytes(data);

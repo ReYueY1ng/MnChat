@@ -19,7 +19,8 @@ String luaUrlEncode(Object value) {
   var i = 0;
   while (i < bytes.length) {
     final b = bytes[i];
-    final isAlnum = (b >= 0x30 && b <= 0x39) || // 0-9
+    final isAlnum =
+        (b >= 0x30 && b <= 0x39) || // 0-9
         (b >= 0x41 && b <= 0x5A) || // A-Z
         (b >= 0x61 && b <= 0x7A); // a-z
     if (isAlnum || b == 0x2E || b == 0x2D || b == 0x5F) {

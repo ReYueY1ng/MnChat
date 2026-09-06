@@ -74,37 +74,38 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
-        onCreate: (m) => m.createAll(),
-        // v1→v2: chat_sessions 无主键 → 加主键；v2→v3: 新增 friends 好友信息缓存表；
-        // v3→v4: 新增 settings 设置表；v4→v5: chat_messages 新增 msg_type 列；
-        // v5→v6: friends 新增 relation/mark 列（好友关系位掩码）。
-        onUpgrade: (m, from, to) async {
-          if (from < 2) {
-            await m.deleteTable('chat_sessions');
-            await m.deleteTable('chat_messages');
-            await m.createTable(chatSessions);
-            await m.createTable(chatMessages);
-          }
-          if (from < 3) {
-            await m.createTable(friends);
-          }
-          if (from < 4) {
-            await m.createTable(settingsTable);
-          }
-          if (from < 5) {
-            await m.addColumn(chatMessages, chatMessages.msgType);
-          }
-          if (from < 6) {
-            await m.addColumn(friends, friends.relation);
-            await m.addColumn(friends, friends.mark);
-          }
-        },
-      );
+    onCreate: (m) => m.createAll(),
+    // v1→v2: chat_sessions 无主键 → 加主键；v2→v3: 新增 friends 好友信息缓存表；
+    // v3→v4: 新增 settings 设置表；v4→v5: chat_messages 新增 msg_type 列；
+    // v5→v6: friends 新增 relation/mark 列（好友关系位掩码）。
+    onUpgrade: (m, from, to) async {
+      if (from < 2) {
+        await m.deleteTable('chat_sessions');
+        await m.deleteTable('chat_messages');
+        await m.createTable(chatSessions);
+        await m.createTable(chatMessages);
+      }
+      if (from < 3) {
+        await m.createTable(friends);
+      }
+      if (from < 4) {
+        await m.createTable(settingsTable);
+      }
+      if (from < 5) {
+        await m.addColumn(chatMessages, chatMessages.msgType);
+      }
+      if (from < 6) {
+        await m.addColumn(friends, friends.relation);
+        await m.addColumn(friends, friends.mark);
+      }
+    },
+  );
 
   /// 读取设置项；不存在返回 null。
   Future<String?> getSetting(String key) async {
-    final row = await (select(settingsTable)..where((t) => t.key.equals(key)))
-        .getSingleOrNull();
+    final row = await (select(
+      settingsTable,
+    )..where((t) => t.key.equals(key))).getSingleOrNull();
     return row?.value;
   }
 
@@ -131,6 +132,27 @@ class AppDatabase extends _$AppDatabase {
     return query.get();
   }
 
+  /// 一次查询全部消息（按 time 升序），用于启动时批量恢复离线缓存，
+  /// 避免逐会话查询的 N+1 问题。
+  Future<List<ChatMessageRecord>> allMessages({int limit = 10000}) {
+    final query = select(chatMessages)
+      ..orderBy([(t) => OrderingTerm.asc(t.time)])
+      ..limit(limit);
+    return query.get();
+  }
+
+  /// 原子替换某会话的整段历史（清空 + 批量写入，一个事务内完成，
+  /// 中途失败不留半写状态）。
+  Future<void> replaceMessages(
+    String key,
+    List<ChatMessagesCompanion> rows,
+  ) async {
+    await transaction(() async {
+      await (delete(chatMessages)..where((t) => t.sessionKey.equals(key))).go();
+      await batch((b) => b.insertAll(chatMessages, rows));
+    });
+  }
+
   Future<void> clearMessages(String key) =>
       (delete(chatMessages)..where((t) => t.sessionKey.equals(key))).go();
 
@@ -139,17 +161,19 @@ class AppDatabase extends _$AppDatabase {
 
   Future<List<ChatSessionRecord>> allSessions() => select(chatSessions).get();
 
-  Future<ChatSessionRecord?> sessionOf(String key) =>
-      (select(chatSessions)..where((t) => t.sessionKey.equals(key)))
-          .getSingleOrNull();
+  Future<ChatSessionRecord?> sessionOf(String key) => (select(
+    chatSessions,
+  )..where((t) => t.sessionKey.equals(key))).getSingleOrNull();
 
   Future<void> updateUnread(String key, int unread) =>
-      (update(chatSessions)..where((t) => t.sessionKey.equals(key)))
-          .write(ChatSessionsCompanion(unreadCount: Value(unread)));
+      (update(chatSessions)..where((t) => t.sessionKey.equals(key))).write(
+        ChatSessionsCompanion(unreadCount: Value(unread)),
+      );
 
   Future<void> markRead(String key) =>
-      (update(chatSessions)..where((t) => t.sessionKey.equals(key)))
-          .write(const ChatSessionsCompanion(unreadCount: Value(0)));
+      (update(chatSessions)..where((t) => t.sessionKey.equals(key))).write(
+        const ChatSessionsCompanion(unreadCount: Value(0)),
+      );
 
   /// 好友信息缓存：全量覆盖保存（每次 query_friend_list 成功后调用）。
   Future<void> replaceFriends(List<FriendRecord> records) async {

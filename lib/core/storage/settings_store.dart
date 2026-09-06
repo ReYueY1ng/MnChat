@@ -5,6 +5,7 @@
 /// 会因 `getApplicationSupportDirectory()`/`File` 抛错）。
 library;
 
+import '../crypto/credential_cipher.dart' show decryptPassword, encryptPassword;
 import 'app_database.dart' show AppDatabase;
 
 /// 设置项 key 常量。
@@ -45,19 +46,25 @@ class SettingsStore {
   Future<void> setBool(String key, bool value) =>
       setString(key, value ? '1' : '0');
 
-  /// 保存自动登录凭据。
+  /// 保存自动登录凭据（密码以 v1 密文形式落库，避免明文泄露）。
   Future<void> saveCredentials(int uin, String password) async {
     await _db.setSetting(SettingsKeys.savedUin, '$uin');
-    await _db.setSetting(SettingsKeys.savedPassword, password);
+    await _db.setSetting(
+      SettingsKeys.savedPassword,
+      encryptPassword(password, uin),
+    );
   }
 
-  /// 读取自动登录凭据；未保存返回 null。
+  /// 读取自动登录凭据；未保存或密文被篡改返回 null。
+  /// 旧版明文密码由 decryptPassword 内部兼容处理，无需额外迁移逻辑。
   Future<SavedCredentials?> loadCredentials() async {
     final uinStr = await getString(SettingsKeys.savedUin);
     final pwd = await getString(SettingsKeys.savedPassword);
     final uin = int.tryParse(uinStr ?? '');
     if (uin == null || pwd == null || pwd.isEmpty) return null;
-    return SavedCredentials(uin: uin, password: pwd);
+    final plain = decryptPassword(pwd, uin);
+    if (plain == null) return null;
+    return SavedCredentials(uin: uin, password: plain);
   }
 
   /// 清除自动登录凭据。

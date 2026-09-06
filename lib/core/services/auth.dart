@@ -36,22 +36,22 @@ class MiniAuth {
   });
 
   Map<String, Object?> toJson() => {
-        'uin': uin,
-        'api_id': apiId,
-        'name': name,
-        's2': s2,
-        's2t': s2t,
-        'jwt': jwt,
-      };
+    'uin': uin,
+    'api_id': apiId,
+    'name': name,
+    's2': s2,
+    's2t': s2t,
+    'jwt': jwt,
+  };
 
   factory MiniAuth.fromJson(Map<String, Object?> json) => MiniAuth(
-        uin: (json['uin'] as num).toInt(),
-        apiId: (json['api_id'] as num).toInt(),
-        name: json['name'] as String? ?? '',
-        s2: json['s2'] as String? ?? '',
-        s2t: json['s2t'] as String? ?? '',
-        jwt: json['jwt'] as String? ?? '',
-      );
+    uin: (json['uin'] as num).toInt(),
+    apiId: (json['api_id'] as num).toInt(),
+    name: json['name'] as String? ?? '',
+    s2: json['s2'] as String? ?? '',
+    s2t: json['s2t'] as String? ?? '',
+    jwt: json['jwt'] as String? ?? '',
+  );
 }
 
 class MiniAuthError implements Exception {
@@ -85,7 +85,7 @@ class LoginClient {
     final payload = <String, Object?>{
       'source': 'client',
       'juhe_auth': '',
-      'passwd_auth': '{"passwd":"$passwd"}',
+      'passwd_auth': jsonEncode({'passwd': passwd}),
       'DeviceID': deviceId,
       'is_url': true,
       'geetest': 'blending',
@@ -109,20 +109,23 @@ class LoginClient {
           .replace(queryParameters: {'msg': msg, 'sign': sign});
     } else {
       final port = kLoginPorts[Random().nextInt(kLoginPorts.length)];
-      url = Uri.https(
-        kLoginHost,
-        kLoginPath,
-        {'msg': msg, 'sign': sign},
-      ).replace(port: port);
+      url = Uri.https(kLoginHost, kLoginPath, {
+        'msg': msg,
+        'sign': sign,
+      }).replace(port: port);
     }
 
     final resp = await _dio.getUri(url);
-    final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
+    final text = resp.data is String
+        ? resp.data as String
+        : jsonEncode(resp.data);
     final Map<String, Object?> data;
     try {
       data = (jsonDecode(text) as Map).cast<String, Object?>();
     } on FormatException {
-      throw MiniAuthError('Login failed: invalid JSON response: ${text.substring(0, text.length > 200 ? 200 : text.length)}');
+      throw MiniAuthError(
+        'Login failed: invalid JSON response: ${text.substring(0, text.length > 200 ? 200 : text.length)}',
+      );
     }
 
     final code = data['code'];
@@ -133,7 +136,8 @@ class LoginClient {
       final splitIdx = fullSign.indexOf('_');
       final s2 = splitIdx <= 0 ? fullSign : fullSign.substring(0, splitIdx);
       final s2t = splitIdx <= 0 ? '' : fullSign.substring(splitIdx + 1);
-      final roleInfo = ((baseinfo['RoleInfo'] as Map? ?? {}).cast<String, Object?>());
+      final roleInfo = ((baseinfo['RoleInfo'] as Map? ?? {})
+          .cast<String, Object?>());
       return MiniAuth(
         uin: uin,
         apiId: apiId,
@@ -151,16 +155,9 @@ class LoginClient {
 class WsConnection {
   /// 从 config 端点取 WS URL。
   Future<String> getWsUrl({required int uin, int apiId = 110}) async {
-    final uri = Uri.parse('${backendWsConfig()}/update/?${Uri(queryParameters: {
-          'cltversion': '80384',
-          'clttype': '0',
-          'uin': '$uin',
-          'game_env': '0',
-          'ver': kClientVersionStr,
-          'apiid': '$apiId',
-          'lang': '0',
-          'country': 'CN',
-        }).query}');
+    final uri = Uri.parse(
+      '${backendWsConfig()}/update/?${Uri(queryParameters: {'cltversion': '80384', 'clttype': '0', 'uin': '$uin', 'game_env': '0', 'ver': kClientVersionStr, 'apiid': '$apiId', 'lang': '0', 'country': 'CN'}).query}',
+    );
     final resp = await createDio().getUri(uri);
     // Dio 默认自动解析 JSON → resp.data 已是 Map；但保留 String 分支兼容
     final Map<String, dynamic> data;
@@ -170,7 +167,9 @@ class WsConnection {
     } else if (raw is String) {
       data = (jsonDecode(raw) as Map).cast<String, dynamic>();
     } else {
-      throw MiniAuthError('Unexpected WS config response type: ${raw.runtimeType}');
+      throw MiniAuthError(
+        'Unexpected WS config response type: ${raw.runtimeType}',
+      );
     }
     return data['conn'] as String;
   }
@@ -189,17 +188,21 @@ class WsConnection {
     final hb = xxteaEncrypt(List<int>.from(msgpackPack([0, seq, jwt])));
     channel.sink.add(hb);
 
-    final raw = await channel.stream.first;
+    final raw = await channel.stream.first.timeout(const Duration(seconds: 10));
     final data = msgpackUnpack(xxteaDecrypt(raw));
     await channel.sink.close();
 
     if (data is! List || data.isEmpty || data[0] != 1 || data.length < 4) {
-      throw MiniAuthError('Unexpected HB response: ${data.toString().substring(0, 200)}');
+      throw MiniAuthError(
+        'Unexpected HB response: ${data.toString().substring(0, 200)}',
+      );
     }
     final code = data[2];
     if (code != 0) throw MiniAuthError('HB error code=$code');
     final result = data[3]?.toString() ?? '';
-    if (!result.contains('_')) throw MiniAuthError('Invalid sign format: $result');
+    if (!result.contains('_')) {
+      throw MiniAuthError('Invalid sign format: $result');
+    }
     final idx = result.indexOf('_');
     return (result.substring(0, idx), result.substring(idx + 1));
   }
@@ -243,7 +246,9 @@ class MainAccountConnection {
     final enc = xxteaEncrypt(List<int>.from(msgpackPack(params)));
     final body = Uri.encodeComponent(base64Encode(enc));
     final resp = await createDio().post('$lb/minilb/alloc', data: body);
-    final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
+    final text = resp.data is String
+        ? resp.data as String
+        : jsonEncode(resp.data);
     final Map<String, Object?> data;
     try {
       data = (jsonDecode(text) as Map).cast<String, Object?>();
@@ -259,7 +264,11 @@ class MainAccountConnection {
 
   /// 连接主账号长连接（wsurl，/update/ config 的 conn 字段）。
   /// 认证：发 `[0,seq,jwt]` 并**等 ack**（fetchS2 同款），认证完成才可发 RPC。
-  Future<void> connect({required String jwt, required int uin, String? wsUrl}) async {
+  Future<void> connect({
+    required String jwt,
+    required int uin,
+    String? wsUrl,
+  }) async {
     final url = wsUrl ?? await WsConnection().getWsUrl(uin: uin);
     final channel = WebSocketChannel.connect(Uri.parse(url));
     _channel = channel;
@@ -285,8 +294,12 @@ class MainAccountConnection {
 
   /// 发一条 RPC 并等响应（`[1,seq,code,result,other]`）。comm_param 对齐游戏
   /// remote_call：session_id/log_id/scene_id/game_session_id。
-  Future<List<dynamic>> sendRpc(String svc, String method, List<dynamic> args,
-      {Duration timeout = const Duration(seconds: 8)}) async {
+  Future<List<dynamic>> sendRpc(
+    String svc,
+    String method,
+    List<dynamic> args, {
+    Duration timeout = const Duration(seconds: 8),
+  }) async {
     final seq = _seq = (_seq + 1) % 100000000;
     final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
     final completer = Completer<List<dynamic>>();

@@ -36,17 +36,38 @@ const Map<String, String> kChatEmoji = {
 };
 
 /// 游戏表情选择器使用的**有序基础表情码**（#A1xx 这一组，MNChat 选择器展示）。
-const List<String> kGameEmojiCodes = [
-  '#A101', '#A102', '#A103', '#A104', '#A105', '#A106', '#A107', '#A108', '#A109',
-  '#A110', '#A111', '#A112', '#A113', '#A114', '#A115', '#A116', '#A117', '#A118',
-];
+///
+/// 用 [Set] 使气泡行内 `contains` 判定为 O(1)；`const Set` 底层是
+/// [LinkedHashSet]，保持声明顺序，选择器遍历顺序不变。
+const Set<String> kGameEmojiCodes = {
+  '#A101',
+  '#A102',
+  '#A103',
+  '#A104',
+  '#A105',
+  '#A106',
+  '#A107',
+  '#A108',
+  '#A109',
+  '#A110',
+  '#A111',
+  '#A112',
+  '#A113',
+  '#A114',
+  '#A115',
+  '#A116',
+  '#A117',
+  '#A118',
+};
 
 /// 表情码 → Unicode 表示（无映射时返回原文）。
 String emojiRepr(String code) => kChatEmoji[code] ?? code;
 
 /// 把文本里的表情码替换为 Unicode（逐个替换已知码，MNChat 自身气泡显示用）。
 String decodeEmojiCodes(String text) {
-  if (text.isEmpty || (!text.contains('#A1') && !text.contains('#A3'))) return text;
+  if (text.isEmpty || (!text.contains('#A1') && !text.contains('#A3'))) {
+    return text;
+  }
   var out = text;
   for (final e in kChatEmoji.entries) {
     if (out.contains(e.key)) out = out.replaceAll(e.key, e.value);

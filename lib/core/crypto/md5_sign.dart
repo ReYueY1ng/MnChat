@@ -7,30 +7,40 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart' as crypto;
 
 import 'encoding.dart' show luaUrlEncode;
+import 'protocol_keys.dart';
 
-/// Auth key used for login message signing.
-const String loginAuthKey = '2ddb7619717147439c83ab022e9d4d38';
-
-/// Auth key used for room/friend operations.
-const String roomAuthKey = 'f5711eb1640712de051e5aedc35329c3';
-
-/// Auth key used for ChatPush allocation.
-const String chatpushAuthKey = '#Chat@Push.99#';
-
-/// Private key used by `http_getParamMD5` for general API requests.
-const String httpGetParamKey = '3dbc5f33add11d1af78ba2af365e0952';
+// Re-export protocol keys for backward compatibility (services import from here).
+export 'protocol_keys.dart'
+    show loginAuthKey, roomAuthKey, chatpushAuthKey, httpGetParamKey;
 
 /// Keys excluded from `http_getParamMD5` hash.
 const Set<String> _paramMd5Exclude = {
-  'content', 'title', 'nickname', 'json', 'test',
-  'item_type_ids', 'md5', 'log', 'content_ctx', 'auth',
+  'content',
+  'title',
+  'nickname',
+  'json',
+  'test',
+  'item_type_ids',
+  'md5',
+  'log',
+  'content_ctx',
+  'auth',
 };
 
 /// Keys whitelisted in `http_getParamMD5_roomServer` hash.
 const Set<String> _roomServerKeys = {
-  'country', 'time', 'is_empty_night', 'game_label',
-  'page_size', 'page', 'count', 'cmd', 's2t', 'map_type',
-  'uin', 'lang',
+  'country',
+  'time',
+  'is_empty_night',
+  'game_label',
+  'page_size',
+  'page',
+  'count',
+  'cmd',
+  's2t',
+  'map_type',
+  'uin',
+  'lang',
 };
 
 String _md5(String body) => crypto.md5.convert(utf8.encode(body)).toString();
@@ -83,7 +93,9 @@ String httpGetParamMd5(
   combined['s2t'] = s2t;
   combined['encrypt_ver'] = '3';
 
-  final keys = combined.keys.where((k) => !_paramMd5Exclude.contains(k)).toList()..sort();
+  final keys =
+      combined.keys.where((k) => !_paramMd5Exclude.contains(k)).toList()
+        ..sort();
   final parts = keys.map((k) => '$k=${luaUrlEncode(combined[k]!)}').join('&');
   return _md5('$parts$key');
 }
@@ -102,7 +114,8 @@ String httpGetParamMd5RoomServer(
   combined['s2t'] = s2t;
   combined['encrypt_ver'] = '2';
 
-  final keys = combined.keys.where((k) => _roomServerKeys.contains(k)).toList()..sort();
+  final keys = combined.keys.where((k) => _roomServerKeys.contains(k)).toList()
+    ..sort();
   final parts = keys.map((k) => '$k=${combined[k]!}').join('&');
   return _md5('$parts$roomAuthKey');
 }
@@ -114,8 +127,14 @@ String httpGetS2Act(String act, int timeVal, String s2, int uin, String s2t) {
 }
 
 /// Per-act branching sign (http.lua:620-646).
-String httpGetS1GuardMap(String act, int timeVal, String s2, int uin, String s2t,
-    {String deviceId = ''}) {
+String httpGetS1GuardMap(
+  String act,
+  int timeVal,
+  String s2,
+  int uin,
+  String s2t, {
+  String deviceId = '',
+}) {
   if (act == 'ab_test_all') {
     final hash = _md5('$timeVal$s2$uin');
     return 'time=$timeVal&uin=$uin&auth=$hash&s2t=$s2t';
@@ -158,8 +177,13 @@ String httpGetRealNameMobileSum(
 }
 
 /// `MD5(sortedParams + ROOM_AUTH_KEY)` — CreateFriendRequest.finish.
-String createFriendRequestSign(String sortedParams) => _md5('$sortedParams$roomAuthKey');
+String createFriendRequestSign(String sortedParams) =>
+    _md5('$sortedParams$roomAuthKey');
 
 /// `http_get_s1` signing for group chat requests.
-String createGroupChatRequestSign(int timeVal, String s2, int uin, String s2t) =>
-    httpGetS1(timeVal, s2, uin, s2t);
+String createGroupChatRequestSign(
+  int timeVal,
+  String s2,
+  int uin,
+  String s2t,
+) => httpGetS1(timeVal, s2, uin, s2t);

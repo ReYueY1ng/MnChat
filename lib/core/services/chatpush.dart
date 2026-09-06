@@ -4,7 +4,6 @@
 library;
 
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 import 'dart:math';
 
@@ -59,9 +58,10 @@ class ChatPushClient {
   static const String kProdLb = 'https://chatpush.mini1.cn:19602';
 
   ChatPushClient({int env = 0, String? lbUrl, Dio? dio})
-      : _lbUrl = lbUrl ??
-            (kIsWeb ? backendChatpush(env) : (kChatpushLbUrls[env] ?? kProdLb)),
-        _dio = dio ?? createDio();
+    : _lbUrl =
+          lbUrl ??
+          (kIsWeb ? backendChatpush(env) : (kChatpushLbUrls[env] ?? kProdLb)),
+      _dio = dio ?? createDio();
 
   // ── alloc ─────────────────────────────────────────────────────────────
 
@@ -131,9 +131,15 @@ class ChatPushClient {
     final extdata = Uri.encodeComponent(b64);
 
     final loginauth = md5Token(timeVal, s2, uin);
-    final auth = md5Sign([timeVal.toString(), chatpushAuthKey, uin.toString(), extdata]);
+    final auth = md5Sign([
+      timeVal.toString(),
+      chatpushAuthKey,
+      uin.toString(),
+      extdata,
+    ]);
 
-    final url = '$_lbUrl/minilb/rpc'
+    final url =
+        '$_lbUrl/minilb/rpc'
         '?uid=$uin&time=$timeVal&auth=$auth&loginauth=$loginauth&s2t=$s2t';
     final resp = await _dio.post(url, data: extdata);
     final text = resp.data.toString();
@@ -143,7 +149,9 @@ class ChatPushClient {
       if (decoded is List) return decoded;
       return [decoded];
     } catch (e) {
-      throw ChatPushError('rpcHttp decode failed: $e (raw=${text.substring(0, text.length > 60 ? 60 : text.length)})');
+      throw ChatPushError(
+        'rpcHttp decode failed: $e (raw=${text.substring(0, text.length > 60 ? 60 : text.length)})',
+      );
     }
   }
 
@@ -168,7 +176,8 @@ class ChatPushClient {
     final auth = md5Sign([timeVal.toString(), chatpushAuthKey, uin.toString()]);
     final reconnectParam = reconnect ? '&reconnect=1' : '';
     final uri = Uri.parse(
-        'ws://$host/minigate/gate?uid=$uin&token=$token&time=$timeVal&auth=$auth&cltversion=$kCltVersion&apiid=$apiId$reconnectParam');
+      'ws://$host/minigate/gate?uid=$uin&token=$token&time=$timeVal&auth=$auth&cltversion=$kCltVersion&apiid=$apiId$reconnectParam',
+    );
     final channel = WebSocketChannel.connect(uri);
     return ChatPushConnection(
       channel,
@@ -192,17 +201,25 @@ class ChatPushConnection {
   bool _closed = false;
 
   final Map<int, Completer<ChatPushRpcResult>> _pending = {};
-    final Set<String> _recvedOk = LinkedHashSet();
-    static const int _kMaxRecvedOk = 1000;
+  final Set<String> _recvedOk = <String>{};
+  static const int _kMaxRecvedOk = 1000;
   int _seq = 0;
   StreamSubscription? _sub;
   Timer? _heartbeat;
 
-  ChatPushConnection(this._channel,
-      {this.authToken, this.onPush, this.onRpc, this.onClosed}) {
+  ChatPushConnection(
+    this._channel, {
+    this.authToken,
+    this.onPush,
+    this.onRpc,
+    this.onClosed,
+  }) {
     _seq = DateTime.now().microsecondsSinceEpoch % 100000;
     _sub = _channel.stream.listen(_onMessage, onDone: _onDone, onError: (_) {});
-    _heartbeat = Timer.periodic(const Duration(seconds: 10), (_) => _sendHeartbeat());
+    _heartbeat = Timer.periodic(
+      const Duration(seconds: 10),
+      (_) => _sendHeartbeat(),
+    );
     // 连接打开 → 立即发 {21, authToken} 握手（container.lua:1290-1297）
     _sendHandshake();
   }
@@ -241,16 +258,23 @@ class ChatPushConnection {
   }
 
   /// RPC 请求（JSON + rotate-XOR 编码），返回响应 Future。
-  Future<ChatPushRpcResult> sendRpc(String svc, String method, List<dynamic> args,
-      {Duration timeout = const Duration(seconds: 15), Map<String, Object?>? commParam}) async {
+  Future<ChatPushRpcResult> sendRpc(
+    String svc,
+    String method,
+    List<dynamic> args, {
+    Duration timeout = const Duration(seconds: 15),
+    Map<String, Object?>? commParam,
+  }) async {
     final seq = _nextSeq();
     final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
-    final comm = commParam ?? <String, Object?>{
-      'session_id': _randId(),
-      'log_id': _randId(),
-      'scene_id': '0',
-      'game_session_id': '',
-    };
+    final comm =
+        commParam ??
+        <String, Object?>{
+          'session_id': _randId(),
+          'log_id': _randId(),
+          'scene_id': '0',
+          'game_session_id': '',
+        };
     final msg = <dynamic>[0, svc, method, seq, msec, args, comm];
     final completer = Completer<ChatPushRpcResult>();
     _pending[seq] = completer;
@@ -270,7 +294,9 @@ class ChatPushConnection {
 
   void _sendHeartbeat() {
     final seq = _nextSeq();
-    _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[0, seq]))));
+    _channel.sink.add(
+      chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[0, seq]))),
+    );
   }
 
   void _onMessage(dynamic raw) {
@@ -282,7 +308,9 @@ class ChatPushConnection {
       return;
     }
     if (msg.isEmpty) return;
-    final msgType = msg[0] is int ? msg[0] as int : int.tryParse('${msg[0]}') ?? -1;
+    final msgType = msg[0] is int
+        ? msg[0] as int
+        : int.tryParse('${msg[0]}') ?? -1;
 
     if (msgType == 1 && msg.length >= 4) {
       // 两种 RPC 响应形态：
@@ -319,7 +347,9 @@ class ChatPushConnection {
       if (completer != null && !completer.isCompleted) {
         completer.complete(ChatPushRpcResult(seq, 0, msg[2], null));
       }
-      _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[1, seq]))));
+      _channel.sink.add(
+        chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[1, seq]))),
+      );
       return;
     }
 
@@ -327,17 +357,19 @@ class ChatPushConnection {
     // 帧结构 (0-indexed): [0]=msg_type, [1]=servicename, [2]=methodname,
     //                     [3]=seq, [4]=ts, [5]=args_or_result
     // Lua (1-indexed): msg_type, msgseq = msg[1], msg[4] → 对应 [0] 和 [3]
-      if (msgType == 11 && msg.length >= 2) {
-        final msgSeq = msg.length > 3 ? '${msg[3]}' : '';
-        _channel.sink.add(chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[11, msgSeq]))));
-        final baseSeq = msgSeq.split('_').isEmpty ? '' : msgSeq.split('_').first;
-        if (baseSeq.isNotEmpty) {
-          if (_recvedOk.contains(baseSeq)) return;
-          _recvedOk.add(baseSeq);
-          if (_recvedOk.length > _kMaxRecvedOk) {
-            _truncateRecvedOk();
-          }
+    if (msgType == 11 && msg.length >= 2) {
+      final msgSeq = msg.length > 3 ? '${msg[3]}' : '';
+      _channel.sink.add(
+        chatpushEncrypt(utf8.encode(jsonEncode(<dynamic>[11, msgSeq]))),
+      );
+      final baseSeq = msgSeq.split('_').isEmpty ? '' : msgSeq.split('_').first;
+      if (baseSeq.isNotEmpty) {
+        if (_recvedOk.contains(baseSeq)) return;
+        _recvedOk.add(baseSeq);
+        if (_recvedOk.length > _kMaxRecvedOk) {
+          _truncateRecvedOk();
         }
+      }
       if (msg.length >= 6) {
         final service = msg[1]?.toString() ?? '';
         final methodName = msg[2]?.toString() ?? '';

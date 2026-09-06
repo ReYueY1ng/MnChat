@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/models/messages.dart';
+import 'core/services/chat_service.dart' show ChatEvent;
 import 'core/services/native_bridge.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
@@ -44,6 +47,9 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 是否存在可用的自动登录凭据（启动时先读一次，用于跳过登录页停留）。
   bool _autoLoginAvailable = false;
 
+  /// 后台通知订阅（dispose 时必须取消，否则泄漏）。
+  StreamSubscription<ChatEvent>? _notifySub;
+
   @override
   void initState() {
     super.initState();
@@ -60,15 +66,17 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     setState(() {
       _autoLoginAvailable = creds != null;
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _tryAutoLogin());
     // 后台新消息通知监听
     _subscribeNotifications();
+    // 等设置读取完成后再尝试自动登录，消除与启动页的竞态
+    await _tryAutoLogin();
   }
 
   /// 订阅 ChatService 事件流：收新消息 → 系统通知（仅后台时弹，避免打扰前台）。
   void _subscribeNotifications() {
     final service = ref.read(chatServiceProvider);
-    service.eventStream.listen((event) {
+    _notifySub?.cancel();
+    _notifySub = service.eventStream.listen((event) {
       // 通知开关即时生效
       if (!ref.read(notifyEnabledProvider)) return;
       // 自己发的消息不通知
@@ -105,6 +113,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _notifySub?.cancel();
+    _notifySub = null;
     super.dispose();
   }
 
@@ -205,7 +215,9 @@ class _MainShellState extends ConsumerState<MainShell> {
     final session = activeSession == null
         ? null
         : findActive(list, activeSession);
-    // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）
+    // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）。
+    // 注意：_chatInstance 在无活动会话时**有意保留**（IndexedStack 保活设计，
+    // 返回列表后聊天 UI 状态不丢）；如需释放内存可在会话关闭时另行处理。
     if (activeSession != null) {
       _chatInstance = ChatPage(
         key: ValueKey('${activeSession.type.name}_${activeSession.id}'),

@@ -34,7 +34,8 @@ final chatBridgeProvider = Provider<ChatBridge>((ref) {
 
 /// AppDatabase 单例（main() 中用 drift_flutter 构建后 override）。
 final databaseProvider = Provider<AppDatabase>(
-    (ref) => throw UnimplementedError('AppDatabase must be created in main()'));
+  (ref) => throw UnimplementedError('AppDatabase must be created in main()'),
+);
 
 /// 应用设置存储（自动登录凭据等）单例 —— 基于 Drift 设置表（Web/原生统一）。
 final settingsProvider = Provider<SettingsStore>(
@@ -57,7 +58,9 @@ class AuthState {
   });
 }
 
-final authProvider = NotifierProvider<AuthNotifier, AuthState>(AuthNotifier.new);
+final authProvider = NotifierProvider<AuthNotifier, AuthState>(
+  AuthNotifier.new,
+);
 
 class AuthNotifier extends Notifier<AuthState> {
   StreamSubscription<ChatServiceState>? _sub;
@@ -65,18 +68,27 @@ class AuthNotifier extends Notifier<AuthState> {
   @override
   AuthState build() {
     final service = ref.watch(chatServiceProvider);
-    _sub ??= service.stateStream.listen((s) {
-      final loggedIn = s == ChatServiceState.connected ||
-          s == ChatServiceState.connectingChatPush;
-      state = AuthState(
-        isLoggedIn: loggedIn,
-        auth: service.auth,
-        isBusy: s == ChatServiceState.authenticating,
-        error: s == ChatServiceState.error ? service.lastError : null,
-      );
+    _sub ??= service.stateStream.listen((s) => state = _stateFrom(service));
+    ref.onDispose(() {
+      _sub?.cancel();
+      _sub = null;
     });
-    ref.onDispose(() => _sub?.cancel());
-    return const AuthState();
+    // 同步读取 service 当前状态作为初始值：service 可能已处于 connected
+    // （如自动登录已发起），只等流事件会漏掉初始态导致 UI 误判未登录。
+    return _stateFrom(service);
+  }
+
+  AuthState _stateFrom(ChatService service) {
+    final s = service.state;
+    final loggedIn =
+        s == ChatServiceState.connected ||
+        s == ChatServiceState.connectingChatPush;
+    return AuthState(
+      isLoggedIn: loggedIn,
+      auth: service.auth,
+      isBusy: s == ChatServiceState.authenticating,
+      error: s == ChatServiceState.error ? service.lastError : null,
+    );
   }
 
   /// 登录；成功返回 true。
@@ -113,7 +125,8 @@ class AuthNotifier extends Notifier<AuthState> {
 
   void logout() {
     final service = ref.read(chatServiceProvider);
-    service.reset();
+    // reset() 是 async：fire-and-forget，出错也交由内部处理，不阻塞登出流程
+    unawaited(service.reset());
     state = const AuthState();
   }
 }
@@ -134,9 +147,10 @@ class ActiveSession {
   int get hashCode => Object.hash(type, id);
 }
 
-final activeSessionProvider = NotifierProvider<ActiveSessionNotifier, ActiveSession?>(
-  ActiveSessionNotifier.new,
-);
+final activeSessionProvider =
+    NotifierProvider<ActiveSessionNotifier, ActiveSession?>(
+      ActiveSessionNotifier.new,
+    );
 
 class ActiveSessionNotifier extends Notifier<ActiveSession?> {
   @override
@@ -182,25 +196,31 @@ enum SessionSortMode {
   final String key;
   final String label;
 
-  static SessionSortMode fromKey(String? k) => SessionSortMode.values.firstWhere(
-        (m) => m.key == k,
-        orElse: () => SessionSortMode.time,
-      );
+  static SessionSortMode fromKey(String? k) => SessionSortMode.values
+      .firstWhere((m) => m.key == k, orElse: () => SessionSortMode.time);
 }
 
 /// 会话排序方式（持久化到设置）。
-final sessionSortModeProvider = NotifierProvider<SessionSortModeNotifier, SessionSortMode>(
-  SessionSortModeNotifier.new,
-);
+final sessionSortModeProvider =
+    NotifierProvider<SessionSortModeNotifier, SessionSortMode>(
+      SessionSortModeNotifier.new,
+    );
 
 class SessionSortModeNotifier extends Notifier<SessionSortMode> {
   @override
   SessionSortMode build() {
-    // 初始化：从设置读取
-    ref.read(settingsProvider).getString(SettingsKeys.sortMode).then((k) {
-      final m = SessionSortMode.fromKey(k);
-      if (m != state) state = m;
-    });
+    // 初始化：从设置读取（异步；provider 可能先被 dispose，用 ref.mounted 保护）
+    ref
+        .read(settingsProvider)
+        .getString(SettingsKeys.sortMode)
+        .then((k) {
+          if (!ref.mounted) return;
+          final m = SessionSortMode.fromKey(k);
+          if (m != state) state = m;
+        })
+        .catchError((Object _) {
+          // 设置读取失败保持默认值
+        });
     return SessionSortMode.time;
   }
 
@@ -211,14 +231,23 @@ class SessionSortModeNotifier extends Notifier<SessionSortMode> {
 }
 
 /// 新消息通知开关（运行时即时生效，持久化到设置）。
-final notifyEnabledProvider = NotifierProvider<NotifyEnabledNotifier, bool>(NotifyEnabledNotifier.new);
+final notifyEnabledProvider = NotifierProvider<NotifyEnabledNotifier, bool>(
+  NotifyEnabledNotifier.new,
+);
 
 class NotifyEnabledNotifier extends Notifier<bool> {
   @override
   bool build() {
-    ref.read(settingsProvider).getBool(SettingsKeys.notifyEnabled, fallback: true).then((v) {
-      if (v != state) state = v;
-    });
+    ref
+        .read(settingsProvider)
+        .getBool(SettingsKeys.notifyEnabled, fallback: true)
+        .then((v) {
+          if (!ref.mounted) return;
+          if (v != state) state = v;
+        })
+        .catchError((Object _) {
+          // 设置读取失败保持默认值
+        });
     return true;
   }
 

@@ -66,16 +66,22 @@ ChatOps computeChatOps(List<Message> current, List<Message> target) {
 
   final missing = target.where((m) => !currentById.containsKey(m.id)).toList();
   final stale = current.where((m) => !targetIds.contains(m.id)).toList();
-  final hasUpdate = target.any((m) => currentById[m.id] != null && currentById[m.id] != m);
+  final hasUpdate = target.any(
+    (m) =>
+        currentById[m.id] != null &&
+        _messageFingerprint(currentById[m.id]!) != _messageFingerprint(m),
+  );
 
   if (missing.isEmpty && stale.isEmpty && !hasUpdate) return const NoOp();
 
   if (stale.isEmpty && !hasUpdate) {
     final oldest = current.isEmpty ? null : current.first;
-    final allOlder = oldest == null ||
+    final allOlder =
+        oldest == null ||
         missing.every((m) => _createdAt(m).isBefore(_createdAt(oldest)));
     if (allOlder) {
-      final sorted = [...missing]..sort((a, b) => _createdAt(a).compareTo(_createdAt(b)));
+      final sorted = [...missing]
+        ..sort((a, b) => _createdAt(a).compareTo(_createdAt(b)));
       return InsertAll(sorted, 0);
     }
   }
@@ -87,6 +93,24 @@ ChatOps computeChatOps(List<Message> current, List<Message> target) {
 final DateTime _epochZero = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
 DateTime _createdAt(Message m) => m.createdAt ?? _epochZero;
+
+/// 消息内容指纹：判断同 id 消息内容是否变化。
+///
+/// flutter_chat_core 的 [Message] 是 sealed class，不同实例即使内容相同也可能
+/// 不相等，故按内容字段派生稳定字符串比较。本项目只产生三种类型（见
+/// [chatMessageToMessage]）：TextMessage / CustomMessage / SystemMessage。
+/// metadata 用 [Map.toString] 即可：同一逻辑消息两次映射的 metadata 内容与
+/// 插入顺序一致。
+String _messageFingerprint(Message m) {
+  final base = '${m.id}|${m.authorId}|${m.createdAt?.millisecondsSinceEpoch}';
+  return switch (m) {
+    TextMessage(:final text, :final metadata) =>
+      '$base|T|$text|${metadata?.toString()}',
+    CustomMessage(:final metadata) => '$base|C|${metadata?.toString()}',
+    SystemMessage(:final text) => '$base|S|$text',
+    _ => '$base|U',
+  };
+}
 
 // ── 历史映射 ──────────────────────────────────────────────────────────────
 
@@ -135,25 +159,47 @@ class ChatBridge {
     if (existing != null) return existing;
 
     final controller = InMemoryChatController(
-      messages: chatHistoryToMessages(_service.historyOf(type, sessionId), type, sessionId),
+      messages: chatHistoryToMessages(
+        _service.historyOf(type, sessionId),
+        type,
+        sessionId,
+      ),
     );
     _controllers[key] = controller;
     return controller;
+  }
+
+  /// 释放指定会话的控制器（会话关闭时调用）。
+  ///
+  /// 幂等：该会话无控制器时什么都不做。释放后再次 [controllerFor] 同一会话
+  /// 会新建控制器。
+  void release(ChatSessionType type, int sessionId) {
+    final c = _controllers.remove(sessionKey(type, sessionId));
+    c?.dispose();
   }
 
   /// 处理一条事件：该会话已有控制器则 reconcile，否则忽略（不抛异常）。
   ///
   /// 公开以便测试直接驱动重复投递场景；生产路径由 eventStream 订阅调用。
   void handleEvent(ChatEvent event) {
-    final controller = _controllers[sessionKey(event.sessionType, event.sessionId)];
+    final controller =
+        _controllers[sessionKey(event.sessionType, event.sessionId)];
     if (controller == null) return;
     reconcile(controller, event.sessionType, event.sessionId);
   }
 
   /// 把 [controller] 的内容对齐到 service 当前历史。
-  void reconcile(ChatController controller, ChatSessionType type, int sessionId) {
+  void reconcile(
+    ChatController controller,
+    ChatSessionType type,
+    int sessionId,
+  ) {
     final current = List.of(controller.messages);
-    final target = chatHistoryToMessages(_service.historyOf(type, sessionId), type, sessionId);
+    final target = chatHistoryToMessages(
+      _service.historyOf(type, sessionId),
+      type,
+      sessionId,
+    );
 
     switch (computeChatOps(current, target)) {
       case InsertAll(:final messages, :final index):

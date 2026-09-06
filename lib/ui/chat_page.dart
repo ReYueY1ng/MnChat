@@ -3,6 +3,7 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../chat/chat_bridge.dart' show ChatBridge;
 import '../chat/message_adapter.dart';
 import '../core/chat_emoji.dart' show kGameEmojiCodes;
 import '../core/emoticon.dart' show EmoticonImage;
@@ -31,9 +32,19 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   bool _historyLoaded = false;
   final TextEditingController _composerController = TextEditingController();
 
+  /// 桥接层引用：在 [initState] 中保存，供 [dispose] 释放控制器使用——
+  /// Riverpod 3.x 禁止在 State.dispose 中再访问 ref，必须提前持有。
+  late final ChatBridge _bridge;
+
+  /// 本会话的聊天控制器。在 [initState] 中一次性取得（[ChatBridge.controllerFor]
+  /// 有创建/缓存副作用，不能在 build 中调用），build 直接复用。
+  late final ChatController _controller;
+
   @override
   void initState() {
     super.initState();
+    _bridge = ref.read(chatBridgeProvider);
+    _controller = _bridge.controllerFor(widget.type, widget.sessionId);
     // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）
     ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -50,6 +61,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   void dispose() {
+    // 释放本会话控制器，避免 ChatBridge 的控制器映射随会话开关累积泄漏。
+    _bridge.release(widget.type, widget.sessionId);
     _composerController.dispose();
     super.dispose();
   }
@@ -77,15 +90,23 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   IconButton(
                     tooltip: isWide ? '关闭' : '返回',
                     icon: Icon(isWide ? Icons.close : Icons.arrow_back),
-                    onPressed: () => ref.read(activeSessionProvider.notifier).close(),
+                    onPressed: () =>
+                        ref.read(activeSessionProvider.notifier).close(),
                   ),
-                  Icon(widget.type == ChatSessionType.group ? Icons.group : Icons.person,
-                      size: 20),
+                  Icon(
+                    widget.type == ChatSessionType.group
+                        ? Icons.group
+                        : Icons.person,
+                    size: 20,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       displayName,
-                      style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -114,39 +135,75 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         // 消息列表 + 输入区（flutter_chat_ui Chat 组件）
         Expanded(
           child: Chat(
-            chatController: ref.watch(chatBridgeProvider).controllerFor(widget.type, widget.sessionId),
+            chatController: _controller,
             currentUserId: myUin.toString(),
             resolveUser: _resolveUser,
             onMessageSend: _send,
             theme: ChatTheme.fromThemeData(Theme.of(context)),
             builders: Builders(
-              textMessageBuilder: (context, message, index, {required isSentByMe, groupStatus}) =>
-                  _InlineEmojiBubble(message: message, isSentByMe: isSentByMe),
-              customMessageBuilder: (context, message, index, {required isSentByMe, groupStatus}) =>
-                  Align(
-                    alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+              textMessageBuilder:
+                  (
+                    context,
+                    message,
+                    index, {
+                    required isSentByMe,
+                    groupStatus,
+                  }) => _InlineEmojiBubble(
+                    message: message,
+                    isSentByMe: isSentByMe,
+                  ),
+              customMessageBuilder:
+                  (
+                    context,
+                    message,
+                    index, {
+                    required isSentByMe,
+                    groupStatus,
+                  }) => Align(
+                    alignment: isSentByMe
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
                     child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.62),
+                      constraints: BoxConstraints(
+                        maxWidth: MediaQuery.of(context).size.width * 0.62,
+                      ),
                       child: Container(
-                        margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+                        margin: const EdgeInsets.symmetric(
+                          vertical: 2,
+                          horizontal: 8,
+                        ),
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest,
+                          color: Theme.of(context)
+                              .colorScheme
+                              .surfaceContainerHighest,
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Theme.of(context).colorScheme.outlineVariant),
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
+                          ),
                         ),
                         child: Column(
-                          crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+                          crossAxisAlignment: isSentByMe
+                              ? CrossAxisAlignment.end
+                              : CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             if (message.createdAt != null)
-                              Text(_fmtFullTime(message.createdAt!.toLocal()),
-                                  style: Theme.of(context).textTheme.labelSmall
-                                      ?.copyWith(color: Theme.of(context).colorScheme.outline)),
+                              Text(
+                                _fmtFullTime(message.createdAt!.toLocal()),
+                                style: Theme.of(context).textTheme.labelSmall
+                                    ?.copyWith(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .outline,
+                                    ),
+                              ),
                             const SizedBox(height: 2),
                             Text(
                               customMessageText(message),
-                              style: const TextStyle(fontStyle: FontStyle.italic),
+                              style: const TextStyle(
+                                fontStyle: FontStyle.italic,
+                              ),
                             ),
                           ],
                         ),
@@ -174,8 +231,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   void _insertText(String text) {
     final controller = _composerController;
     final sel = controller.selection;
-    final start = (sel.isValid ? sel.start : controller.text.length).clamp(0, controller.text.length);
-    final end = (sel.isValid ? sel.end : controller.text.length).clamp(0, controller.text.length);
+    final start = (sel.isValid ? sel.start : controller.text.length).clamp(
+      0,
+      controller.text.length,
+    );
+    final end = (sel.isValid ? sel.end : controller.text.length).clamp(
+      0,
+      controller.text.length,
+    );
     controller.value = TextEditingValue(
       text: controller.text.replaceRange(start, end, text),
       selection: TextSelection.collapsed(offset: start + text.length),
@@ -189,7 +252,8 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     if (id == myUin.toString()) {
       return chatUserFor(myUin, nickname: service.myNickname);
     }
-    if (widget.type == ChatSessionType.friend && id == widget.sessionId.toString()) {
+    if (widget.type == ChatSessionType.friend &&
+        id == widget.sessionId.toString()) {
       return chatUserFor(widget.sessionId, nickname: widget.name);
     }
     return chatUserFor(int.tryParse(id) ?? 0);
@@ -212,7 +276,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('发送失败: $e'), backgroundColor: Colors.red.shade400),
+          SnackBar(
+            content: Text('发送失败: $e'),
+            backgroundColor: Colors.red.shade400,
+          ),
         );
       }
     }
@@ -246,7 +313,10 @@ class _ComposerBar extends StatelessWidget {
               borderRadius: BorderRadius.circular(14),
               onTap: () => onInsert(_phrases[i]),
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 4,
+                ),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.surfaceContainerHighest,
                   borderRadius: BorderRadius.circular(14),
@@ -284,10 +354,13 @@ class _ComposerBar extends StatelessWidget {
   }
 
   void _placeholder(BuildContext context, String name) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$name 功能暂未接入')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text('$name 功能暂未接入')));
   }
 
   void _showEmojiPicker(BuildContext context) {
+    // kGameEmojiCodes 是 Set（O(1) contains）；选择器需按下标遍历，取一次有序快照。
+    final codes = kGameEmojiCodes.toList();
     showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -302,18 +375,16 @@ class _ComposerBar extends StatelessWidget {
               crossAxisSpacing: 6,
               childAspectRatio: 1,
             ),
-            itemCount: kGameEmojiCodes.length,
+            itemCount: codes.length,
             itemBuilder: (context, i) {
-              final code = kGameEmojiCodes[i];
+              final code = codes[i];
               return InkWell(
                 borderRadius: BorderRadius.circular(6),
                 onTap: () {
                   Navigator.of(ctx).pop();
                   onInsert(code); // 插入 #A1xx 代码（游戏客户端渲染成它自己的图标）
                 },
-                child: Center(
-                  child: EmoticonImage(code: code, size: 34),
-                ),
+                child: Center(child: EmoticonImage(code: code, size: 34)),
               );
             },
           ),
@@ -328,7 +399,11 @@ class _ToolBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
-  const _ToolBtn({required this.tooltip, required this.icon, required this.onTap});
+  const _ToolBtn({
+    required this.tooltip,
+    required this.icon,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -352,7 +427,8 @@ class _InlineEmojiBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final raw = (message.metadata?['raw'] as String?) ??
+    final raw =
+        (message.metadata?['raw'] as String?) ??
         switch (message) {
           TextMessage m => m.text,
           SystemMessage m => m.text,
@@ -373,13 +449,17 @@ class _InlineEmojiBubble extends StatelessWidget {
             borderRadius: BorderRadius.circular(12),
           ),
           child: Column(
-            crossAxisAlignment: isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment: isSentByMe
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
               if (createdAt != null)
                 Text(
                   _fmtFullTime(createdAt),
-                  style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.outline,
+                  ),
                 ),
               const SizedBox(height: 2),
               Text.rich(TextSpan(children: _spans(raw, theme))),
@@ -399,13 +479,20 @@ class _InlineEmojiBubble extends StatelessWidget {
       if (m.start > pos) spans.add(TextSpan(text: raw.substring(pos, m.start)));
       final tok = m.group(0)!;
       if (kGameEmojiCodes.contains(tok)) {
-        spans.add(WidgetSpan(
-          alignment: PlaceholderAlignment.middle,
-          child: EmoticonImage(code: tok, size: 20),
-        ));
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: EmoticonImage(code: tok, size: 20),
+          ),
+        );
       } else {
         // @提及 → 主题色高亮
-        spans.add(TextSpan(text: tok, style: TextStyle(color: theme.colorScheme.primary)));
+        spans.add(
+          TextSpan(
+            text: tok,
+            style: TextStyle(color: theme.colorScheme.primary),
+          ),
+        );
       }
       pos = m.end;
     }

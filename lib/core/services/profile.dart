@@ -142,9 +142,9 @@ class ProfileClient {
   /// 批量拉取玩家**DIY 自定义头像**（游戏内主界面头像来源）。
   ///
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`:
-  ///   {HttpMap}miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list={uins}&{sign}
+  ///   `{HttpMap}miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list={uins}&{sign}`
   /// 响应结构: `{code:0, data:{ "<uin>": {use_diy, diy_header:{pre_url, pass_url, aduit_fail}, ...} }}`
-  /// 返回 Map<uin, DIY头像URL>（仅 use_diy==1 且 pass_url/pre_url 非空）。
+  /// 返回 Map&lt;uin, DIY头像URL&gt;（仅 use_diy==1 且 pass_url/pre_url 非空）。
   Future<Map<int, String?>> getPersonCenterHeadInfo(List<int> uins) async {
     final out = <int, String?>{};
     if (uins.isEmpty) return out;

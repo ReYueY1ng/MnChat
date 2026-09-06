@@ -6,6 +6,8 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../models/messages.dart';
 import '../storage/app_database.dart';
 import '../storage/chat_mapper.dart';
@@ -17,7 +19,13 @@ import 'profile.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 
 /// 服务状态。
-enum ChatServiceState { unauthenticated, authenticating, connected, connectingChatPush, error }
+enum ChatServiceState {
+  unauthenticated,
+  authenticating,
+  connected,
+  connectingChatPush,
+  error,
+}
 
 /// 收到的新消息事件（好友/群）。
 class ChatEvent {
@@ -55,8 +63,6 @@ class ChatService {
 
   // ── 连接 ───────────────────────────────────────────────────────────────
   ChatPushConnection? _conn;
-  // 主账号长连接（XXTEA+msgpack，承载 buddy 好友服务 RPC）。
-  MainAccountConnection? _mainConn;
   Timer? _reconnectTimer;
   bool _shouldReconnect = false;
   // 首次连过之后置 true；重连时用于拼 URL 的 &reconnect=1（对齐原版）。
@@ -78,12 +84,16 @@ class ChatService {
   // 群成员资料缓存：groupId → (uin → PlayerProfile)。
   final Map<int, Map<int, PlayerProfile>> _groupMemberProfiles = {};
 
+  // ── 排序/过滤缓存（数据变更时置 null，getter 惰性重算，避免热路径反复排序）──
+  List<ChatSession>? _sessionsCache;
+  List<FriendRequest>? _friendReqsCache;
+
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
   // 私有字段无法跨库用 this._db 初始化形参，故保留显式赋值
-  ChatService({AppDatabase? db})
-      : _db = db { // ignore: prefer_initializing_formals
+  ChatService({AppDatabase? db}) : _db = db {
+    // ignore: prefer_initializing_formals
     _login = LoginClient();
     _chatpush = ChatPushClient();
   }
@@ -101,19 +111,26 @@ class ChatService {
   Stream<SessionSnapshot> get sessionStream => _sessionCtrl.stream;
   Stream<List<FriendRequest>> get friendRequestStream => _friendReqCtrl.stream;
 
-  /// 待处理好友申请（pending 优先，按时间倒序）。
-  List<FriendRequest> get friendRequests => List.unmodifiable(
+  /// 待处理好友申请（pending 优先，按时间倒序）。结果缓存，数据变更时失效。
+  List<FriendRequest> get friendRequests =>
+      _friendReqsCache ??= List.unmodifiable(
         _friendRequests
             .where((r) => r.status == FriendRequestStatus.pending)
             .toList()
           ..sort((a, b) => b.time.compareTo(a.time)),
       );
 
-  int get friendRequestCount => _friendRequests.where((r) => r.status == FriendRequestStatus.pending).length;
+  int get friendRequestCount => _friendRequests
+      .where((r) => r.status == FriendRequestStatus.pending)
+      .length;
 
+  /// 会话列表（按最后消息时间倒序）。结果缓存，数据变更时失效。
   List<ChatSession> get sessions =>
-      [..._friendSessions.values, ..._groupSessions.values]
-        ..sort((a, b) => (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0));
+      _sessionsCache ??= [..._friendSessions.values, ..._groupSessions.values]
+        ..sort(
+          (a, b) =>
+              (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0),
+        );
 
   List<Contact> get contacts => List.unmodifiable(_contacts);
 
@@ -121,7 +138,8 @@ class ChatService {
   GroupInfo? groupInfo(int groupId) => _groupInfos[groupId];
 
   /// 群聊成员 uin 列表（拉详情时兜底，不依赖 server 已缓存）。
-  List<int> groupMembers(int groupId) => _groupInfos[groupId]?.members ?? const [];
+  List<int> groupMembers(int groupId) =>
+      _groupInfos[groupId]?.members ?? const [];
 
   /// 群成员资料（昵称/头像），未拉取到则 null。
   PlayerProfile? groupMemberProfile(int groupId, int uin) =>
@@ -131,7 +149,9 @@ class ChatService {
   /// 返回稳定升序副本（缓存以升序为规范，此处兜底保证对外契约）。
   List<ChatMessage> historyOf(ChatSessionType type, int id) =>
       List.unmodifiable(
-        sortMessagesAscending(_messagesCache[_sessionKey(type, id)] ?? const []),
+        sortMessagesAscending(
+          _messagesCache[_sessionKey(type, id)] ?? const [],
+        ),
       );
 
   static String _sessionKey(ChatSessionType type, int id) => '${type.name}_$id';
@@ -157,17 +177,18 @@ class ChatService {
         );
       } catch (e) {
         // WS 心跳失败不阻断（login_v3 的 sign 仍可用）
-        // ignore: avoid_print
-        print('WS heartbeat failed (using login_v3 sign): $e');
+        debugPrint('WS heartbeat failed (using login_v3 sign): $e');
       }
       _auth = auth;
       _friend = FriendClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _group = GroupClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _setState(ChatServiceState.connected);
       await _connectChatPush();
-      await _loadSessions();
+      await _bootstrapSessions();
       final uins = _contacts.map((c) => c.uin).toList();
-      unawaited(_probeBuddyMain(uins)); // 经 chatpush 主动拉在线状态（buddy 方法 usechatpush=true）
+      unawaited(
+        _probeBuddyMain(uins),
+      ); // 经 chatpush 主动拉在线状态（buddy 方法 usechatpush=true）
       return auth;
     } catch (e) {
       _lastError = e.toString();
@@ -196,7 +217,6 @@ class ChatService {
         authToken: auth.jwt, // 握手用（Lua container.conn.token = 登录 jwt）
         reconnect: _hasConnectedOnce, // 重连时 true → URL &reconnect=1（对齐原版，保留在线态）
         onPush: _handlePush,
-        onRpc: _handleRpc,
         onClosed: _onChatpushClosed,
       );
       // 保留旧连接并关闭
@@ -208,7 +228,10 @@ class ChatService {
       _setState(ChatServiceState.connected);
     } catch (e) {
       _lastError = 'ChatPush connect failed: $e';
-      _setState(ChatServiceState.error);
+      // 登录本身已成功（auth 已获取）：不把状态置为 error，保持 connected，
+      // 由后台重连恢复聊天推送——否则 login() 返回成功而 UI 显示失败，
+      // 出现状态不一致。
+      _setState(ChatServiceState.connected);
       _scheduleReconnect();
     }
   }
@@ -226,12 +249,13 @@ class ChatService {
     final conn = _conn; // chatpush 连接
     if (conn == null || uins.isEmpty) return;
     try {
-      final r = await conn.sendRpc('buddysvr', 'batch_friend_info', [uins, false],
-          timeout: const Duration(seconds: 8));
+      final r = await conn.sendRpc('buddysvr', 'batch_friend_info', [
+        uins,
+        false,
+      ], timeout: const Duration(seconds: 8));
       _applyBatchFriendStatus(r.result);
     } catch (e) {
-      // ignore: avoid_print
-      print('[main batch_friend_info] ERR: $e');
+      debugPrint('[main batch_friend_info] ERR: $e');
     }
   }
 
@@ -250,7 +274,10 @@ class ChatService {
       final online = info['online'] == true || info['online'] == 1;
       final status = _friendStatusText(info);
       if (session.isOnline != online || session.gameStatus != status) {
-        _friendSessions[uin] = session.copyWith(isOnline: online, gameStatus: status);
+        _friendSessions[uin] = session.copyWith(
+          isOnline: online,
+          gameStatus: status,
+        );
         updated = true;
       }
     }
@@ -258,22 +285,34 @@ class ChatService {
   }
 
   /// 从 baseinfo.statusinfo 生成游玩状态文本（游戏中/组队中/在线）。
-  /// 从 baseinfo.statusinfo 生成游玩状态文本（游戏中/组队中/在线）。
   /// statusinfo 结构 [ingame, roomID, 房数据] —— 房数据可能是 Map 或**序列化字符串**。
   static String? _friendStatusText(Map<String, Object?> info) {
     final si = info['statusinfo'];
-    if (si is! List || si.isEmpty) return null;
-    final kind = si[0]?.toString();
+    final kind = _statusKind(si);
     if (kind == 'ingame') {
-      final room = si.length >= 3 ? _statusRoomData(si[2]) : null;
+      final room = si is List && si.length >= 3 ? _statusRoomData(si[2]) : null;
       final map = room?['mapname']?.toString() ?? '';
       final cur = room?['curPlayerNum'];
       final max = room?['maxPlayerNum'];
-      final playerText = (cur is num && max is num) ? '(${cur.toInt()}/${max.toInt()})' : '';
+      final playerText = (cur is num && max is num)
+          ? '(${cur.toInt()}/${max.toInt()})'
+          : '';
       return '游戏中${map.isNotEmpty ? ' $map' : ''}$playerText';
     }
     if (kind == 'inteam') return '组队中';
     return null; // outgame / 未知 → 在线但无游玩状态
+  }
+
+  /// 从 statusinfo 提取状态类别（ingame/inteam/其余返回 null）。
+  /// statusinfo 可能是 List（[kind, ...]）或序列化字符串（含 ingame/inteam 字样）。
+  static String? _statusKind(Object? si) {
+    if (si is List && si.isNotEmpty) return si[0]?.toString();
+    if (si is String) {
+      final lower = si.toLowerCase();
+      if (lower.contains('ingame')) return 'ingame';
+      if (lower.contains('inteam')) return 'inteam';
+    }
+    return null;
   }
 
   /// statusinfo 第 3 项可能是 Map 或序列化字符串（LuaTable/JSON）。
@@ -295,7 +334,7 @@ class ChatService {
   void _scheduleReconnect() {
     if (!_shouldReconnect || _reconnectTimer?.isActive == true) return;
     _reconnectTimer = Timer(const Duration(seconds: 10), () {
-      if (_shouldReconnect) _connectChatPush();
+      if (_shouldReconnect) unawaited(_connectChatPush());
     });
   }
 
@@ -320,9 +359,8 @@ class ChatService {
     //   args = ["friend.msg", {...data...}]
     // 所以事件名不是 "friend.msg"，data 在 args[1]。
     final eventName = push.eventName;
-    // 调试：打印所有收到的推送（尤其好友上线/下线事件）供抓包校准。
-    // ignore: avoid_print
-    print('[push] $eventName args=${push.args}');
+    // 调试：只打印事件名与参数条数，不打印消息正文（隐私/日志泄漏）。
+    debugPrint('[push] $eventName args=${push.args.length}');
     if (eventName == 'client.on' && push.args.length >= 2) {
       final kind = push.args[0]?.toString();
       final data = push.args[1];
@@ -335,7 +373,9 @@ class ChatService {
     if (eventName == 'buddysvr.speek') {
       // speek(ts, msg, who, speeker) 位置参数
       if (push.args.length >= 3) {
-        final ts = (push.args[0] as num?)?.toInt() ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        final ts =
+            (push.args[0] as num?)?.toInt() ??
+            DateTime.now().millisecondsSinceEpoch ~/ 1000;
         final msg = push.args[1]?.toString() ?? '';
         final who = (push.args[2] as num?)?.toInt() ?? 0;
         if (who != 0 && who != myUin) {
@@ -379,19 +419,18 @@ class ChatService {
       case 'group_chat_notify':
         // 群聊推送: {cmd, extend_data}，消息体藏在 extend_data (url→b64→json)
         final rawExt = data['extend_data']?.toString();
-        final notify = rawExt != null ? GroupNotify.fromExtendData(rawExt) : null;
+        final notify = rawExt != null
+            ? GroupNotify.fromExtendData(rawExt)
+            : null;
         if (notify != null) {
-          final m = ChatMessage.fromGroupNotify(
-            {
-              'uin': notify.uin,
-              'text': notify.text,
-              'send_time': notify.sendTime,
-              'extend_data': notify.shareData,
-              'groupid': notify.groupId,
-              'Type': notify.type, // SendMsg/ShareMsg/CreateGroup → 消息类型
-            },
-            groupId: notify.groupId,
-          );
+          final m = ChatMessage.fromGroupNotify({
+            'uin': notify.uin,
+            'text': notify.text,
+            'send_time': notify.sendTime,
+            'extend_data': notify.shareData,
+            'groupid': notify.groupId,
+            'Type': notify.type, // SendMsg/ShareMsg/CreateGroup → 消息类型
+          }, groupId: notify.groupId);
           _upsertGroupMessage(notify.groupId, m);
         }
         break;
@@ -425,11 +464,21 @@ class ChatService {
     if (existing != null) {
       _friendRequests.remove(existing);
       _friendRequests.add(
-        FriendRequest(uin: uin, name: existing.name, avatar: existing.avatar, time: time),
+        FriendRequest(
+          uin: uin,
+          name: existing.name,
+          avatar: existing.avatar,
+          time: time,
+        ),
       );
     } else {
       _friendRequests.add(
-        FriendRequest(uin: uin, name: _friendNickname(data), avatar: _friendAvatar(data), time: time),
+        FriendRequest(
+          uin: uin,
+          name: _friendNickname(data),
+          avatar: _friendAvatar(data),
+          time: time,
+        ),
       );
     }
     _emitFriendRequests();
@@ -450,17 +499,19 @@ class ChatService {
     if (idx >= 0) {
       final r = _friendRequests[idx];
       _friendRequests[idx] = FriendRequest(
-        uin: r.uin, name: r.name, avatar: r.avatar, time: r.time, status: status);
+        uin: r.uin,
+        name: r.name,
+        avatar: r.avatar,
+        time: r.time,
+        status: status,
+      );
     }
     _emitFriendRequests();
   }
 
   void _emitFriendRequests() {
+    _friendReqsCache = null; // 好友申请数据变更 → 下次访问重算
     if (!_friendReqCtrl.isClosed) _friendReqCtrl.add(friendRequests);
-  }
-
-  void _handleRpc(ChatPushRpcResult rpc) {
-    // 未被 pending 匹配的 RPC 响应（一般不会到这）
   }
 
   /// 兼容解析数字：int / num / 数字字符串。
@@ -566,7 +617,10 @@ class ChatService {
   Future<Map<String, Object?>> transferGroup(int groupId, int newLord) async {
     final group = _group;
     if (group == null) throw StateError('not logged in');
-    final resp = await group.transferGroup({'group_id': '$groupId', 'op_uin': '$newLord'});
+    final resp = await group.transferGroup({
+      'group_id': '$groupId',
+      'op_uin': '$newLord',
+    });
     await loadSessions();
     return resp;
   }
@@ -587,7 +641,14 @@ class ChatService {
         uin: auth.uin,
         s2: auth.s2,
         s2t: auth.s2t,
-        message: ['buddysvr', 'chat_query', seq, msec, [uin2], <String, Object?>{}],
+        message: [
+          'buddysvr',
+          'chat_query',
+          seq,
+          msec,
+          [uin2],
+          <String, Object?>{},
+        ],
       );
       // 响应格式 [code?, ...]，chat_query 返回 [0, msglist]
       if (resp.length >= 2 && resp[1] is List) {
@@ -596,8 +657,7 @@ class ChatService {
         _applyChatQueryResult(uin2, resp[0] as List);
       }
     } catch (e) {
-      // ignore: avoid_print
-      print('chat_query failed for $uin2: $e');
+      debugPrint('chat_query failed for $uin2: $e');
     }
   }
 
@@ -615,11 +675,12 @@ class ChatService {
     if (group == null) return;
     try {
       final list = await group.sendCacheMsg(groupId);
-      final msgs = list.map((m) => ChatMessage.fromGroupNotify(m, groupId: groupId)).toList();
+      final msgs = list
+          .map((m) => ChatMessage.fromGroupNotify(m, groupId: groupId))
+          .toList();
       _replaceHistory(ChatSessionType.group, groupId, msgs);
     } catch (e) {
-      // ignore: avoid_print
-      print('send_cache_msg failed for $groupId: $e');
+      debugPrint('send_cache_msg failed for $groupId: $e');
     }
   }
 
@@ -632,13 +693,18 @@ class ChatService {
     _emitSessionSnapshot();
   }
 
-  Future<void> _loadSessions() async {
+  Future<void> _bootstrapSessions() async {
     // 先加载本地离线缓存（SQLite），让 UI 立即有内容
     await _loadOfflineCache();
     await loadSessions();
-    // 拉取每个好友的历史（后台）
-    for (final c in _contacts) {
-      unawaited(requestFriendHistory(c.uin));
+    // 拉取每个好友的历史（后台；分批并发，每批最多 5 个，避免
+    // 大量好友时同时发起上百个 HTTP 请求压垮服务端/客户端）
+    const batchSize = 5;
+    for (var i = 0; i < _contacts.length; i += batchSize) {
+      final end = (i + batchSize).clamp(0, _contacts.length);
+      await Future.wait(
+        _contacts.sublist(i, end).map((c) => requestFriendHistory(c.uin)),
+      );
     }
   }
 
@@ -648,6 +714,12 @@ class ChatService {
     if (db == null) return;
     try {
       final sessionRows = await db.allSessions();
+      // 一次查询全部消息再内存分组，消除逐会话查询的 N+1
+      final allMsgs = await db.allMessages();
+      final msgsByKey = <String, List<ChatMessageRecord>>{};
+      for (final r in allMsgs) {
+        msgsByKey.putIfAbsent(r.sessionKey, () => []).add(r);
+      }
       for (final r in sessionRows) {
         final s = chatSessionFromRecord(r);
         if (s.type == ChatSessionType.friend) {
@@ -656,9 +728,13 @@ class ChatService {
           _groupSessions[s.id] = s;
         }
         final key = sessionKeyOf(s.type, s.id);
-        final msgRows = await db.messagesOf(key);
-        if (msgRows.isNotEmpty) {
-          _messagesCache[key] = msgRows.map(chatMessageFromRecord).toList();
+        final msgRows = msgsByKey[key];
+        if (msgRows != null && msgRows.isNotEmpty) {
+          // 与 messagesOf 语义一致：升序取最早 200 条
+          _messagesCache[key] = msgRows
+              .take(200)
+              .map(chatMessageFromRecord)
+              .toList();
         }
       }
       // 恢复好友信息缓存（昵称/头像/在线/游玩状态）
@@ -697,8 +773,7 @@ class ChatService {
       }
       _emitSessionSnapshot();
     } catch (e) {
-      // ignore: avoid_print
-      print('load offline cache failed: $e');
+      debugPrint('load offline cache failed: $e');
     }
   }
 
@@ -723,20 +798,35 @@ class ChatService {
         final mark = _friendMark(m);
         // relation & 2 = 对方申请我（待处理好友申请）→ 归入申请列表，不建普通会话
         if ((relation & 2) != 0) {
-          final exists = _friendRequests.any((r) => r.uin == uin2 && r.status == FriendRequestStatus.pending);
+          final exists = _friendRequests.any(
+            (r) => r.uin == uin2 && r.status == FriendRequestStatus.pending,
+          );
           if (!exists) {
-            _friendRequests.add(FriendRequest(
-              uin: uin2,
-              name: _friendNickname(m).isNotEmpty ? _friendNickname(m) : '$uin2',
-              time: _toNum(m['beapply_time']) != 0 ? _toNum(m['beapply_time']) : mark,
-            ));
+            _friendRequests.add(
+              FriendRequest(
+                uin: uin2,
+                name: _friendNickname(m).isNotEmpty
+                    ? _friendNickname(m)
+                    : '$uin2',
+                time: _toNum(m['beapply_time']) != 0
+                    ? _toNum(m['beapply_time'])
+                    : mark,
+              ),
+            );
           }
           continue;
         }
         final nickname = _friendNickname(m);
         // friend_list 只返回 {mark, uin, relation}，无昵称 → 用 uin 兜底显示
         final displayName = nickname.isNotEmpty ? nickname : '$uin2';
-        _contacts.add(Contact(uin: uin2, nickname: nickname, relation: relation, mark: mark));
+        _contacts.add(
+          Contact(
+            uin: uin2,
+            nickname: nickname,
+            relation: relation,
+            mark: mark,
+          ),
+        );
         _friendSessions[uin2] = ChatSession(
           id: uin2,
           type: ChatSessionType.friend,
@@ -753,8 +843,7 @@ class ChatService {
       // 保存好友信息缓存（下次启动免等待网络拉取）
       await _saveFriendCache();
     } catch (e) {
-      // ignore: avoid_print
-      print('query_friend_list failed: $e');
+      debugPrint('query_friend_list failed: $e');
     }
   }
 
@@ -775,8 +864,7 @@ class ChatService {
       }).toList();
       await db.replaceFriends(records);
     } catch (e) {
-      // ignore: avoid_print
-      print('save friend cache failed: $e');
+      debugPrint('save friend cache failed: $e');
     }
   }
 
@@ -795,7 +883,8 @@ class ChatService {
   }
 
   /// 从好友记录提取 uin（兼容嵌套 baseinfo 结构）。
-  static int _friendUin(Map<String, Object?> m) {    final outer = m['Uin'] ?? m['uin'];
+  static int _friendUin(Map<String, Object?> m) {
+    final outer = m['Uin'] ?? m['uin'];
     if (outer is num) return outer.toInt();
     final bi = m['baseinfo'];
     if (bi is Map) {
@@ -808,7 +897,9 @@ class ChatService {
   /// 从好友记录提取昵称（嵌套 baseinfo.RoleInfo.NickName）。
   static String _friendNickname(Map<String, Object?> m) {
     final direct = m['NickName'] ?? m['nickname'] ?? m['Name'];
-    if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+    if (direct != null && direct.toString().isNotEmpty) {
+      return direct.toString();
+    }
     final bi = m['baseinfo'];
     if (bi is Map) {
       final ri = bi['RoleInfo'];
@@ -854,25 +945,18 @@ class ChatService {
   }
 
   /// 好友游玩状态文本（statusinfo[1]: "ingame"/"inteam"；[3] 为游戏详情）。
-  /// 返回如「游戏中」「组队中」，未知返回 null。
+  /// 返回如「游戏中」「组队中」，未知返回 null。复用 [_statusKind] 判定。
   static String? _friendGameStatus(Map<String, Object?> m) {
     Object? si = m['statusinfo'];
     if (si == null) {
       final bi = m['baseinfo'];
       if (bi is Map) si = bi['statusinfo'];
     }
-    if (si is List && si.isNotEmpty) {
-      final kind = si[0]?.toString();
-      if (kind == 'ingame') return '游戏中';
-      if (kind == 'inteam') return '组队中';
-    }
-    if (si is String) {
-      final lower = si.toLowerCase();
-      if (lower.contains('ingame')) return '游戏中';
-      if (lower.contains('inteam')) return '组队中';
-      // "online" 视为在线但无游玩状态
-    }
-    return null;
+    return switch (_statusKind(si)) {
+      'ingame' => '游戏中',
+      'inteam' => '组队中',
+      _ => null,
+    };
   }
 
   /// 批量拉取好友昵称/头像（/miniw/profile getProfileBatch3）。
@@ -883,53 +967,70 @@ class ChatService {
   ///   DIY 自定义头像 getPersonCenterHeadInfo(diy_header.pass/pre_url)
   ///   → getProfileBatch3 的 header3 → header2 → header → 首字母占位。
   Future<void> _fetchFriendInfos(List<Map<String, Object?>> items) async {
-    final auth = _auth;
-    if (auth == null) return;
     final uins = items.map(_friendUin).where((u) => u != 0).toList();
     if (uins.isEmpty) return;
+    var updated = false;
+    await _fetchProfiles(
+      uins,
+      onProfile: (p, diyAvatar) {
+        final s = _friendSessions[p.uin];
+        if (s == null) return;
+        _friendSessions[p.uin] = ChatSession(
+          id: s.id,
+          type: s.type,
+          name: p.nickname.isNotEmpty ? p.nickname : s.name,
+          avatar: diyAvatar ?? p.avatarUrl ?? s.avatar,
+          isOnline: s.isOnline, // 保留好友列表已有的在线状态
+          gameStatus: s.gameStatus,
+          lastMessage: s.lastMessage,
+          unreadCount: s.unreadCount,
+          lastReadTime: s.lastReadTime,
+          relation: s.relation,
+        );
+        updated = true;
+      },
+    );
+    if (updated) {
+      _emitSessionSnapshot();
+      await _saveFriendCache(); // 头像/昵称更新持久化
+    }
+  }
+
+  /// 批量拉取资料（DIY 头像 + getProfileBatch3，每批最多 20 个 uin）。
+  ///
+  /// 公共实现：好友昵称/头像与群成员资料共用同一套 HTTP 接口与分片逻辑，
+  /// 差异仅在结果落点（由 [onProfile] 回调决定）。任何异常内部吞掉，
+  /// 由调用方决定是否降级。
+  Future<void> _fetchProfiles(
+    List<int> uins, {
+    required void Function(PlayerProfile p, String? diyAvatar) onProfile,
+  }) async {
+    final auth = _auth;
+    if (auth == null || uins.isEmpty) return;
     try {
       final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
       // ① 先拉 DIY 自定义头像（游戏主界面头像来源）
       final diyAvatars = await profile.getPersonCenterHeadInfo(uins);
-      // ② 再拉普通资料（昵称 + header3/2/1 兜底头像）
-      bool updated = false;
+      // ② 再拉普通资料（昵称 + header3/2/1 兜底头像），按 20 个一批
       for (var i = 0; i < uins.length; i += 20) {
         final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
         final infos = await profile.getProfileBatch3(batch);
         for (final p in infos) {
-          final s = _friendSessions[p.uin];
-          if (s != null) {
-            final avatar = diyAvatars[p.uin] ?? p.avatarUrl ?? s.avatar;
-            _friendSessions[p.uin] = ChatSession(
-              id: s.id,
-              type: s.type,
-              name: p.nickname.isNotEmpty ? p.nickname : s.name,
-              avatar: avatar,
-              isOnline: s.isOnline, // 保留好友列表已有的在线状态
-              gameStatus: s.gameStatus,
-              lastMessage: s.lastMessage,
-              unreadCount: s.unreadCount,
-              lastReadTime: s.lastReadTime,
-              relation: s.relation,
-            );
-            updated = true;
-          }
+          onProfile(p, diyAvatars[p.uin]);
         }
       }
-      if (updated) {
-        _emitSessionSnapshot();
-        await _saveFriendCache(); // 头像/昵称更新持久化
-      }
     } catch (e) {
-      // ignore: avoid_print
-      print('getProfileBatch3/getPersonCenterHeadInfo failed: $e');
+      debugPrint('getProfileBatch3/getPersonCenterHeadInfo failed: $e');
     }
   }
 
   /// 把 friend_list 各种可能结构归一化成 List<Map>。
   static List<Map<String, Object?>> _asFriendItems(Object? data) {
     if (data is List) {
-      return data.whereType<Map>().map((m) => m.cast<String, Object?>()).toList();
+      return data
+          .whereType<Map>()
+          .map((m) => m.cast<String, Object?>())
+          .toList();
     }
     if (data is Map) {
       final out = <Map<String, Object?>>[];
@@ -969,7 +1070,8 @@ class ChatService {
           final gid = (m['group_id'] ?? m['groupId'] ?? m['GroupId'] ?? 0);
           if (gid is! num) continue;
           final g = gid.toInt();
-          final gname = (m['group_name'] ?? m['groupName'] ?? '群 $g').toString();
+          final gname = (m['group_name'] ?? m['groupName'] ?? '群 $g')
+              .toString();
           _groupSessions[g] = ChatSession(
             id: g,
             type: ChatSessionType.group,
@@ -979,8 +1081,7 @@ class ChatService {
         }
       }
     } catch (e) {
-      // ignore: avoid_print
-      print('query_user_groups failed: $e');
+      debugPrint('query_user_groups failed: $e');
     }
   }
 
@@ -1021,29 +1122,20 @@ class ChatService {
 
   /// 批量拉群成员资料（getProfileBatch3 + DIY 头像），存进 [_groupMemberProfiles]。
   Future<void> _fetchGroupMemberProfiles(int gid, List<int> uins) async {
-    final auth = _auth;
-    if (auth == null || uins.isEmpty) return;
-    try {
-      final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
-      final diyAvatars = await profile.getPersonCenterHeadInfo(uins);
-      for (var i = 0; i < uins.length; i += 20) {
-        final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
-        final infos = await profile.getProfileBatch3(batch);
-        for (final p in infos) {
-          final member = _groupMemberProfiles[gid];
-          if (member == null) continue;
-          member[p.uin] = PlayerProfile(
-            uin: p.uin,
-            nickname: p.nickname,
-            avatarUrl: diyAvatars[p.uin] ?? p.avatarUrl,
-          );
-        }
-      }
-      _emitSessionSnapshot(); // 触发群详情刷新
-    } catch (e) {
-      // ignore: avoid_print
-      print('fetch group member profiles failed: $e');
-    }
+    if (uins.isEmpty) return;
+    await _fetchProfiles(
+      uins,
+      onProfile: (p, diyAvatar) {
+        final member = _groupMemberProfiles[gid];
+        if (member == null) return;
+        member[p.uin] = PlayerProfile(
+          uin: p.uin,
+          nickname: p.nickname,
+          avatarUrl: diyAvatar ?? p.avatarUrl,
+        );
+      },
+    );
+    _emitSessionSnapshot(); // 触发群详情刷新
   }
 
   // ── 内部消息维护 ───────────────────────────────────────────────────────
@@ -1064,9 +1156,18 @@ class ChatService {
     }
   }
 
+  /// 同一逻辑消息判定：与 [message_adapter] 的确定性消息 id 一致，
+  /// (uin, time, text) 三元组唯一决定一条消息。
+  static bool _sameMessage(ChatMessage a, ChatMessage b) =>
+      a.uin == b.uin && a.time == b.time && a.text == b.text;
+
   void _upsertFriendMessage(int uin2, ChatMessage m) {
     final key = _sessionKey(ChatSessionType.friend, uin2);
     final list = _messagesCache.putIfAbsent(key, () => []);
+    // 去重：乐观本地回显与服务器确认推送是同一逻辑消息（共享
+    // uin/time/text → 同一 id），已存在则跳过，避免同 id 重复记录
+    //（flutter_chat_core 控制器在 debug 下断言 id 唯一）。
+    if (list.any((e) => _sameMessage(e, m))) return;
     list.add(m);
     if (list.length > 50) list.removeRange(0, list.length - 50);
 
@@ -1074,7 +1175,9 @@ class ChatService {
     if (existing != null) {
       _friendSessions[uin2] = existing.copyWith(
         lastMessage: m,
-        unreadCount: m.uin == myUin ? existing.unreadCount : existing.unreadCount + 1,
+        unreadCount: m.uin == myUin
+            ? existing.unreadCount
+            : existing.unreadCount + 1,
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
@@ -1085,6 +1188,8 @@ class ChatService {
   void _upsertGroupMessage(int groupId, ChatMessage m) {
     final key = _sessionKey(ChatSessionType.group, groupId);
     final list = _messagesCache.putIfAbsent(key, () => []);
+    // 去重逻辑同 _upsertFriendMessage。
+    if (list.any((e) => _sameMessage(e, m))) return;
     list.add(m);
     if (list.length > 100) list.removeRange(0, list.length - 100);
 
@@ -1092,7 +1197,9 @@ class ChatService {
     if (existing != null) {
       _groupSessions[groupId] = existing.copyWith(
         lastMessage: m,
-        unreadCount: m.uin == myUin ? existing.unreadCount : existing.unreadCount + 1,
+        unreadCount: m.uin == myUin
+            ? existing.unreadCount
+            : existing.unreadCount + 1,
       );
     } else if (m.uin != myUin) {
       _groupSessions[groupId] = ChatSession(
@@ -1108,12 +1215,18 @@ class ChatService {
     _emitSessionSnapshot();
   }
 
-  /// 持久化一条消息 + 更新会话行。
+  /// 持久化一条消息 + 更新会话行。写库失败仅记录日志，不阻断消息链路。
   void _persistMessage(ChatSessionType type, int id, ChatMessage m) {
     final db = _db;
     if (db == null) return;
     final key = _sessionKey(type, id);
-    unawaited(db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin)));
+    unawaited(() async {
+      try {
+        await db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin));
+      } catch (e) {
+        debugPrint('persist message failed: $e');
+      }
+    }());
     _persistSession(type, id);
   }
 
@@ -1147,14 +1260,20 @@ class ChatService {
     unawaited(_replaceHistoryInDb(db, key, msgs));
   }
 
-  Future<void> _replaceHistoryInDb(AppDatabase db, String key, List<ChatMessage> msgs) async {
-    await db.clearMessages(key);
-    for (final m in msgs) {
-      await db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin));
-    }
+  Future<void> _replaceHistoryInDb(
+    AppDatabase db,
+    String key,
+    List<ChatMessage> msgs,
+  ) async {
+    // 原子替换：清空 + 批量写入在一个事务内完成，中途失败不留半写状态。
+    await db.replaceMessages(
+      key,
+      msgs.map((m) => chatMessageToCompanion(m, key, myUin: myUin)).toList(),
+    );
   }
 
   void _emitSessionSnapshot() {
+    _sessionsCache = null; // 会话数据变更 → 下次访问重算
     _sessionCtrl.add(SessionSnapshot(sessions, _contacts));
   }
 
@@ -1162,10 +1281,15 @@ class ChatService {
 
   /// 标记会话已读（重置未读）。
   void markRead(ChatSessionType type, int id) {
-    final sessionsMap = type == ChatSessionType.friend ? _friendSessions : _groupSessions;
+    final sessionsMap = type == ChatSessionType.friend
+        ? _friendSessions
+        : _groupSessions;
     final existing = sessionsMap[id];
     if (existing != null) {
-      sessionsMap[id] = existing.copyWith(unreadCount: 0, lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000);
+      sessionsMap[id] = existing.copyWith(
+        unreadCount: 0,
+        lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      );
     }
     _persistSession(type, id);
     _emitSessionSnapshot();
@@ -1180,8 +1304,6 @@ class ChatService {
     _reconnectTimer = null;
     await _conn?.close();
     _conn = null;
-    await _mainConn?.close();
-    _mainConn = null;
     _auth = null;
     _friend = null;
     _group = null;
@@ -1191,13 +1313,24 @@ class ChatService {
     _messagesCache.clear();
     _groupInfos.clear();
     _friendRequests.clear();
+    _sessionsCache = null;
+    _friendReqsCache = null;
     _state = ChatServiceState.unauthenticated;
     _lastError = null;
     _setState(ChatServiceState.unauthenticated);
   }
 
+  /// 释放服务：先 reset 清理状态与连接，再关闭 4 个事件流控制器。
+  /// 控制器若不关闭，监听者永远等不到 done 事件，造成泄漏。
   Future<void> dispose() async {
+    _shouldReconnect = false;
+    _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     await reset();
+    await _stateCtrl.close();
+    await _eventCtrl.close();
+    await _sessionCtrl.close();
+    await _friendReqCtrl.close();
   }
 
   // ── 内部 ──────────────────────────────────────────────────────────────

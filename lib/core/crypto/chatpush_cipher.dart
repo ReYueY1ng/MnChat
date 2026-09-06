@@ -5,8 +5,7 @@
 /// 注意：不是普通 XOR——位旋转对正确性至关重要。
 library;
 
-const List<int> _key = [18, 35, 52, 69];
-/// Cyclic XOR key extracted from `container.lua`.
+import 'protocol_keys.dart';
 
 /// Encrypt [data] with rotate-left-3 + cyclic XOR.
 /// `((b << 3) + (b >> 5)) & 0xFF` then `^ key[i % 4]`.
@@ -15,7 +14,7 @@ List<int> chatpushEncrypt(List<int> data) {
   for (var i = 0; i < data.length; i++) {
     final b = data[i];
     final rotated = ((b << 3) + (b >> 5)) & 0xFF;
-    out[i] = (rotated ^ _key[i % 4]) & 0xFF;
+    out[i] = (rotated ^ chatpushXorKey[i % 4]) & 0xFF;
   }
   return out;
 }
@@ -26,7 +25,7 @@ List<int> chatpushDecrypt(List<int> data) {
   final out = List<int>.filled(data.length, 0);
   for (var i = 0; i < data.length; i++) {
     final b = data[i];
-    final xored = (b ^ _key[i % 4]) & 0xFF;
+    final xored = (b ^ chatpushXorKey[i % 4]) & 0xFF;
     out[i] = ((xored << 5) + (xored >> 3)) & 0xFF;
   }
   return out;
