@@ -3,10 +3,11 @@
 library;
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/encoding.dart' show luaUrlEncode;
 import '../crypto/md5_sign.dart';
-import '../net/config.dart';
+import '../net/config.dart' show backendShequ, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart';
 
@@ -78,13 +79,13 @@ class GatewayClient {
   final Map<String, String> _urls;
 
   GatewayClient({Dio? dio, Map<String, String>? urls})
-      : _dio = dio ??
-            (createDio()
-              ..options.headers = {'User-Agent': kUa}),
+      : _dio = dio ?? createDio(),
         _urls = {...kDefaultUrls, ...?urls};
 
   /// 解析 URL key → base URL。
-  String resolve(String key) => _urls[key] ?? kDefaultBase;
+  /// Web 平台统一走同源代理前缀（backendShequ），规避 CORS；原生取配置真实地址。
+  String resolve(String key) =>
+      kIsWeb ? backendShequ() : (_urls[key] ?? kDefaultBase);
 
   /// GET 并解码响应（JSON → LuaTable 兼容）。
   Future<Map<String, Object?>> get(String url,

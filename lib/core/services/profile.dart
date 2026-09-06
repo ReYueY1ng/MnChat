@@ -6,9 +6,10 @@ library;
 import 'dart:convert';
 
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetS1Map;
-import '../net/config.dart';
+import '../net/config.dart' show backendShequ, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 
@@ -96,7 +97,8 @@ class ProfileClient {
     this.lang = '0',
     this.country = 'CN',
   })  : _dio = dio ?? createDio(),
-        baseUrl = baseUrl ?? kDefaultUrls['HttpMap'] ?? kDefaultBase;
+        baseUrl = baseUrl ??
+            (kIsWeb ? backendShequ() : (kDefaultUrls['HttpMap'] ?? kDefaultBase));
 
   /// 批量拉取玩家资料（昵称/头像）。
   ///
