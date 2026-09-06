@@ -19,6 +19,7 @@ class ChatMessages extends Table {
   BoolColumn get isSystemMsg => boolean()();
   BoolColumn get isTime => boolean()();
   TextColumn get direction => text()();
+  TextColumn get msgType => text().withDefault(const Constant('text'))();
 }
 
 @DataClassName('ChatSessionRecord')
@@ -46,22 +47,37 @@ class Friends extends Table {
   BoolColumn get isOnline => boolean()();
   TextColumn get gameStatus => text().nullable()();
   IntColumn get updatedAt => integer()();
+  IntColumn get relation => integer().withDefault(const Constant(0))();
+  IntColumn get mark => integer().withDefault(const Constant(0))();
 
   @override
   Set<Column> get primaryKey => {uin};
 }
 
-@DriftDatabase(tables: [ChatMessages, ChatSessions, Friends])
+/// 应用设置 key-value 存储（自动登录凭据、开关、服务器地址、排序模式等）。
+/// 用 Drift 表替代 path_provider JSON 文件：Web(WASM/IndexedDB) 与原生(SQLite) 统一。
+@DataClassName('SettingRecord')
+class SettingsTable extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
+@DriftDatabase(tables: [ChatMessages, ChatSessions, Friends, SettingsTable])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 3;
+  int get schemaVersion => 6;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) => m.createAll(),
-        // v1→v2: chat_sessions 无主键 → 加主键；v2→v3: 新增 friends 好友信息缓存表。
+        // v1→v2: chat_sessions 无主键 → 加主键；v2→v3: 新增 friends 好友信息缓存表；
+        // v3→v4: 新增 settings 设置表；v4→v5: chat_messages 新增 msg_type 列；
+        // v5→v6: friends 新增 relation/mark 列（好友关系位掩码）。
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             await m.deleteTable('chat_sessions');
@@ -72,8 +88,37 @@ class AppDatabase extends _$AppDatabase {
           if (from < 3) {
             await m.createTable(friends);
           }
+          if (from < 4) {
+            await m.createTable(settingsTable);
+          }
+          if (from < 5) {
+            await m.addColumn(chatMessages, chatMessages.msgType);
+          }
+          if (from < 6) {
+            await m.addColumn(friends, friends.relation);
+            await m.addColumn(friends, friends.mark);
+          }
         },
       );
+
+  /// 读取设置项；不存在返回 null。
+  Future<String?> getSetting(String key) async {
+    final row = await (select(settingsTable)..where((t) => t.key.equals(key)))
+        .getSingleOrNull();
+    return row?.value;
+  }
+
+  /// 写入/覆盖设置项。
+  Future<void> setSetting(String key, String value) async {
+    await into(settingsTable).insertOnConflictUpdate(
+      SettingsTableCompanion(key: Value(key), value: Value(value)),
+    );
+  }
+
+  /// 删除设置项。
+  Future<void> clearSetting(String key) async {
+    await (delete(settingsTable)..where((t) => t.key.equals(key))).go();
+  }
 
   Future<void> insertMessage(ChatMessagesCompanion row) =>
       into(chatMessages).insert(row);

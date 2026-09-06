@@ -29,6 +29,7 @@ ChatMessagesCompanion chatMessageToCompanion(
     isSystemMsg: Value(m.isSystemMsg),
     isTime: Value(m.isTime),
     direction: Value(m.uin == myUin ? 'out' : 'in'),
+    msgType: Value(m.type.name),
   );
 }
 
@@ -47,6 +48,7 @@ ChatMessage chatMessageFromRecord(ChatMessageRecord r) {
     groupId: r.groupId,
     isSystemMsg: r.isSystemMsg,
     isTime: r.isTime,
+    type: chatMsgTypeFrom(r.msgType),
   );
 }
 
@@ -108,6 +110,8 @@ FriendRecord friendToRecord(
     isOnline: isOnline,
     gameStatus: gameStatus,
     updatedAt: updatedAt,
+    relation: c.relation,
+    mark: c.mark,
   );
 }
 
@@ -117,5 +121,7 @@ Contact friendFromRecord(FriendRecord r) {
     uin: r.uin,
     nickname: r.nickname,
     avatar: r.avatar,
+    relation: r.relation,
+    mark: r.mark,
   );
 }
