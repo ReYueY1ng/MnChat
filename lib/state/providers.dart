@@ -36,8 +36,10 @@ final chatBridgeProvider = Provider<ChatBridge>((ref) {
 final databaseProvider = Provider<AppDatabase>(
     (ref) => throw UnimplementedError('AppDatabase must be created in main()'));
 
-/// 应用设置存储（自动登录凭据等）单例。
-final settingsProvider = Provider<SettingsStore>((ref) => SettingsStore());
+/// 应用设置存储（自动登录凭据等）单例 —— 基于 Drift 设置表（Web/原生统一）。
+final settingsProvider = Provider<SettingsStore>(
+  (ref) => SettingsStore(ref.read(databaseProvider)),
+);
 
 // ── 认证状态 ─────────────────────────────────────────────────────────────
 
@@ -156,6 +158,18 @@ final sessionListProvider = StreamProvider<SessionSnapshot>((ref) {
 final contactsProvider = StreamProvider<List<Contact>>((ref) {
   final service = ref.watch(chatServiceProvider);
   return service.sessionStream.map((snap) => snap.contacts);
+});
+
+/// 待处理好友申请列表（由 applyed_notify 推送驱动）。
+final friendRequestStreamProvider = StreamProvider<List<FriendRequest>>((ref) {
+  final service = ref.watch(chatServiceProvider);
+  return service.friendRequestStream;
+});
+
+/// 待处理好友申请数（红点）。
+final friendRequestCountProvider = Provider<int>((ref) {
+  ref.watch(friendRequestStreamProvider);
+  return ref.watch(chatServiceProvider).friendRequestCount;
 });
 
 /// 会话排序方式。

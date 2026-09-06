@@ -13,11 +13,21 @@ import 'ui/session_list_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
-  final db = AppDatabase(driftDatabase(name: 'mnchat'));
-  runApp(ProviderScope(
-    overrides: [databaseProvider.overrideWithValue(db)],
-    child: const MnChatApp(),
-  ));
+  final db = AppDatabase(
+    driftDatabase(
+      name: 'mnchat',
+      web: DriftWebOptions(
+        sqlite3Wasm: Uri.parse('sqlite3.wasm'),
+        driftWorker: Uri.parse('drift_worker.js'),
+      ),
+    ),
+  );
+  runApp(
+    ProviderScope(
+      overrides: [databaseProvider.overrideWithValue(db)],
+      child: const MnChatApp(),
+    ),
+  );
 }
 
 class MnChatApp extends ConsumerStatefulWidget {
@@ -64,7 +74,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       // 自己发的消息不通知
       if (event.message.uin == service.myUin) return;
       final lifecycle = WidgetsBinding.instance.lifecycleState;
-      final inBackground = lifecycle == AppLifecycleState.paused ||
+      final inBackground =
+          lifecycle == AppLifecycleState.paused ||
           lifecycle == AppLifecycleState.hidden ||
           lifecycle == AppLifecycleState.detached ||
           lifecycle == AppLifecycleState.inactive;
@@ -95,6 +106,14 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 回前台：若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
+    if (state == AppLifecycleState.resumed) {
+      ref.read(chatServiceProvider).ensureConnection();
+    }
   }
 
   @override
@@ -183,7 +202,9 @@ class _MainShellState extends ConsumerState<MainShell> {
     }
 
     final activeSession = active;
-    final session = activeSession == null ? null : findActive(list, activeSession);
+    final session = activeSession == null
+        ? null
+        : findActive(list, activeSession);
     // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）
     if (activeSession != null) {
       _chatInstance = ChatPage(
@@ -249,13 +270,19 @@ class _EmptyChatPlaceholder extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.forum_outlined, size: 80, color: theme.colorScheme.outline),
+          Icon(
+            Icons.forum_outlined,
+            size: 80,
+            color: theme.colorScheme.outline,
+          ),
           const SizedBox(height: 16),
           Text('选择左侧会话开始聊天', style: theme.textTheme.titleMedium),
           const SizedBox(height: 4),
           Text(
             '好友 / 群聊 · 无需进入房间',
-            style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.outline),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+            ),
           ),
         ],
       ),
