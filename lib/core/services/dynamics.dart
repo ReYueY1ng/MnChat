@@ -1,0 +1,530 @@
+/// 动态(Posting)服务客户端 —— /miniw/posting 与 /miniw/com_posting。
+/// 移植自反编译源码 dynamicsdatamanager.lua：
+///   - 好友 feed: POSTING + get_friend_posting (+ from)
+///   - 热门/时间: COM_POSTING + get_list_by_hot / get_list_by_time (+ offset)
+/// URL 用 act + http_getParamMD5 签名。
+library;
+
+import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+
+import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
+import '../net/config.dart' show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
+import '../net/http_factory.dart' show createDio;
+import '../protocol/lua_table.dart' show decodeHttpResponse;
+
+const String kCountry = 'CN';
+const String kLang = '0';
+
+const String kPostingPath = 'miniw/posting';
+const String kComPostingPath = 'miniw/com_posting';
+
+/// 动态图片（带宽高，用于按自身宽高比排版；无宽高时由 UI 兜底）。
+class PostImage {
+  final String url;
+  final int width;
+  final int height;
+
+  const PostImage({required this.url, this.width = 0, this.height = 0});
+
+  /// 宽高比（宽/高），无效时返回 [kDefaultAspect]。
+  double get aspect {
+    if (width > 0 && height > 0) return width / height;
+    return 0;
+  }
+}
+
+const double kDefaultAspect = 1.5;
+
+/// 一页动态 + 下一页游标（data.ct）。nextCt==0 表示没有更多。
+class FeedResult {
+  final List<DynamicsPost> posts;
+  final int nextCt;
+
+  const FeedResult(this.posts, this.nextCt);
+}
+
+/// 动态 feed 类型（对应动态大厅的 tab，均在 /miniw/posting）。
+enum DynamicsFeedType {
+  recommend('推荐', 'get_friend_posting'),
+  hot('热门', 'get_hot_posting2'),
+  official('官方', 'get_official_posting'),
+  mine('我的', 'get_posting_list');
+
+  const DynamicsFeedType(this.label, this.act);
+  final String label;
+  final String act;
+}
+
+/// 一条动态。
+class DynamicsPost {
+  /// 动态 id，形如 `"<uin>_<ct>"`（如 "273640665_1787757890"）。
+  final String pid;
+  final int uin;
+  final String content;
+  final int createTime; // 秒
+  final int ctype;
+  final String? nickname;
+  final String? avatar;
+
+  /// 图片列表（带宽高）。
+  final List<PostImage> pics;
+
+  /// 属地（city / location）。
+  final String city;
+  final String location;
+
+  /// 点赞 / 评论 / 转发数。
+  final int likeCount;
+  final int commentCount;
+  final int shareCount;
+
+  /// 附加信息：作品/地图链接名（evaluate_extract_info.name / com_map_info）。
+  final String? linkName;
+  final String? linkAuthor;
+
+  /// 是否抽奖/投票。
+  final bool isLottery;
+
+  const DynamicsPost({
+    required this.pid,
+    required this.uin,
+    required this.content,
+    this.createTime = 0,
+    this.ctype = 0,
+    this.nickname,
+    this.avatar,
+    this.pics = const [],
+    this.city = '',
+    this.location = '',
+    this.likeCount = 0,
+    this.commentCount = 0,
+    this.shareCount = 0,
+    this.linkName,
+    this.linkAuthor,
+    this.isLottery = false,
+  });
+
+  static int _int(Map<String, Object?> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v is num) return v.toInt();
+    }
+    return 0;
+  }
+
+  /// 从 pic_list（[{url, width, height, ...}]）提取图片列表。
+  static List<PostImage> _picUrls(Map<String, Object?> m) {
+    final pl = m['pic_list'];
+    if (pl is! List) return const [];
+    final out = <PostImage>[];
+    for (final e in pl) {
+      if (e is Map) {
+        final u = e['url']?.toString();
+        if (u != null && u.isNotEmpty) {
+          final w = e['width'] is num ? (e['width'] as num).toInt() : 0;
+          final h = e['height'] is num ? (e['height'] as num).toInt() : 0;
+          out.add(PostImage(url: u, width: w, height: h));
+        }
+      }
+    }
+    return out;
+  }
+
+  static DynamicsPost? fromItem(Map<String, Object?> m) {
+    // pid：可能是数字，也可能是 "uin_ct" 字符串（真实服务器返回字符串）。
+    final rawPid = m['pid'] ?? m['posting_id'] ?? m['id'];
+    String pid = '';
+    int uin = _int(m, ['uin', 'Uin', 'author_uin']);
+    int ct = _int(m, ['create_time', 'ct', 'time', 'send_time']);
+    if (rawPid is String) {
+      pid = rawPid;
+      final idx = rawPid.indexOf('_');
+      if (idx > 0) {
+        if (uin == 0) uin = int.tryParse(rawPid.substring(0, idx)) ?? 0;
+        if (ct == 0) ct = int.tryParse(rawPid.substring(idx + 1)) ?? 0;
+      }
+    } else if (rawPid is num) {
+      pid = '${rawPid.toInt()}';
+      if (uin == 0) uin = rawPid.toInt();
+    }
+    if (pid.isEmpty) return null;
+
+    String? linkName;
+    String? linkAuthor;
+    final ev = m['evaluate_extract_info'];
+    if (ev is Map) {
+      linkName = ev['name']?.toString();
+      linkAuthor = ev['author_uin']?.toString();
+    }
+    if (linkName == null) {
+      final cm = m['com_map_info'];
+      if (cm is Map) {
+        linkName = cm['name']?.toString();
+        linkAuthor = cm['uin']?.toString();
+      }
+    }
+
+    return DynamicsPost(
+      pid: pid,
+      uin: uin,
+      content: m['content']?.toString() ?? '',
+      createTime: ct,
+      ctype: _int(m, ['ctype', 'content_type']),
+      nickname: m['nickname']?.toString() ?? m['NickName']?.toString(),
+      avatar: m['header']?.toString() ?? m['avatar']?.toString(),
+      pics: _picUrls(m),
+      city: m['city']?.toString() ?? '',
+      location: m['location']?.toString() ?? '',
+      likeCount: _int(m, ['prize_count', 'cai', 'like_count']),
+      commentCount: _int(m, ['comment_count', 'comment_num']),
+      shareCount: _int(m, ['share', 'forward_count']),
+      linkName: linkName,
+      linkAuthor: linkAuthor,
+      isLottery: m['com_lottery'] == 1 || m['lottery_id'] != null,
+    );
+  }
+
+  DynamicsPost withProfile({String? nickname, String? avatar}) => DynamicsPost(
+        pid: pid,
+        uin: uin,
+        content: content,
+        createTime: createTime,
+        ctype: ctype,
+        nickname: nickname ?? this.nickname,
+        avatar: avatar ?? this.avatar,
+        pics: pics,
+        city: city,
+        location: location,
+        likeCount: likeCount,
+        commentCount: commentCount,
+        shareCount: shareCount,
+        linkName: linkName,
+        linkAuthor: linkAuthor,
+        isLottery: isLottery,
+      );
+}
+
+/// 一条评论。
+class DynamicsComment {
+  final int uin;
+  final String content;
+  final int createTime;
+  final String? nickname;
+  final String? avatar;
+  final int likeCount;
+  final int replyCount;
+
+  /// 属地（location）。
+  final String location;
+
+  const DynamicsComment({
+    required this.uin,
+    required this.content,
+    this.createTime = 0,
+    this.nickname,
+    this.avatar,
+    this.likeCount = 0,
+    this.replyCount = 0,
+    this.location = '',
+  });
+
+  static DynamicsComment? fromItem(Map<String, Object?> m) {
+    final rawUin = m['uin'] ?? m['Uin'] ?? m['sender'] ?? 0;
+    final uin = rawUin is num ? rawUin.toInt() : int.tryParse('$rawUin') ?? 0;
+    // content 是 URL 编码（UTF-8），需解码。
+    final content = Uri.decodeComponent(m['content']?.toString() ?? '');
+    if (content.isEmpty) return null;
+    int time = 0;
+    final t = m['last_time'] ?? m['time'] ?? m['ct'];
+    if (t is num) {
+      time = t.toInt();
+    } else {
+      time = int.tryParse('$t') ?? 0;
+    }
+    final like = m['cai'] ?? m['like_count'] ?? 0;
+    final reply = m['com_cnt'] ?? m['reply_count'] ?? 0;
+    return DynamicsComment(
+      uin: uin,
+      content: content,
+      createTime: time,
+      nickname: m['nickname']?.toString() ?? m['NickName']?.toString(),
+      likeCount: like is num ? like.toInt() : 0,
+      replyCount: reply is num ? reply.toInt() : 0,
+      location: m['location']?.toString() ?? '',
+    );
+  }
+
+  DynamicsComment withProfile({String? nickname, String? avatar}) => DynamicsComment(
+        uin: uin,
+        content: content,
+        createTime: createTime,
+        nickname: nickname ?? this.nickname,
+        avatar: avatar ?? this.avatar,
+        likeCount: likeCount,
+        replyCount: replyCount,
+        location: location,
+      );
+}
+
+/// 动态客户端。
+class DynamicsClient {
+  final int uin;
+  final String s2;
+  final String s2t;
+  final Dio _dio;
+  final String baseUrl;
+
+  DynamicsClient({
+    required this.uin,
+    required this.s2,
+    required this.s2t,
+    Dio? dio,
+    String? baseUrl,
+  })  : _dio = dio ?? createDio(),
+        baseUrl = baseUrl ??
+            (kIsWeb ? backendShequ() : (kDefaultUrls['HttpCommon'] ?? kDefaultBase));
+
+  String _url(String act, [Map<String, String> params = const {}]) {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // 通用鉴权参数（url_addParams 注入，同时进 md5 与 URL）
+    final all = <String, String>{
+      'act': act,
+      'uin': '$uin',
+      'apiid': kApiId,
+      'ver': kClientVersionStr,
+      'country': kCountry,
+      'lang': kLang,
+      ...params,
+    };
+    final md5 = httpGetParamMd5(all, timeVal: now, s2: s2, s2t: s2t, key: httpGetParamKey);
+    // 对齐 Lua http_getParamMD5：md5 用 s2，但 URL query 不含 s2；
+    // 需显式带上 time/s2t/encrypt_ver（供服务器复算 md5）。
+    final parts = <String>[
+      ...all.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+      'time=$now',
+      's2t=$s2t',
+      'encrypt_ver=3',
+    ];
+    return '$base/$kPostingPath?${parts.join('&')}&md5=$md5';
+  }
+
+  /// 拉动态列表。响应 `{ret:0, data:{list:[...], role_info_list:[...], ct:[游标]}}`。
+  /// [tag] 非空时走分类标签接口 `get_posting_by_tag`（子分类 tab 用）。
+  Future<FeedResult> pullPostings(
+    DynamicsFeedType type, {
+    String from = 'null',
+    int ct = 0,
+    int? tag,
+  }) async {
+    final act = tag != null ? 'get_posting_by_tag' : type.act;
+    final params = <String, String>{};
+    if (tag != null) {
+      // get_posting_by_tag: act, tag, from, ct（反编译 dynamicsdatamanager.lua:1830）
+      params['tag'] = '$tag';
+      params['from'] = from;
+      if (ct > 0) params['ct'] = '$ct';
+    } else {
+      switch (type) {
+        case DynamicsFeedType.recommend:
+        case DynamicsFeedType.mine:
+          params['from'] = from;
+          params['op_uin'] = '$uin';
+          if (ct > 0) params['ct'] = '$ct';
+        case DynamicsFeedType.hot:
+          if (ct > 0) params['ct'] = '$ct';
+        case DynamicsFeedType.official:
+          params['from'] = from;
+          if (ct > 0) params['ct'] = '$ct';
+      }
+    }
+    final url = _url(act, params);
+
+    debugPrint('[Dynamics $act] url: $url');
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    debugPrint('[Dynamics $act] RAW: $raw');
+
+    // 原始响应是字符串 → 解码；否则已是结构。
+    Object? decoded;
+    if (raw is String) {
+      decoded = decodeHttpResponse(raw);
+    } else {
+      decoded = raw;
+    }
+
+    if (decoded is! Map) {
+      debugPrint('[Dynamics $act] decoded not Map: ${decoded.runtimeType}');
+      return const FeedResult([], 0);
+    }
+    final m = decoded.cast<String, Object?>();
+
+    final code = m['ret'] ?? m['code'];
+    if (code is num && code != 0) {
+      debugPrint('[Dynamics $act] error: ${m['msg']}');
+      return const FeedResult([], 0);
+    }
+
+    Object? data = m['data'];
+    List<DynamicsPost> posts = [];
+    int nextCt = 0;
+
+    if (data is Map) {
+      // 游标：data.ct（下一页再传回）
+      final ctVal = data['ct'];
+      if (ctVal is num) {
+        nextCt = ctVal.toInt();
+      } else {
+        nextCt = int.tryParse('$ctVal') ?? 0;
+      }
+      // role_info_list: { "<uin>": {NickName, PersonCenterHead:{diy_header:{pass_url}}} }
+      final roleMap = <int, Map<String, Object?>>{};
+      final rl = data['role_info_list'];
+      if (rl is Map) {
+        for (final e in rl.entries) {
+          final u = int.tryParse('${e.key}');
+          if (u != null && e.value is Map) {
+            roleMap[u] = (e.value as Map).cast<String, Object?>();
+          }
+        }
+      }
+      final rawList = data['list'];
+      if (rawList is List) {
+        for (final e in rawList) {
+          if (e is! Map) continue;
+          final post = DynamicsPost.fromItem(e.cast<String, Object?>());
+          if (post == null) continue;
+          final info = roleMap[post.uin];
+          String? avatar;
+          if (info != null) {
+            final pch = info['PersonCenterHead'];
+            if (pch is Map) {
+              final diy = (pch)['diy_header'];
+              if (diy is Map) avatar = (diy)['pass_url']?.toString();
+            }
+            posts.add(post.withProfile(
+              nickname: info['NickName']?.toString(),
+              avatar: avatar,
+            ));
+          } else {
+            posts.add(post);
+          }
+        }
+      }
+    } else if (data is List) {
+      for (final e in data) {
+        if (e is Map) {
+          final p = DynamicsPost.fromItem(e.cast<String, Object?>());
+          if (p != null) posts.add(p);
+        }
+      }
+    } else {
+      final l = m['list'];
+      if (l is List) {
+        for (final e in l) {
+          if (e is Map) {
+            final p = DynamicsPost.fromItem(e.cast<String, Object?>());
+            if (p != null) posts.add(p);
+          }
+        }
+      }
+    }
+    return FeedResult(posts, nextCt);
+  }
+
+  /// 拉取动态评论（act=get_comment）。响应结构未知，做尽力解析 + 原始日志。
+  Future<List<DynamicsComment>> fetchComments(String pid) async {
+    final url = _url('get_comment', {'pid': pid});
+    debugPrint('[Dynamics get_comment] url: $url');
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    debugPrint('[Dynamics get_comment] RAW: $raw');
+
+    Object? decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    if (decoded is! Map) return [];
+    final m = decoded.cast<String, Object?>();
+    if (((m['ret'] ?? m['code']) is num && (m['ret'] ?? m['code']) != 0)) {
+      return [];
+    }
+
+    Object? data = m['data'];
+    final roleMap = <int, Map<String, Object?>>{};
+    if (data is Map) {
+      final rl = data['role_info_list'];
+      if (rl is Map) {
+        for (final e in rl.entries) {
+          final u = int.tryParse('${e.key}');
+          if (u != null && e.value is Map) {
+            roleMap[u] = (e.value as Map).cast<String, Object?>();
+          }
+        }
+      }
+      data = data['list'];
+    }
+    if (data is! List) data = m['list'];
+    if (data is! List) return [];
+
+    final out = <DynamicsComment>[];
+    for (final e in data) {
+      if (e is! Map) continue;
+      final c = DynamicsComment.fromItem(e.cast<String, Object?>());
+      if (c == null) continue;
+      final info = roleMap[c.uin];
+      String? avatar;
+      if (info != null) {
+        final pch = info['PersonCenterHead'];
+        if (pch is Map) {
+          final diy = pch['diy_header'];
+          if (diy is Map) avatar = diy['pass_url']?.toString();
+        }
+        out.add(c.withProfile(
+          nickname: info['NickName']?.toString(),
+          avatar: avatar,
+        ));
+      } else {
+        out.add(c);
+      }
+    }
+    return out;
+  }
+
+  /// 点赞（act=like_posting）。返回服务器原始 map（含 ret）。
+  Future<Map<String, Object?>> likePosting(String pid) =>
+      _getMap(_url('like_posting', {'pid': pid}));
+
+  /// 发表评论（act=add_comment）。
+  Future<Map<String, Object?>> addComment(String pid, String content) =>
+      _getMap(_url('add_comment', {'pid': pid, 'content': content}));
+
+  /// 拉取某条评论的回复（act=get_comment_rep）。op_uin 用评论发布者 uin。
+  Future<List<DynamicsComment>> fetchCommentReplies(String pid, int commentUin) async {
+    final url = _url('get_comment_rep', {'pid': pid, 'op_uin': '$commentUin'});
+    debugPrint('[Dynamics get_comment_rep] url: $url');
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    debugPrint('[Dynamics get_comment_rep] RAW: $raw');
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    if (decoded is! Map) return [];
+    final m = decoded.cast<String, Object?>();
+    Object? data = m['data'];
+    if (data is Map) data = data['list'];
+    if (data is! List) data = m['list'];
+    if (data is! List) return [];
+    return data
+        .whereType<Map>()
+        .map((e) => DynamicsComment.fromItem(e.cast<String, Object?>()))
+        .whereType<DynamicsComment>()
+        .toList();
+  }
+
+  // ── 内部 ──────────────────────────────────────────────────────────────
+
+  Future<Map<String, Object?>> _getMap(String url) async {
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    if (decoded is Map) return decoded.cast<String, Object?>();
+    return <String, Object?>{};
+  }
+}
