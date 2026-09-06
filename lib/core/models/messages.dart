@@ -7,6 +7,25 @@ import 'dart:convert';
 /// 消息类型。
 enum ChatMsgType { text, share, custom, system }
 
+/// 把协议里的类型字段（string/num）归一化为 [ChatMsgType]，未知回退 text。
+ChatMsgType chatMsgTypeFrom(Object? v) {
+  if (v is num) {
+    // 常见 msg_type 数值：0=text, 1=share(分享), 2=custom(互动)
+    return switch (v.toInt()) {
+      1 => ChatMsgType.share,
+      2 => ChatMsgType.custom,
+      _ => ChatMsgType.text,
+    };
+  }
+  if (v is String) {
+    final s = v.toLowerCase();
+    if (s.contains('share')) return ChatMsgType.share;
+    if (s.contains('custom') || s.contains('interactive')) return ChatMsgType.custom;
+    if (s.contains('system') || s.contains('create')) return ChatMsgType.system;
+  }
+  return ChatMsgType.text;
+}
+
 /// 会话类型。
 enum ChatSessionType { friend, group, system }
 
@@ -42,6 +61,10 @@ class ChatMessage {
   /// 是否时间分隔条。
   final bool isTime;
 
+  /// 消息类型（text/share/custom/system）。默认 text；system 时也会被
+  /// [isSystemMsg] 标记，两者保持一致。
+  final ChatMsgType type;
+
   const ChatMessage({
     required this.uin,
     required this.text,
@@ -55,6 +78,7 @@ class ChatMessage {
     this.groupId,
     this.isSystemMsg = false,
     this.isTime = false,
+    this.type = ChatMsgType.text,
   });
 
   /// 从 chat_query 三元组 [who, ts, msg] 构造（buddymanager.lua）。
@@ -62,7 +86,14 @@ class ChatMessage {
     final who = triple.isNotEmpty ? (triple[0] as num).toInt() : 0;
     final ts = triple.length > 1 ? (triple[1] as num).toInt() : 0;
     final msg = triple.length > 2 ? triple[2]?.toString() ?? '' : '';
-    return ChatMessage(uin: who, text: msg, time: ts, isSystemMsg: who == 1000);
+    final isSys = who == 1000;
+    return ChatMessage(
+      uin: who,
+      text: msg,
+      time: ts,
+      isSystemMsg: isSys,
+      type: isSys ? ChatMsgType.system : ChatMsgType.text,
+    );
   }
 
   /// 从群聊归一化 map 构造（AddNewGroupChatMessage 字段）。
@@ -82,6 +113,7 @@ class ChatMessage {
       bubble: m['bubble']?.toString(),
       interCode: m['interCode']?.toString(),
       groupId: groupId ?? (m['groupid'] as num?)?.toInt(),
+      type: chatMsgTypeFrom(m['Type'] ?? m['type'] ?? m['msg_type']),
     );
   }
 
@@ -91,6 +123,7 @@ class ChatMessage {
         text: m['chat_msg']?.toString() ?? '',
         time: (m['send_time'] as num?)?.toInt() ?? 0,
         extendData: m['extend_data']?.toString(),
+        type: chatMsgTypeFrom(m['msg_type'] ?? m['type']),
       );
 
   Map<String, Object?> toJson() => {
@@ -106,6 +139,7 @@ class ChatMessage {
         'group_id': groupId,
         'is_system_msg': isSystemMsg,
         'is_time': isTime,
+        'msg_type': type.name,
       };
 
   factory ChatMessage.fromJson(Map<String, Object?> json) => ChatMessage(
@@ -121,6 +155,7 @@ class ChatMessage {
         groupId: (json['group_id'] as num?)?.toInt(),
         isSystemMsg: json['is_system_msg'] as bool? ?? false,
         isTime: json['is_time'] as bool? ?? false,
+        type: chatMsgTypeFrom(json['msg_type']),
       );
 
   @override
@@ -171,6 +206,9 @@ class ChatSession {
   /// 最后读取时间（秒）。
   final int lastReadTime;
 
+  /// 好友关系位掩码（仅好友会话；群为 0）。
+  final int relation;
+
   const ChatSession({
     required this.id,
     required this.type,
@@ -181,6 +219,7 @@ class ChatSession {
     this.lastMessage,
     this.unreadCount = 0,
     this.lastReadTime = 0,
+    this.relation = 0,
   });
 
   ChatSession copyWith({
@@ -190,6 +229,7 @@ class ChatSession {
     int? unreadCount,
     int? lastReadTime,
     String? name,
+    int? relation,
   }) =>
       ChatSession(
         id: id,
@@ -201,6 +241,7 @@ class ChatSession {
         lastMessage: lastMessage ?? this.lastMessage,
         unreadCount: unreadCount ?? this.unreadCount,
         lastReadTime: lastReadTime ?? this.lastReadTime,
+        relation: relation ?? this.relation,
       );
 
   Map<String, Object?> toJson() => {
@@ -213,6 +254,7 @@ class ChatSession {
         'last_message': lastMessage?.toJson(),
         'unread_count': unreadCount,
         'last_read_time': lastReadTime,
+        'relation': relation,
       };
 
   factory ChatSession.fromJson(Map<String, Object?> json) => ChatSession(
@@ -230,6 +272,7 @@ class ChatSession {
             : null,
         unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
         lastReadTime: (json['last_read_time'] as num?)?.toInt() ?? 0,
+        relation: (json['relation'] as num?)?.toInt() ?? 0,
       );
 }
 
@@ -239,14 +282,82 @@ class Contact {
   final String nickname;
   final String? avatar;
 
-  const Contact({required this.uin, required this.nickname, this.avatar});
+  /// 好友关系位掩码（反编译 friend_relation）：
+  /// bit0=我申请, bit1=他申请我, bit2=单向, bit3=双向好友, bit4=我关注,
+  /// bit5=关注我, bit6=黑名单, bit7=QQ好友。
+  final int relation;
 
-  Map<String, Object?> toJson() => {'uin': uin, 'nickname': nickname, 'avatar': avatar};
+  /// 成为好友/最近互动时间戳（relation&8 的好友有值，否则 0）。
+  final int mark;
+
+  const Contact({
+    required this.uin,
+    required this.nickname,
+    this.avatar,
+    this.relation = 0,
+    this.mark = 0,
+  });
+
+  /// 是否双向好友（我的好友列表）。
+  bool get isEachother => (relation & 8) != 0;
+
+  /// 是否我关注（但非双向）。
+  bool get isMyAttention => (relation & 16) != 0;
+
+  /// 是否黑名单。
+  bool get isBlack => (relation & 64) != 0;
+
+  /// 是否对方申请我（待处理）。
+  bool get isBeApply => (relation & 2) != 0;
+
+  Map<String, Object?> toJson() =>
+      {'uin': uin, 'nickname': nickname, 'avatar': avatar, 'relation': relation, 'mark': mark};
 
   factory Contact.fromJson(Map<String, Object?> json) => Contact(
         uin: (json['uin'] as num).toInt(),
         nickname: json['nickname']?.toString() ?? '',
         avatar: json['avatar']?.toString(),
+        relation: (json['relation'] as num?)?.toInt() ?? 0,
+        mark: (json['mark'] as num?)?.toInt() ?? 0,
+      );
+}
+
+/// 好友申请状态。
+enum FriendRequestStatus { pending, accepted, rejected, removed }
+
+/// 好友申请（applyed_notify 推送归集；本地持久化，无需独立查询接口）。
+class FriendRequest {
+  final int uin;
+  final String name;
+  final String? avatar;
+  final int time;
+  final FriendRequestStatus status;
+
+  const FriendRequest({
+    required this.uin,
+    required this.name,
+    this.avatar,
+    this.time = 0,
+    this.status = FriendRequestStatus.pending,
+  });
+
+  Map<String, Object?> toJson() => {
+        'uin': uin,
+        'name': name,
+        'avatar': avatar,
+        'time': time,
+        'status': status.name,
+      };
+
+  factory FriendRequest.fromJson(Map<String, Object?> json) => FriendRequest(
+        uin: (json['uin'] as num).toInt(),
+        name: json['name']?.toString() ?? '',
+        avatar: json['avatar']?.toString(),
+        time: (json['time'] as num?)?.toInt() ?? 0,
+        status: FriendRequestStatus.values.firstWhere(
+          (s) => s.name == json['status'],
+          orElse: () => FriendRequestStatus.pending,
+        ),
       );
 }
 
@@ -291,4 +402,44 @@ class GroupNotify {
       return null;
     }
   }
+}
+
+/// 群详情 —— 由 query_user_groups 的 members/creator 归集。
+/// 仅存必要的展示/操作字段，成员为 uin 列表（昵称/头像与好友共用 ProfileClient 拉取）。
+class GroupInfo {
+  final int groupId;
+  final String name;
+
+  /// 群主（lord），`identity == 1` 的成员。
+  final int creatorUin;
+
+  /// 成员 uin 列表（含群主）。
+  final List<int> members;
+
+  /// 我是否被本群静音（ban_group==1 → ignoreAll）。
+  final bool isMuteAll;
+
+  const GroupInfo({
+    required this.groupId,
+    required this.name,
+    this.creatorUin = 0,
+    this.members = const [],
+    this.isMuteAll = false,
+  });
+
+  Map<String, Object?> toJson() => {
+        'group_id': groupId,
+        'name': name,
+        'creator_uin': creatorUin,
+        'members': members,
+        'is_mute_all': isMuteAll,
+      };
+
+  factory GroupInfo.fromJson(Map<String, Object?> json) => GroupInfo(
+        groupId: (json['group_id'] as num).toInt(),
+        name: json['name']?.toString() ?? '',
+        creatorUin: (json['creator_uin'] as num?)?.toInt() ?? 0,
+        members: (json['members'] as List?)?.whereType<num>().map((e) => e.toInt()).toList() ?? const [],
+        isMuteAll: json['is_mute_all'] as bool? ?? false,
+      );
 }
