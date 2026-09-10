@@ -92,14 +92,22 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// 登录；成功返回 true。
-  Future<bool> login({required int uin, required String password}) async {
+  /// 成功后账号总是加入本地账号列表（切换账号用）；自动登录凭据仅当
+  /// autoLogin 开启时保存（决定下次启动是否免登录）。
+  Future<bool> login({
+    required int uin,
+    required String password,
+    String? name,
+  }) async {
     final service = ref.read(chatServiceProvider);
     state = const AuthState(isBusy: true);
     try {
       final auth = await service.login(uin: uin, password: password);
       state = AuthState(isLoggedIn: true, auth: auth);
-      // 自动登录开启时保存凭据，下次启动免登录
       final settings = ref.read(settingsProvider);
+      // 账号列表：记录昵称（登录成功即有 auth.name）
+      await settings.saveAccount(uin, password, name: name ?? auth.name);
+      // 自动登录开启时保存当前凭据，下次启动免登录
       final autoLogin = await settings.getBool(SettingsKeys.autoLogin);
       if (autoLogin) {
         await settings.saveCredentials(uin, password);
@@ -127,6 +135,9 @@ class AuthNotifier extends Notifier<AuthState> {
     final service = ref.read(chatServiceProvider);
     // reset() 是 async：fire-and-forget，出错也交由内部处理，不阻塞登出流程
     unawaited(service.reset());
+    // 换账号：关闭当前打开的会话 + 清空聊天控制器，防止旧账号消息残留
+    ref.read(activeSessionProvider.notifier).close();
+    ref.read(chatBridgeProvider).reset();
     state = const AuthState();
   }
 }

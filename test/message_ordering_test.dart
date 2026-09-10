@@ -22,16 +22,17 @@ void main() {
       final db = AppDatabase(NativeDatabase.memory());
       addTearDown(db.close);
       const key = 'friend_123';
+      const owner = 1;
 
       // 乱序插入：300 / 100 / 200
       await db.insertMessage(
-          chatMessageToCompanion(ChatMessage(uin: 1, text: 'first', time: 300), key, myUin: 1));
+          chatMessageToCompanion(ChatMessage(uin: 1, text: 'first', time: 300), key, myUin: 1, ownerUin: owner));
       await db.insertMessage(
-          chatMessageToCompanion(ChatMessage(uin: 1, text: 'second', time: 100), key, myUin: 1));
+          chatMessageToCompanion(ChatMessage(uin: 1, text: 'second', time: 100), key, myUin: 1, ownerUin: owner));
       await db.insertMessage(
-          chatMessageToCompanion(ChatMessage(uin: 1, text: 'third', time: 200), key, myUin: 1));
+          chatMessageToCompanion(ChatMessage(uin: 1, text: 'third', time: 200), key, myUin: 1, ownerUin: owner));
 
-      final rows = await db.messagesOf(key);
+      final rows = await db.messagesOf(owner, key);
       final got = rows.map((r) => r.time).toList();
       // 升序语义：已排序输入排序后应恒等
       final expected = _expectedAscending(

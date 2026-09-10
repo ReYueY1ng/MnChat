@@ -202,6 +202,8 @@ class ChatService {
   Future<void> _connectChatPush() async {
     final auth = _auth;
     if (auth == null) return;
+    // 是否为"重连"（此前已连接成功过）：用于重连成功后刷新数据。
+    final isReconnect = _hasConnectedOnce;
     _setState(ChatServiceState.connectingChatPush);
     try {
       final (host, token) = await _chatpush.alloc(
@@ -215,7 +217,7 @@ class ChatService {
         token: token,
         uin: auth.uin,
         authToken: auth.jwt, // 握手用（Lua container.conn.token = 登录 jwt）
-        reconnect: _hasConnectedOnce, // 重连时 true → URL &reconnect=1（对齐原版，保留在线态）
+        reconnect: isReconnect, // 重连时 true → URL &reconnect=1（对齐原版，保留在线态）
         onPush: _handlePush,
         onClosed: _onChatpushClosed,
       );
@@ -226,6 +228,11 @@ class ChatService {
       _hasConnectedOnce = true;
       _shouldReconnect = true;
       _setState(ChatServiceState.connected);
+      // 重连成功 → 刷新本地数据：掉线期间的会话/好友/未读离线了，
+      // 主动重新拉取一遍，避免"断线重连后收不到之前消息"。
+      if (isReconnect) {
+        unawaited(_refreshAfterReconnect());
+      }
     } catch (e) {
       _lastError = 'ChatPush connect failed: $e';
       // 登录本身已成功（auth 已获取）：不把状态置为 error，保持 connected，
@@ -233,6 +240,31 @@ class ChatService {
       // 出现状态不一致。
       _setState(ChatServiceState.connected);
       _scheduleReconnect();
+    }
+  }
+
+  /// 重连成功后的数据刷新：好友列表/群（含未读状态）+ 好友在线状态。
+  Future<void> _refreshAfterReconnect() async {
+    try {
+      await loadSessions(); // 好友/群列表重新拉（query_friend_list 未读/关系）
+      final uins = _contacts.map((c) => c.uin).toList();
+      await _probeBuddyMain(uins); // 在线/游玩状态经 chatpush 拉最新
+      // 逐个好友补拉离线期间的消息历史（前 N 个会话）
+      final chatted = _friendSessions.values
+          .where((s) => s.lastMessage != null)
+          .toList()
+        ..sort(
+          (a, b) => (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0),
+        );
+      for (final s in chatted.take(20)) {
+        try {
+          await requestFriendHistory(s.id);
+        } catch (_) {
+          // 单个失败不阻断
+        }
+      }
+    } catch (e) {
+      debugPrint('refresh after reconnect failed: $e');
     }
   }
 
@@ -392,9 +424,14 @@ class ChatService {
       case 'chat_notify':
         // {cmd, src_uin, des_uin, chat_msg, send_time, ts, extend_data, online}
         // 注意 send_time/src_uin 是字符串，需兼容解析。
+        // 对齐反编译 friendservice.lua:1772-1774：只有收件人是**我**的
+        // chat_notify 才处理（des_uin == myUin），否则丢弃——防止多端/转发
+        // 推送把"发给别人"的消息误当成我的（表现为发消息显示成别人的）。
+        // 自己发送的消息不依赖服务器回推（本地乐观回显 addLocalMessage），
+        // 服务器确认的 chat_notify des_uin 是对方，同样被忽略，不会重复。
         final src = _toNum(data['src_uin']);
         final des = _toNum(data['des_uin']);
-        final otherUin = src == myUin ? des : src;
+        if (des != myUin) break; // 收件人不是我 → 忽略
         final time = _toNum(data['send_time']) != 0
             ? _toNum(data['send_time'])
             : _toNum(data['ts']);
@@ -404,14 +441,14 @@ class ChatService {
           time: time,
           extendData: data['extend_data']?.toString(),
         );
-        _upsertFriendMessage(otherUin, m);
+        _upsertFriendMessage(src, m);
         // 推送携带好友在线状态（online 字段）→ 更新会话在线标识。
         final onlineVal = data['online'];
         if (onlineVal != null) {
           final isOnline = onlineVal == true || onlineVal == 1;
-          final s = _friendSessions[otherUin];
+          final s = _friendSessions[src];
           if (s != null && s.isOnline != isOnline) {
-            _friendSessions[otherUin] = s.copyWith(isOnline: isOnline);
+            _friendSessions[src] = s.copyWith(isOnline: isOnline);
             _emitSessionSnapshot();
           }
         }
@@ -708,14 +745,18 @@ class ChatService {
     }
   }
 
-  /// 从 SQLite 恢复上次的会话与消息（离线缓存）。
+  /// 从 SQLite 恢复上次的会话与消息（离线缓存，按账号隔离）。
   Future<void> _loadOfflineCache() async {
     final db = _db;
     if (db == null) return;
     try {
-      final sessionRows = await db.allSessions();
+      final owner = myUin;
+      if (owner == 0) return;
+      // v6→v7 迁移：把旧数据（ownerUin=0）收养到当前账号，避免升级丢历史
+      await db.adoptOrphanData(owner);
+      final sessionRows = await db.allSessions(owner);
       // 一次查询全部消息再内存分组，消除逐会话查询的 N+1
-      final allMsgs = await db.allMessages();
+      final allMsgs = await db.allMessages(owner);
       final msgsByKey = <String, List<ChatMessageRecord>>{};
       for (final r in allMsgs) {
         msgsByKey.putIfAbsent(r.sessionKey, () => []).add(r);
@@ -738,7 +779,7 @@ class ChatService {
         }
       }
       // 恢复好友信息缓存（昵称/头像/在线/游玩状态）
-      final friendRows = await db.allFriends();
+      final friendRows = await db.allFriends(owner);
       if (friendRows.isNotEmpty) {
         _contacts.clear();
         for (final r in friendRows) {
@@ -786,16 +827,24 @@ class ChatService {
       // 可能是 Map(uin→info) 或 List。
       final data = resp['friend_list'] ?? resp['data'] ?? resp;
       final items = _asFriendItems(data);
-      if (items.isNotEmpty) {
-        _contacts.clear();
-        _friendSessions.clear();
-      }
+      // 已聊过的好友会话不因刷新而消失：合并而不是全量清空重建。
+      // 之前每次刷新 clear 后重建（无 lastMessage），会话列表短暂消失，
+      // 直到历史请求逐个回填才恢复 —— 表现为"聊过的人闪现后消失"。
+      final oldContacts = <int, Contact>{
+        for (final c in _contacts) c.uin: c,
+      };
+      final oldSessions = <int, ChatSession>{..._friendSessions};
+      final newContacts = <Contact>[];
+      final newSessions = <int, ChatSession>{};
+      final seen = <int>{};
+
       for (final m in items) {
         final uin2 = _friendUin(m);
         if (uin2 == 0) continue;
         if (uin2 == myUin || uin2 == 1000) continue;
         final relation = _friendRelation(m);
         final mark = _friendMark(m);
+        seen.add(uin2);
         // relation & 2 = 对方申请我（待处理好友申请）→ 归入申请列表，不建普通会话
         if ((relation & 2) != 0) {
           final exists = _friendRequests.any(
@@ -816,30 +865,72 @@ class ChatService {
           }
           continue;
         }
+        final oldSession = oldSessions[uin2];
+        final oldContact = oldContacts[uin2];
         final nickname = _friendNickname(m);
-        // friend_list 只返回 {mark, uin, relation}，无昵称 → 用 uin 兜底显示
-        final displayName = nickname.isNotEmpty ? nickname : '$uin2';
-        _contacts.add(
+        // 昵称/头像优先保留旧值（离线缓存/资料拉取已有），新列表给的可覆盖
+        final keepName =
+            nickname.isNotEmpty ? nickname : (oldSession?.name ?? '$uin2');
+        // 保留聊天状态（最后消息/未读/已读时间），不清零
+        final merged = ChatSession(
+          id: uin2,
+          type: ChatSessionType.friend,
+          name: keepName.isNotEmpty ? keepName : '$uin2',
+          avatar: _friendAvatar(m) ?? oldSession?.avatar,
+          isOnline: _friendOnline(m),
+          gameStatus: _friendGameStatus(m),
+          relation: relation,
+          lastMessage: oldSession?.lastMessage,
+          unreadCount: oldSession?.unreadCount ?? 0,
+          lastReadTime: oldSession?.lastReadTime ?? 0,
+        );
+        newSessions[uin2] = merged;
+        // 昵称以会话名为准（getProfileBatch3 回填到 session.name）
+        final contactName = oldContact?.nickname.isNotEmpty == true
+            ? oldContact!.nickname
+            : (keepName != '$uin2' ? keepName : '');
+        newContacts.add(
           Contact(
             uin: uin2,
-            nickname: nickname,
+            nickname: contactName,
+            avatar: oldContact?.avatar ?? merged.avatar,
             relation: relation,
             mark: mark,
           ),
         );
-        _friendSessions[uin2] = ChatSession(
-          id: uin2,
-          type: ChatSessionType.friend,
-          name: displayName,
-          avatar: _friendAvatar(m),
-          isOnline: _friendOnline(m),
-          gameStatus: _friendGameStatus(m),
-          relation: relation,
-        );
       }
+
+      // 移除不再出现在好友列表中的占位会话：仅清理从未聊过天、
+      // 也无消息历史的（不丢已保存的聊天记录）；有历史的保留，
+      // 避免误删离线缓存恢复的会话。
+      oldSessions.forEach((uin2, s) {
+        if (seen.contains(uin2)) return;
+        if (s.lastMessage == null &&
+            (_messagesCache[_sessionKey(ChatSessionType.friend, uin2)]?.isEmpty ??
+                true)) {
+          _friendSessions.remove(uin2);
+        } else {
+          // 保留已聊天但已不在列表的好友（黑名单/被删仍可看历史）
+          newSessions.putIfAbsent(uin2, () => s);
+          if (!newContacts.any((c) => c.uin == uin2)) {
+            newContacts.add(
+              oldContacts[uin2] ??
+                  Contact(uin: uin2, nickname: s.name, relation: s.relation),
+            );
+          }
+        }
+      });
+
+      _contacts
+        ..clear()
+        ..addAll(newContacts);
+      _friendSessions
+        ..clear()
+        ..addAll(newSessions);
       // 批量拉取昵称/头像（buddysvr batch_friend_info，走 WS；HTTP chatpush 不支持）
       unawaited(_fetchFriendInfos(items));
       _emitFriendRequests();
+      _emitSessionSnapshot();
       // 保存好友信息缓存（下次启动免等待网络拉取）
       await _saveFriendCache();
     } catch (e) {
@@ -847,22 +938,38 @@ class ChatService {
     }
   }
 
-  /// 把内存好友信息写入 SQLite（昵称/头像/在线/游玩状态）。
+  /// 把内存好友信息写入 SQLite（昵称/头像/在线/游玩状态，按账号隔离）。
+  /// 昵称以好友会话名为准（getProfileBatch3 已回填），保证缓存有名字。
   Future<void> _saveFriendCache() async {
     final db = _db;
-    if (db == null || _contacts.isEmpty) return;
+    if (db == null || (_contacts.isEmpty && _friendSessions.isEmpty)) return;
     try {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final records = _contacts.map((c) {
-        final s = _friendSessions[c.uin];
+      final owner = myUin;
+      if (owner == 0) return;
+      // 以 contacts 为主键集合，昵称/头像从 friendSessions 同步（资料更全）
+      final uins = <int>{..._contacts.map((c) => c.uin)};
+      final records = uins.map((uin) {
+        final c = _contacts.where((x) => x.uin == uin).firstOrNull;
+        final s = _friendSessions[uin];
+        final nick = c?.nickname.isNotEmpty == true
+            ? c!.nickname
+            : ((s != null && s.name != '$uin') ? s.name : '');
         return friendToRecord(
-          c,
+          Contact(
+            uin: uin,
+            nickname: nick,
+            avatar: c?.avatar ?? s?.avatar,
+            relation: c?.relation ?? s?.relation ?? 0,
+            mark: c?.mark ?? 0,
+          ),
           updatedAt: now,
           isOnline: s?.isOnline ?? false,
           gameStatus: s?.gameStatus,
+          ownerUin: owner,
         );
       }).toList();
-      await db.replaceFriends(records);
+      await db.replaceFriends(owner, records);
     } catch (e) {
       debugPrint('save friend cache failed: $e');
     }
@@ -1218,11 +1325,14 @@ class ChatService {
   /// 持久化一条消息 + 更新会话行。写库失败仅记录日志，不阻断消息链路。
   void _persistMessage(ChatSessionType type, int id, ChatMessage m) {
     final db = _db;
-    if (db == null) return;
+    if (db == null || myUin == 0) return;
     final key = _sessionKey(type, id);
+    final owner = myUin;
     unawaited(() async {
       try {
-        await db.insertMessage(chatMessageToCompanion(m, key, myUin: myUin));
+        await db.insertMessage(
+          chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner),
+        );
       } catch (e) {
         debugPrint('persist message failed: $e');
       }
@@ -1230,26 +1340,36 @@ class ChatService {
     _persistSession(type, id);
   }
 
-  /// 持久化会话行（未读/最后消息）。
+  /// 持久化会话行（未读/最后消息，按账号隔离）。
   void _persistSession(ChatSessionType type, int id) {
     final db = _db;
-    if (db == null) return;
+    if (db == null || myUin == 0) return;
     final s = type == ChatSessionType.friend
         ? _friendSessions[id]
         : _groupSessions[id];
     if (s == null) return;
-    unawaited(db.upsertSession(chatSessionToCompanion(s)));
+    unawaited(db.upsertSession(chatSessionToCompanion(s, ownerUin: myUin)));
   }
 
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
     if (msgs.isEmpty) return;
     final key = _sessionKey(type, id);
     // 缓存以 time 升序为规范（离线/网络历史乱序到达时归位）。
-    _messagesCache[key] = sortMessagesAscending(msgs);
-    _persistHistory(type, id, msgs);
+    final sorted = sortMessagesAscending(msgs);
+    _messagesCache[key] = sorted;
+    _persistHistory(type, id, sorted);
+    // 回填会话摘要（最后一条消息）：否则网络历史拉回后会话列表
+    // 不显示最近消息，也无法区分"已聊过"与"纯好友"。
+    final map = type == ChatSessionType.friend ? _friendSessions : _groupSessions;
+    final existing = map[id];
+    if (existing != null) {
+      map[id] = existing.copyWith(lastMessage: sorted.last);
+      _persistSession(type, id);
+    }
+    _emitSessionSnapshot();
     // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配，
     // 收到后重新 yield historyOf）
-    _eventCtrl.add(ChatEvent(type, id, msgs.last));
+    _eventCtrl.add(ChatEvent(type, id, sorted.last));
   }
 
   /// 持久化整段历史（先清空该会话旧消息再批量写入，避免重复）。
@@ -1266,9 +1386,12 @@ class ChatService {
     List<ChatMessage> msgs,
   ) async {
     // 原子替换：清空 + 批量写入在一个事务内完成，中途失败不留半写状态。
+    final owner = myUin;
+    if (owner == 0) return;
     await db.replaceMessages(
+      owner,
       key,
-      msgs.map((m) => chatMessageToCompanion(m, key, myUin: myUin)).toList(),
+      msgs.map((m) => chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner)).toList(),
     );
   }
 

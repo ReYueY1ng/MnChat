@@ -200,6 +200,12 @@ class ChatPushConnection {
 
   bool _closed = false;
 
+  /// 最近一次收到心跳 ack 的时间。看门狗据此判断连接是否假死（半开连接）。
+  DateTime _lastPong = DateTime.now();
+
+  /// 心跳 ack 看门狗：TCP 半开时 onDone 不会触发，主动探测无 ack 即强制断开。
+  Timer? _watchdog;
+
   final Map<int, Completer<ChatPushRpcResult>> _pending = {};
   final Set<String> _recvedOk = <String>{};
   static const int _kMaxRecvedOk = 1000;
@@ -220,6 +226,15 @@ class ChatPushConnection {
       const Duration(seconds: 10),
       (_) => _sendHeartbeat(),
     );
+    // 每 15s 检查一次心跳 ack：超过 45s（4+ 次心跳）无任何 ack → 判定
+    // 连接假死，主动断开走 onClosed → 上层立即重连。
+    _watchdog = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (_closed) return;
+      if (DateTime.now().difference(_lastPong) >
+          const Duration(seconds: 45)) {
+        _forceClose();
+      }
+    });
     // 连接打开 → 立即发 {21, authToken} 握手（container.lua:1290-1297）
     _sendHandshake();
   }
@@ -301,6 +316,7 @@ class ChatPushConnection {
 
   void _onMessage(dynamic raw) {
     if (raw is! List<int>) return;
+    _lastPong = DateTime.now(); // 任意下行数据都证明连接存活
     final List<dynamic> msg;
     try {
       msg = chatpushJsonDecode(utf8.decode(chatpushDecrypt(raw)));
@@ -342,6 +358,7 @@ class ChatPushConnection {
 
     if (msgType == 0 && msg.length >= 3) {
       // 心跳 ack: [0, seq, svrtime_delta] → 回 [1, seq]
+      _lastPong = DateTime.now(); // 心跳有响应 → 连接存活
       final seq = _toInt(msg[1]);
       final completer = _pending[seq];
       if (completer != null && !completer.isCompleted) {
@@ -380,9 +397,23 @@ class ChatPushConnection {
     }
   }
 
+  /// 强制断开（看门狗探测到假死连接）。清理后走 onClosed → 上层重连。
+  void _forceClose() {
+    if (_closed) return;
+    _closed = true;
+    _heartbeat?.cancel();
+    _watchdog?.cancel();
+    for (final c in _pending.values) {
+      if (!c.isCompleted) c.completeError(ChatPushError('heartbeat timeout'));
+    }
+    unawaited(_channel.sink.close());
+    onClosed?.call();
+  }
+
   void _onDone() {
     _closed = true;
     _heartbeat?.cancel();
+    _watchdog?.cancel();
     for (final c in _pending.values) {
       if (!c.isCompleted) c.completeError(ChatPushError('connection closed'));
     }
@@ -399,6 +430,7 @@ class ChatPushConnection {
 
   Future<void> close() async {
     _heartbeat?.cancel();
+    _watchdog?.cancel();
     await _sub?.cancel();
     await _channel.sink.close();
   }

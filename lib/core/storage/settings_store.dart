@@ -5,14 +5,18 @@
 /// 会因 `getApplicationSupportDirectory()`/`File` 抛错）。
 library;
 
+import 'dart:convert';
+
 import '../crypto/credential_cipher.dart' show decryptPassword, encryptPassword;
 import 'app_database.dart' show AppDatabase;
 
 /// 设置项 key 常量。
 class SettingsKeys {
   static const String autoLogin = 'auto_login'; // '1'/'0'
-  static const String savedUin = 'saved_uin'; // string
+  static const String savedUin = 'saved_uin'; // string（当前账号）
   static const String savedPassword = 'saved_password'; // string
+  static const String lastUin = 'last_uin'; // 最后登录账号（账号选择高亮）
+  static const String accounts = 'accounts'; // JSON 数组：已保存的多账号
   static const String serverBase = 'server_base'; // 服务器地址（留空=默认）
   static const String notifyEnabled = 'notify_enabled'; // 新消息通知 '1'/'0'
   static const String sortMode = 'sort_mode'; // 'time'|'name'|'unread'
@@ -23,6 +27,26 @@ class SavedCredentials {
   final int uin;
   final String password;
   const SavedCredentials({required this.uin, required this.password});
+}
+
+/// 已保存的账号（切换账号用）。
+class SavedAccount {
+  final int uin;
+  final String password; // 已解密明文
+  final String? name;
+  const SavedAccount({required this.uin, required this.password, this.name});
+
+  Map<String, Object?> toJson() => {
+        'uin': uin,
+        'pwd': password,
+        'name': name,
+      };
+
+  static SavedAccount fromJson(Map<String, Object?> m) => SavedAccount(
+        uin: (m['uin'] as num?)?.toInt() ?? 0,
+        password: m['pwd']?.toString() ?? '',
+        name: m['name']?.toString(),
+      );
 }
 
 /// 设置存储：直接读写 Drift 设置表。
@@ -46,7 +70,7 @@ class SettingsStore {
   Future<void> setBool(String key, bool value) =>
       setString(key, value ? '1' : '0');
 
-  /// 保存自动登录凭据（密码以 v1 密文形式落库，避免明文泄露）。
+  /// 保存自动登录凭据（当前账号，密码加密落库）。
   Future<void> saveCredentials(int uin, String password) async {
     await _db.setSetting(SettingsKeys.savedUin, '$uin');
     await _db.setSetting(
@@ -55,8 +79,7 @@ class SettingsStore {
     );
   }
 
-  /// 读取自动登录凭据；未保存或密文被篡改返回 null。
-  /// 旧版明文密码由 decryptPassword 内部兼容处理，无需额外迁移逻辑。
+  /// 读取当前账号的自动登录凭据；未保存或密文被篡改返回 null。
   Future<SavedCredentials?> loadCredentials() async {
     final uinStr = await getString(SettingsKeys.savedUin);
     final pwd = await getString(SettingsKeys.savedPassword);
@@ -71,5 +94,86 @@ class SettingsStore {
   Future<void> clearCredentials() async {
     await _db.clearSetting(SettingsKeys.savedUin);
     await _db.clearSetting(SettingsKeys.savedPassword);
+  }
+
+  // ── 多账号切换 ────────────────────────────────────────────────────────
+
+  /// 保存/更新一个账号（加入账号列表 + 设为最后登录账号）。
+  /// 密码用账号 uin 派生密钥加密后落库；name 仅作展示。
+  /// 注意：不写入"自动登录凭据"（saved_uin/saved_password）——
+  /// 那由 [saveCredentials] 单独按 autoLogin 开关控制。
+  Future<void> saveAccount(
+    int uin,
+    String password, {
+    String? name,
+  }) async {
+    final accounts = await _loadAccounts();
+    accounts.removeWhere((a) => a['uin'] == uin);
+    accounts.add({
+      'uin': uin,
+      'pwd': encryptPassword(password, uin),
+      'name': name,
+    });
+    await _saveAccounts(accounts);
+    await _db.setSetting(SettingsKeys.lastUin, '$uin');
+  }
+
+  /// 保存/更新一个已登录账号（不额外重加密——login 成功后调用，
+  /// 密码已是当前会话使用过的明文，仍加密落库）。
+  Future<void> upsertAccount(SavedAccount account) =>
+      saveAccount(account.uin, account.password, name: account.name);
+
+  /// 已保存账号列表（解密后的明文密码）。
+  Future<List<SavedAccount>> listAccounts() async {
+    final accounts = await _loadAccounts();
+    final out = <SavedAccount>[];
+    for (final a in accounts) {
+      final uin = (a['uin'] as num?)?.toInt() ?? 0;
+      final enc = a['pwd']?.toString() ?? '';
+      if (uin == 0 || enc.isEmpty) continue;
+      final plain = decryptPassword(enc, uin);
+      if (plain == null) continue; // 密文被篡改/密钥不符 → 跳过
+      out.add(
+        SavedAccount(uin: uin, password: plain, name: a['name']?.toString()),
+      );
+    }
+    // 最后登录的账号排最前
+    final last = await getString(SettingsKeys.lastUin);
+    out.sort((a, b) {
+      if ('${a.uin}' == last) return -1;
+      if ('${b.uin}' == last) return 1;
+      return a.uin.compareTo(b.uin);
+    });
+    return out;
+  }
+
+  /// 删除一个已保存账号；若删的是当前账号，同时清当前凭据。
+  Future<void> removeAccount(int uin) async {
+    final accounts = await _loadAccounts();
+    accounts.removeWhere((a) => a['uin'] == uin);
+    await _saveAccounts(accounts);
+    final cur = await getString(SettingsKeys.savedUin);
+    if (cur == '$uin') {
+      await clearCredentials();
+    }
+  }
+
+  Future<List<Map<String, Object?>>> _loadAccounts() async {
+    final raw = await getString(SettingsKeys.accounts);
+    if (raw == null || raw.isEmpty) return [];
+    try {
+      final d = jsonDecode(raw);
+      if (d is List) {
+        return d
+            .whereType<Map>()
+            .map((m) => m.cast<String, Object?>())
+            .toList();
+      }
+    } catch (_) {}
+    return [];
+  }
+
+  Future<void> _saveAccounts(List<Map<String, Object?>> accounts) async {
+    await setString(SettingsKeys.accounts, jsonEncode(accounts));
   }
 }

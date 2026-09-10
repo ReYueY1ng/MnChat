@@ -189,6 +189,18 @@ class $ChatMessagesTable extends ChatMessages
     requiredDuringInsert: false,
     defaultValue: const Constant('text'),
   );
+  static const VerificationMeta _ownerUinMeta = const VerificationMeta(
+    'ownerUin',
+  );
+  @override
+  late final GeneratedColumn<int> ownerUin = GeneratedColumn<int>(
+    'owner_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     id,
@@ -207,6 +219,7 @@ class $ChatMessagesTable extends ChatMessages
     isTime,
     direction,
     msgType,
+    ownerUin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -335,6 +348,12 @@ class $ChatMessagesTable extends ChatMessages
         msgType.isAcceptableOrUnknown(data['msg_type']!, _msgTypeMeta),
       );
     }
+    if (data.containsKey('owner_uin')) {
+      context.handle(
+        _ownerUinMeta,
+        ownerUin.isAcceptableOrUnknown(data['owner_uin']!, _ownerUinMeta),
+      );
+    }
     return context;
   }
 
@@ -408,6 +427,10 @@ class $ChatMessagesTable extends ChatMessages
         DriftSqlType.string,
         data['${effectivePrefix}msg_type'],
       )!,
+      ownerUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}owner_uin'],
+      )!,
     );
   }
 
@@ -435,6 +458,9 @@ class ChatMessageRecord extends DataClass
   final bool isTime;
   final String direction;
   final String msgType;
+
+  /// 账号归属（本地多账号数据隔离）：0=旧数据（首登收养）。
+  final int ownerUin;
   const ChatMessageRecord({
     required this.id,
     required this.content,
@@ -452,6 +478,7 @@ class ChatMessageRecord extends DataClass
     required this.isTime,
     required this.direction,
     required this.msgType,
+    required this.ownerUin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -484,6 +511,7 @@ class ChatMessageRecord extends DataClass
     map['is_time'] = Variable<bool>(isTime);
     map['direction'] = Variable<String>(direction);
     map['msg_type'] = Variable<String>(msgType);
+    map['owner_uin'] = Variable<int>(ownerUin);
     return map;
   }
 
@@ -517,6 +545,7 @@ class ChatMessageRecord extends DataClass
       isTime: Value(isTime),
       direction: Value(direction),
       msgType: Value(msgType),
+      ownerUin: Value(ownerUin),
     );
   }
 
@@ -542,6 +571,7 @@ class ChatMessageRecord extends DataClass
       isTime: serializer.fromJson<bool>(json['isTime']),
       direction: serializer.fromJson<String>(json['direction']),
       msgType: serializer.fromJson<String>(json['msgType']),
+      ownerUin: serializer.fromJson<int>(json['ownerUin']),
     );
   }
   @override
@@ -564,6 +594,7 @@ class ChatMessageRecord extends DataClass
       'isTime': serializer.toJson<bool>(isTime),
       'direction': serializer.toJson<String>(direction),
       'msgType': serializer.toJson<String>(msgType),
+      'ownerUin': serializer.toJson<int>(ownerUin),
     };
   }
 
@@ -584,6 +615,7 @@ class ChatMessageRecord extends DataClass
     bool? isTime,
     String? direction,
     String? msgType,
+    int? ownerUin,
   }) => ChatMessageRecord(
     id: id ?? this.id,
     content: content ?? this.content,
@@ -603,6 +635,7 @@ class ChatMessageRecord extends DataClass
     isTime: isTime ?? this.isTime,
     direction: direction ?? this.direction,
     msgType: msgType ?? this.msgType,
+    ownerUin: ownerUin ?? this.ownerUin,
   );
   ChatMessageRecord copyWithCompanion(ChatMessagesCompanion data) {
     return ChatMessageRecord(
@@ -630,6 +663,7 @@ class ChatMessageRecord extends DataClass
       isTime: data.isTime.present ? data.isTime.value : this.isTime,
       direction: data.direction.present ? data.direction.value : this.direction,
       msgType: data.msgType.present ? data.msgType.value : this.msgType,
+      ownerUin: data.ownerUin.present ? data.ownerUin.value : this.ownerUin,
     );
   }
 
@@ -651,7 +685,8 @@ class ChatMessageRecord extends DataClass
           ..write('isSystemMsg: $isSystemMsg, ')
           ..write('isTime: $isTime, ')
           ..write('direction: $direction, ')
-          ..write('msgType: $msgType')
+          ..write('msgType: $msgType, ')
+          ..write('ownerUin: $ownerUin')
           ..write(')'))
         .toString();
   }
@@ -674,6 +709,7 @@ class ChatMessageRecord extends DataClass
     isTime,
     direction,
     msgType,
+    ownerUin,
   );
   @override
   bool operator ==(Object other) =>
@@ -694,7 +730,8 @@ class ChatMessageRecord extends DataClass
           other.isSystemMsg == this.isSystemMsg &&
           other.isTime == this.isTime &&
           other.direction == this.direction &&
-          other.msgType == this.msgType);
+          other.msgType == this.msgType &&
+          other.ownerUin == this.ownerUin);
 }
 
 class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
@@ -714,6 +751,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
   final Value<bool> isTime;
   final Value<String> direction;
   final Value<String> msgType;
+  final Value<int> ownerUin;
   const ChatMessagesCompanion({
     this.id = const Value.absent(),
     this.content = const Value.absent(),
@@ -731,6 +769,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
     this.isTime = const Value.absent(),
     this.direction = const Value.absent(),
     this.msgType = const Value.absent(),
+    this.ownerUin = const Value.absent(),
   });
   ChatMessagesCompanion.insert({
     this.id = const Value.absent(),
@@ -749,6 +788,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
     required bool isTime,
     required String direction,
     this.msgType = const Value.absent(),
+    this.ownerUin = const Value.absent(),
   }) : content = Value(content),
        sessionKey = Value(sessionKey),
        uin = Value(uin),
@@ -774,6 +814,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
     Expression<bool>? isTime,
     Expression<String>? direction,
     Expression<String>? msgType,
+    Expression<int>? ownerUin,
   }) {
     return RawValuesInsertable({
       if (id != null) 'id': id,
@@ -792,6 +833,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
       if (isTime != null) 'is_time': isTime,
       if (direction != null) 'direction': direction,
       if (msgType != null) 'msg_type': msgType,
+      if (ownerUin != null) 'owner_uin': ownerUin,
     });
   }
 
@@ -812,6 +854,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
     Value<bool>? isTime,
     Value<String>? direction,
     Value<String>? msgType,
+    Value<int>? ownerUin,
   }) {
     return ChatMessagesCompanion(
       id: id ?? this.id,
@@ -830,6 +873,7 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
       isTime: isTime ?? this.isTime,
       direction: direction ?? this.direction,
       msgType: msgType ?? this.msgType,
+      ownerUin: ownerUin ?? this.ownerUin,
     );
   }
 
@@ -884,6 +928,9 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
     if (msgType.present) {
       map['msg_type'] = Variable<String>(msgType.value);
     }
+    if (ownerUin.present) {
+      map['owner_uin'] = Variable<int>(ownerUin.value);
+    }
     return map;
   }
 
@@ -905,7 +952,8 @@ class ChatMessagesCompanion extends UpdateCompanion<ChatMessageRecord> {
           ..write('isSystemMsg: $isSystemMsg, ')
           ..write('isTime: $isTime, ')
           ..write('direction: $direction, ')
-          ..write('msgType: $msgType')
+          ..write('msgType: $msgType, ')
+          ..write('ownerUin: $ownerUin')
           ..write(')'))
         .toString();
   }
@@ -1010,6 +1058,18 @@ class $ChatSessionsTable extends ChatSessions
     type: DriftSqlType.string,
     requiredDuringInsert: false,
   );
+  static const VerificationMeta _ownerUinMeta = const VerificationMeta(
+    'ownerUin',
+  );
+  @override
+  late final GeneratedColumn<int> ownerUin = GeneratedColumn<int>(
+    'owner_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     sessionKey,
@@ -1021,6 +1081,7 @@ class $ChatSessionsTable extends ChatSessions
     unreadCount,
     lastUin,
     lastText,
+    ownerUin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1106,11 +1167,17 @@ class $ChatSessionsTable extends ChatSessions
         lastText.isAcceptableOrUnknown(data['last_text']!, _lastTextMeta),
       );
     }
+    if (data.containsKey('owner_uin')) {
+      context.handle(
+        _ownerUinMeta,
+        ownerUin.isAcceptableOrUnknown(data['owner_uin']!, _ownerUinMeta),
+      );
+    }
     return context;
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {sessionKey};
+  Set<GeneratedColumn> get $primaryKey => {sessionKey, ownerUin};
   @override
   ChatSessionRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
@@ -1151,6 +1218,10 @@ class $ChatSessionsTable extends ChatSessions
         DriftSqlType.string,
         data['${effectivePrefix}last_text'],
       ),
+      ownerUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}owner_uin'],
+      )!,
     );
   }
 
@@ -1171,6 +1242,9 @@ class ChatSessionRecord extends DataClass
   final int unreadCount;
   final int? lastUin;
   final String? lastText;
+
+  /// 账号归属（本地多账号数据隔离）：0=旧数据（首登收养）。
+  final int ownerUin;
   const ChatSessionRecord({
     required this.sessionKey,
     required this.typeId,
@@ -1181,6 +1255,7 @@ class ChatSessionRecord extends DataClass
     required this.unreadCount,
     this.lastUin,
     this.lastText,
+    required this.ownerUin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1200,6 +1275,7 @@ class ChatSessionRecord extends DataClass
     if (!nullToAbsent || lastText != null) {
       map['last_text'] = Variable<String>(lastText);
     }
+    map['owner_uin'] = Variable<int>(ownerUin);
     return map;
   }
 
@@ -1220,6 +1296,7 @@ class ChatSessionRecord extends DataClass
       lastText: lastText == null && nullToAbsent
           ? const Value.absent()
           : Value(lastText),
+      ownerUin: Value(ownerUin),
     );
   }
 
@@ -1238,6 +1315,7 @@ class ChatSessionRecord extends DataClass
       unreadCount: serializer.fromJson<int>(json['unreadCount']),
       lastUin: serializer.fromJson<int?>(json['lastUin']),
       lastText: serializer.fromJson<String?>(json['lastText']),
+      ownerUin: serializer.fromJson<int>(json['ownerUin']),
     );
   }
   @override
@@ -1253,6 +1331,7 @@ class ChatSessionRecord extends DataClass
       'unreadCount': serializer.toJson<int>(unreadCount),
       'lastUin': serializer.toJson<int?>(lastUin),
       'lastText': serializer.toJson<String?>(lastText),
+      'ownerUin': serializer.toJson<int>(ownerUin),
     };
   }
 
@@ -1266,6 +1345,7 @@ class ChatSessionRecord extends DataClass
     int? unreadCount,
     Value<int?> lastUin = const Value.absent(),
     Value<String?> lastText = const Value.absent(),
+    int? ownerUin,
   }) => ChatSessionRecord(
     sessionKey: sessionKey ?? this.sessionKey,
     typeId: typeId ?? this.typeId,
@@ -1276,6 +1356,7 @@ class ChatSessionRecord extends DataClass
     unreadCount: unreadCount ?? this.unreadCount,
     lastUin: lastUin.present ? lastUin.value : this.lastUin,
     lastText: lastText.present ? lastText.value : this.lastText,
+    ownerUin: ownerUin ?? this.ownerUin,
   );
   ChatSessionRecord copyWithCompanion(ChatSessionsCompanion data) {
     return ChatSessionRecord(
@@ -1294,6 +1375,7 @@ class ChatSessionRecord extends DataClass
           : this.unreadCount,
       lastUin: data.lastUin.present ? data.lastUin.value : this.lastUin,
       lastText: data.lastText.present ? data.lastText.value : this.lastText,
+      ownerUin: data.ownerUin.present ? data.ownerUin.value : this.ownerUin,
     );
   }
 
@@ -1308,7 +1390,8 @@ class ChatSessionRecord extends DataClass
           ..write('lastReadTime: $lastReadTime, ')
           ..write('unreadCount: $unreadCount, ')
           ..write('lastUin: $lastUin, ')
-          ..write('lastText: $lastText')
+          ..write('lastText: $lastText, ')
+          ..write('ownerUin: $ownerUin')
           ..write(')'))
         .toString();
   }
@@ -1324,6 +1407,7 @@ class ChatSessionRecord extends DataClass
     unreadCount,
     lastUin,
     lastText,
+    ownerUin,
   );
   @override
   bool operator ==(Object other) =>
@@ -1337,7 +1421,8 @@ class ChatSessionRecord extends DataClass
           other.lastReadTime == this.lastReadTime &&
           other.unreadCount == this.unreadCount &&
           other.lastUin == this.lastUin &&
-          other.lastText == this.lastText);
+          other.lastText == this.lastText &&
+          other.ownerUin == this.ownerUin);
 }
 
 class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
@@ -1350,6 +1435,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
   final Value<int> unreadCount;
   final Value<int?> lastUin;
   final Value<String?> lastText;
+  final Value<int> ownerUin;
   final Value<int> rowid;
   const ChatSessionsCompanion({
     this.sessionKey = const Value.absent(),
@@ -1361,6 +1447,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
     this.unreadCount = const Value.absent(),
     this.lastUin = const Value.absent(),
     this.lastText = const Value.absent(),
+    this.ownerUin = const Value.absent(),
     this.rowid = const Value.absent(),
   });
   ChatSessionsCompanion.insert({
@@ -1373,6 +1460,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
     required int unreadCount,
     this.lastUin = const Value.absent(),
     this.lastText = const Value.absent(),
+    this.ownerUin = const Value.absent(),
     this.rowid = const Value.absent(),
   }) : sessionKey = Value(sessionKey),
        typeId = Value(typeId),
@@ -1390,6 +1478,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
     Expression<int>? unreadCount,
     Expression<int>? lastUin,
     Expression<String>? lastText,
+    Expression<int>? ownerUin,
     Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
@@ -1402,6 +1491,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
       if (unreadCount != null) 'unread_count': unreadCount,
       if (lastUin != null) 'last_uin': lastUin,
       if (lastText != null) 'last_text': lastText,
+      if (ownerUin != null) 'owner_uin': ownerUin,
       if (rowid != null) 'rowid': rowid,
     });
   }
@@ -1416,6 +1506,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
     Value<int>? unreadCount,
     Value<int?>? lastUin,
     Value<String?>? lastText,
+    Value<int>? ownerUin,
     Value<int>? rowid,
   }) {
     return ChatSessionsCompanion(
@@ -1428,6 +1519,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
       unreadCount: unreadCount ?? this.unreadCount,
       lastUin: lastUin ?? this.lastUin,
       lastText: lastText ?? this.lastText,
+      ownerUin: ownerUin ?? this.ownerUin,
       rowid: rowid ?? this.rowid,
     );
   }
@@ -1462,6 +1554,9 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
     if (lastText.present) {
       map['last_text'] = Variable<String>(lastText.value);
     }
+    if (ownerUin.present) {
+      map['owner_uin'] = Variable<int>(ownerUin.value);
+    }
     if (rowid.present) {
       map['rowid'] = Variable<int>(rowid.value);
     }
@@ -1480,6 +1575,7 @@ class ChatSessionsCompanion extends UpdateCompanion<ChatSessionRecord> {
           ..write('unreadCount: $unreadCount, ')
           ..write('lastUin: $lastUin, ')
           ..write('lastText: $lastText, ')
+          ..write('ownerUin: $ownerUin, ')
           ..write('rowid: $rowid')
           ..write(')'))
         .toString();
@@ -1499,7 +1595,7 @@ class $FriendsTable extends Friends
     aliasedName,
     false,
     type: DriftSqlType.int,
-    requiredDuringInsert: false,
+    requiredDuringInsert: true,
   );
   static const VerificationMeta _nicknameMeta = const VerificationMeta(
     'nickname',
@@ -1579,6 +1675,18 @@ class $FriendsTable extends Friends
     requiredDuringInsert: false,
     defaultValue: const Constant(0),
   );
+  static const VerificationMeta _ownerUinMeta = const VerificationMeta(
+    'ownerUin',
+  );
+  @override
+  late final GeneratedColumn<int> ownerUin = GeneratedColumn<int>(
+    'owner_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
   @override
   List<GeneratedColumn> get $columns => [
     uin,
@@ -1589,6 +1697,7 @@ class $FriendsTable extends Friends
     updatedAt,
     relation,
     mark,
+    ownerUin,
   ];
   @override
   String get aliasedName => _alias ?? actualTableName;
@@ -1607,6 +1716,8 @@ class $FriendsTable extends Friends
         _uinMeta,
         uin.isAcceptableOrUnknown(data['uin']!, _uinMeta),
       );
+    } else if (isInserting) {
+      context.missing(_uinMeta);
     }
     if (data.containsKey('nickname')) {
       context.handle(
@@ -1656,11 +1767,17 @@ class $FriendsTable extends Friends
         mark.isAcceptableOrUnknown(data['mark']!, _markMeta),
       );
     }
+    if (data.containsKey('owner_uin')) {
+      context.handle(
+        _ownerUinMeta,
+        ownerUin.isAcceptableOrUnknown(data['owner_uin']!, _ownerUinMeta),
+      );
+    }
     return context;
   }
 
   @override
-  Set<GeneratedColumn> get $primaryKey => {uin};
+  Set<GeneratedColumn> get $primaryKey => {uin, ownerUin};
   @override
   FriendRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
     final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
@@ -1697,6 +1814,10 @@ class $FriendsTable extends Friends
         DriftSqlType.int,
         data['${effectivePrefix}mark'],
       )!,
+      ownerUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}owner_uin'],
+      )!,
     );
   }
 
@@ -1715,6 +1836,9 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
   final int updatedAt;
   final int relation;
   final int mark;
+
+  /// 账号归属（本地多账号数据隔离）：0=旧数据（首登收养）。
+  final int ownerUin;
   const FriendRecord({
     required this.uin,
     required this.nickname,
@@ -1724,6 +1848,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
     required this.updatedAt,
     required this.relation,
     required this.mark,
+    required this.ownerUin,
   });
   @override
   Map<String, Expression> toColumns(bool nullToAbsent) {
@@ -1740,6 +1865,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
     map['updated_at'] = Variable<int>(updatedAt);
     map['relation'] = Variable<int>(relation);
     map['mark'] = Variable<int>(mark);
+    map['owner_uin'] = Variable<int>(ownerUin);
     return map;
   }
 
@@ -1757,6 +1883,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
       updatedAt: Value(updatedAt),
       relation: Value(relation),
       mark: Value(mark),
+      ownerUin: Value(ownerUin),
     );
   }
 
@@ -1774,6 +1901,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
       updatedAt: serializer.fromJson<int>(json['updatedAt']),
       relation: serializer.fromJson<int>(json['relation']),
       mark: serializer.fromJson<int>(json['mark']),
+      ownerUin: serializer.fromJson<int>(json['ownerUin']),
     );
   }
   @override
@@ -1788,6 +1916,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
       'updatedAt': serializer.toJson<int>(updatedAt),
       'relation': serializer.toJson<int>(relation),
       'mark': serializer.toJson<int>(mark),
+      'ownerUin': serializer.toJson<int>(ownerUin),
     };
   }
 
@@ -1800,6 +1929,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
     int? updatedAt,
     int? relation,
     int? mark,
+    int? ownerUin,
   }) => FriendRecord(
     uin: uin ?? this.uin,
     nickname: nickname ?? this.nickname,
@@ -1809,6 +1939,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
     updatedAt: updatedAt ?? this.updatedAt,
     relation: relation ?? this.relation,
     mark: mark ?? this.mark,
+    ownerUin: ownerUin ?? this.ownerUin,
   );
   FriendRecord copyWithCompanion(FriendsCompanion data) {
     return FriendRecord(
@@ -1822,6 +1953,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
       updatedAt: data.updatedAt.present ? data.updatedAt.value : this.updatedAt,
       relation: data.relation.present ? data.relation.value : this.relation,
       mark: data.mark.present ? data.mark.value : this.mark,
+      ownerUin: data.ownerUin.present ? data.ownerUin.value : this.ownerUin,
     );
   }
 
@@ -1835,7 +1967,8 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
           ..write('gameStatus: $gameStatus, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('relation: $relation, ')
-          ..write('mark: $mark')
+          ..write('mark: $mark, ')
+          ..write('ownerUin: $ownerUin')
           ..write(')'))
         .toString();
   }
@@ -1850,6 +1983,7 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
     updatedAt,
     relation,
     mark,
+    ownerUin,
   );
   @override
   bool operator ==(Object other) =>
@@ -1862,7 +1996,8 @@ class FriendRecord extends DataClass implements Insertable<FriendRecord> {
           other.gameStatus == this.gameStatus &&
           other.updatedAt == this.updatedAt &&
           other.relation == this.relation &&
-          other.mark == this.mark);
+          other.mark == this.mark &&
+          other.ownerUin == this.ownerUin);
 }
 
 class FriendsCompanion extends UpdateCompanion<FriendRecord> {
@@ -1874,6 +2009,8 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
   final Value<int> updatedAt;
   final Value<int> relation;
   final Value<int> mark;
+  final Value<int> ownerUin;
+  final Value<int> rowid;
   const FriendsCompanion({
     this.uin = const Value.absent(),
     this.nickname = const Value.absent(),
@@ -1883,9 +2020,11 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
     this.updatedAt = const Value.absent(),
     this.relation = const Value.absent(),
     this.mark = const Value.absent(),
+    this.ownerUin = const Value.absent(),
+    this.rowid = const Value.absent(),
   });
   FriendsCompanion.insert({
-    this.uin = const Value.absent(),
+    required int uin,
     required String nickname,
     this.avatar = const Value.absent(),
     required bool isOnline,
@@ -1893,7 +2032,10 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
     required int updatedAt,
     this.relation = const Value.absent(),
     this.mark = const Value.absent(),
-  }) : nickname = Value(nickname),
+    this.ownerUin = const Value.absent(),
+    this.rowid = const Value.absent(),
+  }) : uin = Value(uin),
+       nickname = Value(nickname),
        isOnline = Value(isOnline),
        updatedAt = Value(updatedAt);
   static Insertable<FriendRecord> custom({
@@ -1905,6 +2047,8 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
     Expression<int>? updatedAt,
     Expression<int>? relation,
     Expression<int>? mark,
+    Expression<int>? ownerUin,
+    Expression<int>? rowid,
   }) {
     return RawValuesInsertable({
       if (uin != null) 'uin': uin,
@@ -1915,6 +2059,8 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
       if (updatedAt != null) 'updated_at': updatedAt,
       if (relation != null) 'relation': relation,
       if (mark != null) 'mark': mark,
+      if (ownerUin != null) 'owner_uin': ownerUin,
+      if (rowid != null) 'rowid': rowid,
     });
   }
 
@@ -1927,6 +2073,8 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
     Value<int>? updatedAt,
     Value<int>? relation,
     Value<int>? mark,
+    Value<int>? ownerUin,
+    Value<int>? rowid,
   }) {
     return FriendsCompanion(
       uin: uin ?? this.uin,
@@ -1937,6 +2085,8 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
       updatedAt: updatedAt ?? this.updatedAt,
       relation: relation ?? this.relation,
       mark: mark ?? this.mark,
+      ownerUin: ownerUin ?? this.ownerUin,
+      rowid: rowid ?? this.rowid,
     );
   }
 
@@ -1967,6 +2117,12 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
     if (mark.present) {
       map['mark'] = Variable<int>(mark.value);
     }
+    if (ownerUin.present) {
+      map['owner_uin'] = Variable<int>(ownerUin.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
     return map;
   }
 
@@ -1980,7 +2136,9 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
           ..write('gameStatus: $gameStatus, ')
           ..write('updatedAt: $updatedAt, ')
           ..write('relation: $relation, ')
-          ..write('mark: $mark')
+          ..write('mark: $mark, ')
+          ..write('ownerUin: $ownerUin, ')
+          ..write('rowid: $rowid')
           ..write(')'))
         .toString();
   }
@@ -2231,6 +2389,7 @@ typedef $$ChatMessagesTableCreateCompanionBuilder =
       required bool isTime,
       required String direction,
       Value<String> msgType,
+      Value<int> ownerUin,
     });
 typedef $$ChatMessagesTableUpdateCompanionBuilder =
     ChatMessagesCompanion Function({
@@ -2250,6 +2409,7 @@ typedef $$ChatMessagesTableUpdateCompanionBuilder =
       Value<bool> isTime,
       Value<String> direction,
       Value<String> msgType,
+      Value<int> ownerUin,
     });
 
 class $$ChatMessagesTableFilterComposer
@@ -2338,6 +2498,11 @@ class $$ChatMessagesTableFilterComposer
 
   ColumnFilters<String> get msgType => $composableBuilder(
     column: $table.msgType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2430,6 +2595,11 @@ class $$ChatMessagesTableOrderingComposer
     column: $table.msgType,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ChatMessagesTableAnnotationComposer
@@ -2496,6 +2666,9 @@ class $$ChatMessagesTableAnnotationComposer
 
   GeneratedColumn<String> get msgType =>
       $composableBuilder(column: $table.msgType, builder: (column) => column);
+
+  GeneratedColumn<int> get ownerUin =>
+      $composableBuilder(column: $table.ownerUin, builder: (column) => column);
 }
 
 class $$ChatMessagesTableTableManager
@@ -2549,6 +2722,7 @@ class $$ChatMessagesTableTableManager
                 Value<bool> isTime = const Value.absent(),
                 Value<String> direction = const Value.absent(),
                 Value<String> msgType = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
               }) => ChatMessagesCompanion(
                 id: id,
                 content: content,
@@ -2566,6 +2740,7 @@ class $$ChatMessagesTableTableManager
                 isTime: isTime,
                 direction: direction,
                 msgType: msgType,
+                ownerUin: ownerUin,
               ),
           createCompanionCallback:
               ({
@@ -2585,6 +2760,7 @@ class $$ChatMessagesTableTableManager
                 required bool isTime,
                 required String direction,
                 Value<String> msgType = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
               }) => ChatMessagesCompanion.insert(
                 id: id,
                 content: content,
@@ -2602,6 +2778,7 @@ class $$ChatMessagesTableTableManager
                 isTime: isTime,
                 direction: direction,
                 msgType: msgType,
+                ownerUin: ownerUin,
               ),
           withReferenceMapper: (p0) => p0
               .map(
@@ -2648,6 +2825,7 @@ typedef $$ChatSessionsTableCreateCompanionBuilder =
       required int unreadCount,
       Value<int?> lastUin,
       Value<String?> lastText,
+      Value<int> ownerUin,
       Value<int> rowid,
     });
 typedef $$ChatSessionsTableUpdateCompanionBuilder =
@@ -2661,6 +2839,7 @@ typedef $$ChatSessionsTableUpdateCompanionBuilder =
       Value<int> unreadCount,
       Value<int?> lastUin,
       Value<String?> lastText,
+      Value<int> ownerUin,
       Value<int> rowid,
     });
 
@@ -2715,6 +2894,11 @@ class $$ChatSessionsTableFilterComposer
 
   ColumnFilters<String> get lastText => $composableBuilder(
     column: $table.lastText,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -2772,6 +2956,11 @@ class $$ChatSessionsTableOrderingComposer
     column: $table.lastText,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$ChatSessionsTableAnnotationComposer
@@ -2815,6 +3004,9 @@ class $$ChatSessionsTableAnnotationComposer
 
   GeneratedColumn<String> get lastText =>
       $composableBuilder(column: $table.lastText, builder: (column) => column);
+
+  GeneratedColumn<int> get ownerUin =>
+      $composableBuilder(column: $table.ownerUin, builder: (column) => column);
 }
 
 class $$ChatSessionsTableTableManager
@@ -2861,6 +3053,7 @@ class $$ChatSessionsTableTableManager
                 Value<int> unreadCount = const Value.absent(),
                 Value<int?> lastUin = const Value.absent(),
                 Value<String?> lastText = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ChatSessionsCompanion(
                 sessionKey: sessionKey,
@@ -2872,6 +3065,7 @@ class $$ChatSessionsTableTableManager
                 unreadCount: unreadCount,
                 lastUin: lastUin,
                 lastText: lastText,
+                ownerUin: ownerUin,
                 rowid: rowid,
               ),
           createCompanionCallback:
@@ -2885,6 +3079,7 @@ class $$ChatSessionsTableTableManager
                 required int unreadCount,
                 Value<int?> lastUin = const Value.absent(),
                 Value<String?> lastText = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
                 Value<int> rowid = const Value.absent(),
               }) => ChatSessionsCompanion.insert(
                 sessionKey: sessionKey,
@@ -2896,6 +3091,7 @@ class $$ChatSessionsTableTableManager
                 unreadCount: unreadCount,
                 lastUin: lastUin,
                 lastText: lastText,
+                ownerUin: ownerUin,
                 rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
@@ -2933,7 +3129,7 @@ typedef $$ChatSessionsTableProcessedTableManager =
       PrefetchHooks Function()
     >;
 typedef $$FriendsTableCreateCompanionBuilder = FriendsCompanion Function({
-  Value<int> uin,
+  required int uin,
   required String nickname,
   Value<String?> avatar,
   required bool isOnline,
@@ -2941,6 +3137,8 @@ typedef $$FriendsTableCreateCompanionBuilder = FriendsCompanion Function({
   required int updatedAt,
   Value<int> relation,
   Value<int> mark,
+  Value<int> ownerUin,
+  Value<int> rowid,
 });
 typedef $$FriendsTableUpdateCompanionBuilder = FriendsCompanion Function({
   Value<int> uin,
@@ -2951,6 +3149,8 @@ typedef $$FriendsTableUpdateCompanionBuilder = FriendsCompanion Function({
   Value<int> updatedAt,
   Value<int> relation,
   Value<int> mark,
+  Value<int> ownerUin,
+  Value<int> rowid,
 });
 
 class $$FriendsTableFilterComposer
@@ -2999,6 +3199,11 @@ class $$FriendsTableFilterComposer
 
   ColumnFilters<int> get mark => $composableBuilder(
     column: $table.mark,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
     builder: (column) => ColumnFilters(column),
   );
 }
@@ -3051,6 +3256,11 @@ class $$FriendsTableOrderingComposer
     column: $table.mark,
     builder: (column) => ColumnOrderings(column),
   );
+
+  ColumnOrderings<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnOrderings(column),
+  );
 }
 
 class $$FriendsTableAnnotationComposer
@@ -3087,6 +3297,9 @@ class $$FriendsTableAnnotationComposer
 
   GeneratedColumn<int> get mark =>
       $composableBuilder(column: $table.mark, builder: (column) => column);
+
+  GeneratedColumn<int> get ownerUin =>
+      $composableBuilder(column: $table.ownerUin, builder: (column) => column);
 }
 
 class $$FriendsTableTableManager
@@ -3128,6 +3341,8 @@ class $$FriendsTableTableManager
                 Value<int> updatedAt = const Value.absent(),
                 Value<int> relation = const Value.absent(),
                 Value<int> mark = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
               }) => FriendsCompanion(
                 uin: uin,
                 nickname: nickname,
@@ -3137,10 +3352,12 @@ class $$FriendsTableTableManager
                 updatedAt: updatedAt,
                 relation: relation,
                 mark: mark,
+                ownerUin: ownerUin,
+                rowid: rowid,
               ),
           createCompanionCallback:
               ({
-                Value<int> uin = const Value.absent(),
+                required int uin,
                 required String nickname,
                 Value<String?> avatar = const Value.absent(),
                 required bool isOnline,
@@ -3148,6 +3365,8 @@ class $$FriendsTableTableManager
                 required int updatedAt,
                 Value<int> relation = const Value.absent(),
                 Value<int> mark = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
               }) => FriendsCompanion.insert(
                 uin: uin,
                 nickname: nickname,
@@ -3157,6 +3376,8 @@ class $$FriendsTableTableManager
                 updatedAt: updatedAt,
                 relation: relation,
                 mark: mark,
+                ownerUin: ownerUin,
+                rowid: rowid,
               ),
           withReferenceMapper: (p0) => p0
               .map(

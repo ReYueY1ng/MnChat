@@ -220,4 +220,12 @@ class ChatBridge {
     }
     _controllers.clear();
   }
+
+  /// 清空全部会话控制器（切换账号时调用，防止旧账号消息残留到新账号）。
+  void reset() {
+    for (final c in _controllers.values) {
+      c.dispose();
+    }
+    _controllers.clear();
+  }
 }

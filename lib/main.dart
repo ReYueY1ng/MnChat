@@ -10,9 +10,8 @@ import 'core/services/native_bridge.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
 import 'state/providers.dart';
-import 'ui/chat_page.dart';
+import 'ui/home_shell.dart' show MainShell;
 import 'ui/login_page.dart';
-import 'ui/session_list_page.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -54,6 +53,14 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    // 监听登录态：曾登录后变为未登录（手动登出）→ 清除"可自动登录"
+    // 标记，回到登录页。否则 _autoLoginAvailable 保持 true，登出后
+    // home 仍进入 MainShell，表现为"无法退出登录"。
+    ref.listenManual(authProvider, (prev, next) {
+      if (prev?.isLoggedIn == true && next.isLoggedIn == false && mounted) {
+        if (_autoLoginAvailable) setState(() => _autoLoginAvailable = false);
+      }
+    });
     _prepareAutoLogin();
   }
 
@@ -170,134 +177,6 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         ),
       ),
       listTileTheme: const ListTileThemeData(shape: RoundedRectangleBorder()),
-    );
-  }
-}
-
-/// 登录后的主界面：宽屏双栏（会话列表 + 聊天），窄屏单页切换。
-/// 窄屏用 IndexedStack 保持聊天页实例存活（返回列表后聊天状态保留）。
-class MainShell extends ConsumerStatefulWidget {
-  const MainShell({super.key});
-
-  @override
-  ConsumerState<MainShell> createState() => _MainShellState();
-}
-
-class _MainShellState extends ConsumerState<MainShell> {
-  /// 缓存最近一次构建的聊天页，保证 IndexedStack 中状态不丢失。
-  Widget? _chatInstance;
-
-  @override
-  void initState() {
-    super.initState();
-    // 进入会话页后启动后台前台服务（保活收推送）
-    NativeBridge.startBackgroundService();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final active = ref.watch(activeSessionProvider);
-    final sessions = ref.watch(sessionListProvider);
-
-    final list = sessions.when(
-      data: (snap) => snap.sessions,
-      loading: () => <ChatSession>[],
-      error: (_, _) => <ChatSession>[],
-    );
-    ChatSession? findActive(List<ChatSession> list, ActiveSession active) {
-      for (final s in list) {
-        if (s.type == active.type && s.id == active.id) return s;
-      }
-      return null;
-    }
-
-    final activeSession = active;
-    final session = activeSession == null
-        ? null
-        : findActive(list, activeSession);
-    // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）。
-    // 注意：_chatInstance 在无活动会话时**有意保留**（IndexedStack 保活设计，
-    // 返回列表后聊天 UI 状态不丢）；如需释放内存可在会话关闭时另行处理。
-    if (activeSession != null) {
-      _chatInstance = ChatPage(
-        key: ValueKey('${activeSession.type.name}_${activeSession.id}'),
-        type: activeSession.type,
-        sessionId: activeSession.id,
-        name: session?.name ?? '',
-      );
-    }
-    final chatPane = _chatInstance ?? const _EmptyChatPlaceholder();
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= 700;
-        return PopScope(
-          // 一级返回：聊天打开时回会话列表；列表页返回 → 隐藏到后台
-          canPop: false,
-          onPopInvokedWithResult: (didPop, Object? result) {
-            if (didPop) return;
-            if (activeSession != null) {
-              ref.read(activeSessionProvider.notifier).close();
-            } else {
-              // 列表页按返回 → 后台（不退出，前台服务继续收消息）
-              NativeBridge.moveTaskToBack();
-            }
-          },
-          child: Scaffold(
-            body: isWide
-                // 宽屏：左会话列表 + 右聊天（双栏同时可见）
-                ? Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        width: 300,
-                        child: SessionListPage(sessions: list),
-                      ),
-                      const VerticalDivider(width: 1),
-                      Expanded(child: chatPane),
-                    ],
-                  )
-                // 窄屏（手机）：IndexedStack 保留两个页面实例
-                : IndexedStack(
-                    index: activeSession == null ? 0 : 1,
-                    children: [
-                      SessionListPage(sessions: list),
-                      chatPane,
-                    ],
-                  ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _EmptyChatPlaceholder extends StatelessWidget {
-  const _EmptyChatPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            Icons.forum_outlined,
-            size: 80,
-            color: theme.colorScheme.outline,
-          ),
-          const SizedBox(height: 16),
-          Text('选择左侧会话开始聊天', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
-          Text(
-            '好友 / 群聊 · 无需进入房间',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.outline,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }

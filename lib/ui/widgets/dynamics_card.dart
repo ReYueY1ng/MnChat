@@ -124,7 +124,6 @@ class DynamicsCard extends StatelessWidget {
                                 style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
                               ),
                             ),
-                            const _VBadge(),
                           ],
                         ),
                         if (_meta().isNotEmpty)
@@ -412,27 +411,6 @@ class _ChipLabel extends StatelessWidget {
           const SizedBox(width: 4),
           Text(text, style: TextStyle(fontSize: 12, color: theme.colorScheme.onTertiaryContainer)),
         ],
-      ),
-    );
-  }
-}
-
-/// 认证 V 徽标（装饰性，真实等级数据暂缺）。
-class _VBadge extends StatelessWidget {
-  const _VBadge();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(left: 3),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.tertiary]),
-          borderRadius: BorderRadius.circular(3),
-        ),
-        child: const Text('V3', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
       ),
     );
   }

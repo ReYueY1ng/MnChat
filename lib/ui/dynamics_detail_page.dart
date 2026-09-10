@@ -22,11 +22,22 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   List<DynamicsComment> _comments = [];
   bool _loadingComments = true;
   bool _latest = false;
+
+  /// 分页状态：默认排序按 offset（page*20）；最新排序按 ct 游标。
+  bool _hasMore = false;
+  bool _loadingMore = false;
+  int _nextOffset = 0;
+  int _nextCt = 0;
+
+  /// 请求序号：防重复切换/重复分页的旧响应覆盖。
+  int _reqSeq = 0;
+
   bool _liked = false;
   int _likeCount = 0;
-  // 评论回复展开：commentUin → replies。
+  // 评论回复展开：按评论在 _comments 中的下标（uin 会重复，不能用 uin 作 key）。
   final Map<int, List<DynamicsComment>> _replies = {};
   final Set<int> _expandedReplies = {};
+  final Set<int> _replyLoading = {};
 
   @override
   void initState() {
@@ -39,20 +50,61 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     if (auth == null) return;
     _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
     _likeCount = widget.post.likeCount;
-    _loadComments();
+    _loadComments(reset: true);
   }
 
-  Future<void> _loadComments() async {
+  /// 加载评论。默认排序 offset 翻页（每页 20）；最新排序 ct 游标。
+  Future<void> _loadComments({bool reset = false}) async {
     final client = _client;
     if (client == null) return;
-    setState(() => _loadingComments = true);
-    try {
-      _comments = await client.fetchComments(widget.post.pid);
-    } catch (e) {
-      // 忽略：显示空态
-    } finally {
-      if (mounted) setState(() => _loadingComments = false);
+    final seq = ++_reqSeq;
+    if (reset) {
+      setState(() {
+        _loadingComments = true;
+        _comments = [];
+        _nextOffset = 0;
+        _nextCt = 0;
+        _hasMore = false;
+        _replies.clear();
+        _expandedReplies.clear();
+      });
+    } else {
+      setState(() => _loadingMore = true);
     }
+    try {
+      final page = await client.fetchComments(
+        widget.post.pid,
+        latest: _latest,
+        offset: _nextOffset,
+        ct: _nextCt,
+      );
+      if (!mounted || seq != _reqSeq) return;
+      setState(() {
+        _comments = reset ? page : [..._comments, ...page];
+        // 默认排序：offset 累加；最新排序：ct 用本页最后一条 last_time
+        _nextOffset = _comments.length;
+        _hasMore = page.isNotEmpty;
+        if (page.isNotEmpty) {
+          _nextCt = page.last.lastTime;
+        }
+      });
+    } catch (e) {
+      // 忽略：显示已加载部分
+    } finally {
+      if (mounted && seq == _reqSeq) {
+        setState(() {
+          _loadingComments = false;
+          _loadingMore = false;
+        });
+      }
+    }
+  }
+
+  /// 切换 默认/最新 → 从头重载。
+  void _switchSort(bool latest) {
+    if (latest == _latest) return;
+    setState(() => _latest = latest);
+    _loadComments(reset: true);
   }
 
   /// 点赞/取消。
@@ -108,7 +160,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       await client.addComment(widget.post.pid, content);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('评论已发布')));
-        _loadComments();
+        _loadComments(reset: true);
       }
     } catch (e) {
       if (mounted) {
@@ -117,28 +169,39 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     }
   }
 
-  /// 展开/收起一条评论的回复。
-  Future<void> _toggleReplies(int commentUin) async {
+  /// 展开/收起一条评论的回复（按评论下标）。
+  Future<void> _toggleReplies(int index) async {
     final client = _client;
-    if (client == null) return;
-    if (_expandedReplies.contains(commentUin)) {
-      setState(() => _expandedReplies.remove(commentUin));
+    if (client == null || index >= _comments.length) return;
+    if (_expandedReplies.contains(index)) {
+      setState(() => _expandedReplies.remove(index));
       return;
     }
-    setState(() => _expandedReplies.add(commentUin));
-    if (!_replies.containsKey(commentUin)) {
+    final comment = _comments[index];
+    setState(() {
+      _expandedReplies.add(index);
+      _replyLoading.add(index);
+    });
+    if (!_replies.containsKey(index)) {
       try {
-        final reps = await client.fetchCommentReplies(widget.post.pid, commentUin);
-        if (mounted) setState(() => _replies[commentUin] = reps);
+        final reps = await client.fetchCommentReplies(comment);
+        if (mounted) setState(() => _replies[index] = reps);
       } catch (_) {
-        if (mounted) setState(() => _replies[commentUin] = []);
+        if (mounted) setState(() => _replies[index] = []);
+      } finally {
+        if (mounted) setState(() => _replyLoading.remove(index));
       }
+    } else {
+      setState(() => _replyLoading.remove(index));
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isWide = MediaQuery.of(context).size.width >= 700;
+    // 竖屏（手机/平板立放）一律单列堆叠；仅横屏且宽度足够才左右双栏。
+    final isLandscapeWide =
+        MediaQuery.orientationOf(context) == Orientation.landscape &&
+        MediaQuery.sizeOf(context).width >= 900;
     return Scaffold(
       appBar: AppBar(
         title: const Text('动态详情'),
@@ -155,37 +218,54 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
           const SizedBox(width: 4),
         ],
       ),
-      body: isWide
+      body: isLandscapeWide
           ? Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 Expanded(child: _PostPanel(post: widget.post)),
                 const VerticalDivider(width: 1),
                 Expanded(child: _CommentPanel(
+                  fill: true, // 双栏：占满高度，评论区内滚
                   comments: _comments,
                   loading: _loadingComments,
+                  loadingMore: _loadingMore,
+                  hasMore: _hasMore,
                   latest: _latest,
-                  onToggle: (v) => setState(() => _latest = v),
+                  onToggle: _switchSort,
+                  onLoadMore: () => _loadComments(reset: false),
                   onWrite: _writeComment,
                   replies: _replies,
+                  replyLoading: _replyLoading,
                   expandedReplies: _expandedReplies,
                   onToggleReplies: _toggleReplies,
                 )),
               ],
             )
-          : ListView(
+          : Column(
               children: [
-                _PostPanel(post: widget.post),
-                const Divider(),
-                _CommentPanel(
-                  comments: _comments,
-                  loading: _loadingComments,
-                  latest: _latest,
-                  onToggle: (v) => setState(() => _latest = v),
-                  onWrite: _writeComment,
-                  replies: _replies,
-                  expandedReplies: _expandedReplies,
-                  onToggleReplies: _toggleReplies,
+                // 竖屏单列：正文 + 评论区整页滚动（不嵌套有界滚动区）
+                Expanded(
+                  child: ListView(
+                    children: [
+                      _PostPanel(post: widget.post),
+                      const Divider(),
+                      _CommentPanel(
+                        fill: false, // 内联：随页面滚动
+                        comments: _comments,
+                        loading: _loadingComments,
+                        loadingMore: _loadingMore,
+                        hasMore: _hasMore,
+                        latest: _latest,
+                        onToggle: _switchSort,
+                        onLoadMore: () => _loadComments(reset: false),
+                        onWrite: _writeComment,
+                        replies: _replies,
+                        replyLoading: _replyLoading,
+                        expandedReplies: _expandedReplies,
+                        onToggleReplies: _toggleReplies,
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -225,8 +305,6 @@ class _PostPanel extends StatelessWidget {
                       Flexible(child: Text(name,
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                           style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
-                      const SizedBox(width: 3),
-                      _VBadge(),
                     ]),
                     Text(meta, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
                   ],
@@ -314,22 +392,35 @@ class _LotteryInfo extends StatelessWidget {
 
 /// 右侧/底部：评论区。
 class _CommentPanel extends StatelessWidget {
+  /// 是否占满剩余高度（横屏双栏）。false=内联随页面滚动（竖屏单列）。
+  final bool fill;
   final List<DynamicsComment> comments;
   final bool loading;
+  final bool loadingMore;
+  final bool hasMore;
   final bool latest;
   final ValueChanged<bool> onToggle;
+  final VoidCallback onLoadMore;
   final VoidCallback onWrite;
+
+  /// 评论下标 → 回复列表 / 正在加载回复的评论下标 / 已展开的评论下标。
   final Map<int, List<DynamicsComment>> replies;
+  final Set<int> replyLoading;
   final Set<int> expandedReplies;
   final void Function(int) onToggleReplies;
 
   const _CommentPanel({
+    required this.fill,
     required this.comments,
     required this.loading,
+    required this.loadingMore,
+    required this.hasMore,
     required this.latest,
     required this.onToggle,
+    required this.onLoadMore,
     required this.onWrite,
     required this.replies,
+    required this.replyLoading,
     required this.expandedReplies,
     required this.onToggleReplies,
   });
@@ -337,48 +428,104 @@ class _CommentPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final list = loading
+        ? const Center(child: CircularProgressIndicator())
+        : comments.isEmpty
+            ? const Padding(
+                padding: EdgeInsets.all(32),
+                child: Center(child: Text('暂无评论')),
+              )
+            : ListView.separated(
+                // fill=true 时占满父高自滚；fill=false 时内联不滚动
+                // （由外层页面 ListView 统一滚动）
+                shrinkWrap: !fill,
+                physics: fill ? null : const NeverScrollableScrollPhysics(),
+                itemCount: comments.length +
+                    ((hasMore && !fill) ? 1 : 0), // 内联模式末尾加"加载更多"
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  if (i >= comments.length) {
+                    // 加载更多按钮（fill 模式外层监听滚动自动加载，不显示按钮）
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Center(
+                        child: loadingMore
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2))
+                            : TextButton.icon(
+                                onPressed: onLoadMore,
+                                icon: const Icon(Icons.expand_more),
+                                label: const Text('加载更多评论'),
+                              ),
+                      ),
+                    );
+                  }
+                  return _CommentTile(
+                    comment: comments[i],
+                    replies: replies[i],
+                    expanded: expandedReplies.contains(i),
+                    replyLoading: replyLoading.contains(i),
+                    onToggleReplies: () => onToggleReplies(i),
+                  );
+                },
+              );
     return Column(
+      mainAxisSize: fill ? MainAxisSize.max : MainAxisSize.min,
       children: [
         // tab：共N条评论 | 默认/最新
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
           child: Row(children: [
-            Text('共${comments.length}条评论', style: theme.textTheme.bodySmall),
+            Text('共${comments.length}条评论',
+                style: theme.textTheme.bodySmall),
             const Spacer(),
             InkWell(
               onTap: () => onToggle(false),
-              child: Text('默认', style: TextStyle(color: latest ? theme.colorScheme.outline : theme.colorScheme.primary)),
+              child: Text('默认',
+                  style: TextStyle(
+                      color: latest
+                          ? theme.colorScheme.outline
+                          : theme.colorScheme.primary)),
             ),
             const SizedBox(width: 16),
             InkWell(
               onTap: () => onToggle(true),
-              child: Text('最新', style: TextStyle(color: latest ? theme.colorScheme.primary : theme.colorScheme.outline)),
+              child: Text('最新',
+                  style: TextStyle(
+                      color: latest
+                          ? theme.colorScheme.primary
+                          : theme.colorScheme.outline)),
             ),
           ]),
         ),
         const Divider(height: 1),
-        Expanded(
-          child: loading
-              ? const Center(child: CircularProgressIndicator())
-              : comments.isEmpty
-                  ? const Center(child: Text('暂无评论'))
-                  : ListView.separated(
-                      itemCount: comments.length,
-                      separatorBuilder: (_, _) => const Divider(height: 1),
-                      itemBuilder: (context, i) => _CommentTile(
-                        comment: comments[i],
-                        replies: replies[comments[i].uin],
-                        expanded: expandedReplies.contains(comments[i].uin),
-                        onToggleReplies: () => onToggleReplies(comments[i].uin),
-                      ),
-                    ),
-        ),
+        // fill 模式：监听滚动到底自动加载更多
+        if (fill)
+          Expanded(
+            child: hasMore
+                ? NotificationListener<ScrollNotification>(
+                    onNotification: (n) {
+                      if (n.metrics.pixels >=
+                          n.metrics.maxScrollExtent - 200) {
+                        onLoadMore();
+                      }
+                      return false;
+                    },
+                    child: list,
+                  )
+                : list,
+          )
+        else
+          list,
         // 写评论
         SafeArea(
           top: false,
           child: Padding(
             padding: const EdgeInsets.all(8),
-            child: GestureDetector(onTap: onWrite, child: const _WriteCommentBar()),
+            child: GestureDetector(
+                onTap: onWrite, child: const _WriteCommentBar()),
           ),
         ),
       ],
@@ -390,14 +537,23 @@ class _CommentTile extends StatelessWidget {
   final DynamicsComment comment;
   final List<DynamicsComment>? replies;
   final bool expanded;
+  final bool replyLoading;
   final VoidCallback onToggleReplies;
 
-  const _CommentTile({required this.comment, this.replies, required this.expanded, required this.onToggleReplies});
+  const _CommentTile({
+    required this.comment,
+    required this.replies,
+    required this.expanded,
+    required this.replyLoading,
+    required this.onToggleReplies,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final name = (comment.nickname ?? '${comment.uin}').isEmpty ? '${comment.uin}' : (comment.nickname ?? '${comment.uin}');
+    final name = (comment.nickname ?? '${comment.uin}').isEmpty
+        ? '${comment.uin}'
+        : (comment.nickname ?? '${comment.uin}');
     final meta = [
       if (comment.createTime > 0) _relative(comment.createTime),
       'IP ${comment.location.isNotEmpty ? comment.location : comment.uin}',
@@ -414,14 +570,20 @@ class _CommentTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(children: [
-                  Flexible(child: Text(name,
-                      maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
+                  Flexible(
+                      child: Text(name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 13, fontWeight: FontWeight.w600))),
                 ]),
-                Text(meta, style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+                Text(meta,
+                    style: theme.textTheme.labelSmall
+                        ?.copyWith(color: theme.colorScheme.outline)),
                 const SizedBox(height: 4),
                 Text.rich(
-                  TextSpan(children: dynamicsContentSpans(comment.content, context)),
+                  TextSpan(
+                      children: dynamicsContentSpans(comment.content, context)),
                   style: const TextStyle(fontSize: 13, height: 1.3),
                 ),
                 if (comment.replyCount > 0)
@@ -429,39 +591,61 @@ class _CommentTile extends StatelessWidget {
                     onTap: onToggleReplies,
                     child: Padding(
                       padding: const EdgeInsets.only(top: 2),
-                      child: Text(expanded ? '收起回复' : '共${comment.replyCount}条回复',
-                          style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+                      child: Text(
+                          expanded
+                              ? '收起回复'
+                              : '共${comment.replyCount}条回复',
+                          style: theme.textTheme.labelSmall
+                              ?.copyWith(color: theme.colorScheme.outline)),
                     ),
                   ),
-                if (expanded && replies != null) ...[
+                if (replyLoading)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2)),
+                  )
+                else if (expanded && replies != null) ...[
                   const SizedBox(height: 4),
-                  ...replies!.map((r) => Padding(
-                        padding: const EdgeInsets.only(left: 8, top: 4),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.reply, size: 12),
-                            const SizedBox(width: 4),
-                            Expanded(
-                              child: Text.rich(
-                                TextSpan(children: dynamicsContentSpans(
-                                    '${r.nickname ?? r.uin}: ${r.content}', context)),
-                                style: const TextStyle(fontSize: 12, height: 1.3),
+                  if (replies!.isEmpty)
+                    Text('暂无回复',
+                        style: theme.textTheme.labelSmall
+                            ?.copyWith(color: theme.colorScheme.outline))
+                  else
+                    ...replies!.map((r) => Padding(
+                          padding: const EdgeInsets.only(left: 8, top: 4),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Icon(Icons.reply, size: 12),
+                              const SizedBox(width: 4),
+                              Expanded(
+                                child: Text.rich(
+                                  TextSpan(
+                                      children: dynamicsContentSpans(
+                                          '${r.nickname ?? r.uin}: ${r.content}',
+                                          context)),
+                                  style: const TextStyle(
+                                      fontSize: 12, height: 1.3),
+                                ),
                               ),
-                            ),
-                          ],
-                        ),
-                      )),
+                            ],
+                          ),
+                        )),
                 ],
               ],
             ),
           ),
           const SizedBox(width: 8),
           Row(children: [
-            Icon(Icons.thumb_up_alt_outlined, size: 14, color: theme.colorScheme.outline),
+            Icon(Icons.thumb_up_alt_outlined,
+                size: 14, color: theme.colorScheme.outline),
             if (comment.likeCount > 0) ...[
               const SizedBox(width: 3),
-              Text('${comment.likeCount}', style: theme.textTheme.labelSmall),
+              Text('${comment.likeCount}',
+                  style: theme.textTheme.labelSmall),
             ],
           ]),
         ],
@@ -487,21 +671,6 @@ class _WriteCommentBar extends StatelessWidget {
         const SizedBox(width: 8),
         Text('点击写评论', style: TextStyle(color: theme.colorScheme.onSecondaryContainer)),
       ]),
-    );
-  }
-}
-
-class _VBadge extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 0.5),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.tertiary]),
-        borderRadius: BorderRadius.circular(3),
-      ),
-      child: const Text('V3', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
     );
   }
 }

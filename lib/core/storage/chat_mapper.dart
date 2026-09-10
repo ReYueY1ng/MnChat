@@ -13,6 +13,7 @@ ChatMessagesCompanion chatMessageToCompanion(
   ChatMessage m,
   String sessionKey, {
   required int myUin,
+  int ownerUin = 0,
 }) {
   return ChatMessagesCompanion(
     sessionKey: Value(sessionKey),
@@ -30,6 +31,7 @@ ChatMessagesCompanion chatMessageToCompanion(
     isTime: Value(m.isTime),
     direction: Value(m.uin == myUin ? 'out' : 'in'),
     msgType: Value(m.type.name),
+    ownerUin: Value(ownerUin),
   );
 }
 
@@ -53,7 +55,7 @@ ChatMessage chatMessageFromRecord(ChatMessageRecord r) {
 }
 
 /// ChatSession → ChatSessionsCompanion（插入用）。
-ChatSessionsCompanion chatSessionToCompanion(ChatSession s) {
+ChatSessionsCompanion chatSessionToCompanion(ChatSession s, {int ownerUin = 0}) {
   return ChatSessionsCompanion(
     sessionKey: Value(_sessionKeyOf(s)),
     typeId: Value(s.type == ChatSessionType.group ? 1 : 0),
@@ -64,6 +66,7 @@ ChatSessionsCompanion chatSessionToCompanion(ChatSession s) {
     unreadCount: Value(s.unreadCount),
     lastUin: Value(s.lastMessage?.uin),
     lastText: Value(s.lastMessage?.text),
+    ownerUin: Value(ownerUin),
   );
 }
 
@@ -102,6 +105,7 @@ FriendRecord friendToRecord(
   required int updatedAt,
   bool isOnline = false,
   String? gameStatus,
+  int ownerUin = 0,
 }) {
   return FriendRecord(
     uin: c.uin,
@@ -112,6 +116,7 @@ FriendRecord friendToRecord(
     updatedAt: updatedAt,
     relation: c.relation,
     mark: c.mark,
+    ownerUin: ownerUin,
   );
 }
 

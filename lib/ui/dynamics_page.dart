@@ -6,7 +6,10 @@ import '../core/services/dynamics.dart';
 import '../state/providers.dart';
 import 'widgets/dynamics_card.dart';
 
-/// 动态页 —— 双列瀑布流信息流（好友/热门/官方）。
+/// 动态页 —— 瀑布流信息流（热门/关注/官方/我的）。
+///
+/// 每个分类独立缓存：切换分类不清空其它分类已加载内容，
+/// 返回时直接显示缓存并后台静默刷新。
 class DynamicsPage extends ConsumerStatefulWidget {
   const DynamicsPage({super.key});
 
@@ -14,22 +17,44 @@ class DynamicsPage extends ConsumerStatefulWidget {
   ConsumerState<DynamicsPage> createState() => _DynamicsPageState();
 }
 
+/// 单个分类的数据缓存。
+class _TabCache {
+  List<DynamicsPost> posts = [];
+  int nextCt = 0;
+  String? error;
+  bool loading = false;
+  bool loadedOnce = false;
+  bool loadingMore = false;
+}
+
 class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   DynamicsClient? _client;
-  List<DynamicsPost> _posts = [];
-  bool _loading = true;
-  bool _loadingMore = false;
-  String? _error;
+
+  /// 当前 tab：0 热门 / 1 关注 / 2 官方 / 3 我的。默认热门（最左）。
   int _tab = 0;
-  int _nextCt = 0;
+  final List<_TabCache> _caches =
+      List.generate(_feedTypes.length, (_) => _TabCache());
+
+  /// 请求序号：切 tab 后旧的慢响应不应覆盖新列表。
+  int _reqSeq = 0;
   final ScrollController _scroll = ScrollController();
 
-  static const _feedTypes = [DynamicsFeedType.recommend, DynamicsFeedType.hot, DynamicsFeedType.official, DynamicsFeedType.mine];
+  static const _feedTypes = [DynamicsFeedType.hot, DynamicsFeedType.recommend, DynamicsFeedType.official, DynamicsFeedType.mine];
+  static const _feedLabels = ['热门', '关注', '官方', '我的'];
+
+  _TabCache get _cache => _caches[_tab];
 
   @override
   void initState() {
     super.initState();
     _scroll.addListener(_onScroll);
+    // 主壳（IndexedStack）会在后台自动登录完成前就构建本页：
+    // 启动时 auth 可能为 null（显示"未登录"），必须监听登录态，
+    // 一旦登录成功立即初始化并拉取，否则永远停在"未登录"。
+    // 注意：initState 中必须用 listenManual（ref.listen 仅限 build）。
+    ref.listenManual<AuthState>(authProvider, (prev, next) {
+      if (next.isLoggedIn && _client == null && mounted) _init();
+    });
     _init();
   }
 
@@ -50,8 +75,8 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     final auth = ref.read(chatServiceProvider).auth;
     if (auth == null) {
       setState(() {
-        _loading = false;
-        _error = '未登录';
+        _cache.error = '未登录';
+        _cache.loading = false;
       });
       return;
     }
@@ -59,44 +84,60 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     _load();
   }
 
+  /// 加载当前 tab（首次/下拉刷新）。
   Future<void> _load() async {
     final client = _client;
     if (client == null) return;
+    final cache = _cache;
+    final seq = ++_reqSeq;
     setState(() {
-      _loading = true;
-      _error = null;
+      cache.loading = true;
+      cache.error = null;
     });
     try {
       final result = await client.pullPostings(_feedTypes[_tab]);
-      if (mounted) {
-        setState(() {
-          _posts = result.posts;
-          _nextCt = result.nextCt;
-        });
-      }
+      if (!mounted || seq != _reqSeq) return; // 已切 tab，丢弃旧响应
+      setState(() {
+        cache.posts = result.posts;
+        cache.nextCt = result.nextCt;
+        cache.loadedOnce = true;
+      });
     } catch (e) {
-      _error = '加载失败: $e';
+      if (!mounted || seq != _reqSeq) return;
+      setState(() => cache.error = '加载失败: $e');
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && seq == _reqSeq) {
+        setState(() => cache.loading = false);
+      }
     }
   }
 
   Future<void> _loadMore() async {
     final client = _client;
-    if (client == null || _loadingMore || _loading || _nextCt == 0) return;
-    setState(() => _loadingMore = true);
+    final cache = _cache;
+    if (client == null ||
+        cache.loadingMore ||
+        cache.loading ||
+        cache.nextCt == 0 ||
+        !cache.loadedOnce) {
+      return;
+    }
+    final seq = _reqSeq;
+    setState(() => cache.loadingMore = true);
     try {
-      final result = await client.pullPostings(_feedTypes[_tab], ct: _nextCt);
-      if (mounted) {
-        setState(() {
-          _posts = [..._posts, ...result.posts];
-          _nextCt = result.nextCt;
-        });
-      }
+      final result =
+          await client.pullPostings(_feedTypes[_tab], ct: cache.nextCt);
+      if (!mounted || seq != _reqSeq) return;
+      setState(() {
+        cache.posts = [...cache.posts, ...result.posts];
+        cache.nextCt = result.nextCt;
+      });
     } catch (_) {
       // 忽略加载更多失败
     } finally {
-      if (mounted) setState(() => _loadingMore = false);
+      if (mounted && seq == _reqSeq) {
+        setState(() => cache.loadingMore = false);
+      }
     }
   }
 
@@ -104,21 +145,32 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     if (i == _tab) return;
     setState(() {
       _tab = i;
-      _nextCt = 0;
+      _scroll.jumpTo(0); // 回顶部（各分类独立列表）
     });
-    _load();
+    // 保留其它分类内容：仅当此分类从没加载过时才拉取
+    if (!_caches[i].loadedOnce && _caches[i].error == null && _client != null) {
+      _load();
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
       length: _feedTypes.length,
+      initialIndex: 0, // 默认"热门"（最左）
       child: Scaffold(
         appBar: AppBar(
           title: const Text('动态'),
+          actions: [
+            IconButton(
+              tooltip: '刷新',
+              icon: const Icon(Icons.refresh),
+              onPressed: _init,
+            ),
+          ],
           bottom: TabBar(
             onTap: _switchTab,
-            tabs: const [Tab(text: '推荐'), Tab(text: '热门'), Tab(text: '官方'), Tab(text: '我的')],
+            tabs: [for (final l in _feedLabels) Tab(text: l)],
           ),
         ),
         body: _body(),
@@ -127,32 +179,68 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   }
 
   Widget _body() {
-    if (_loading) return const Center(child: CircularProgressIndicator());
-    if (_error != null) {
+    final cache = _cache;
+    // 首次加载（该 tab 还没有内容）→ 显示转圈
+    if (!cache.loadedOnce && cache.loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (cache.error != null && cache.posts.isEmpty) {
       return Center(
-        child: Text('$_error\n\n点击右上角刷新', textAlign: TextAlign.center),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text('${cache.error}', textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            FilledButton.tonalIcon(
+              onPressed: _load,
+              icon: const Icon(Icons.refresh),
+              label: const Text('重试'),
+            ),
+          ],
+        ),
       );
     }
-    if (_posts.isEmpty) return const Center(child: Text('暂无动态'));
+    // 有缓存但正在后台刷新（下拉之外的静默刷新）→ 顶部细条
+    if (cache.posts.isEmpty && !cache.loading) {
+      return RefreshIndicator(
+        onRefresh: _load,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: const [
+            SizedBox(height: 160),
+            Center(child: Text('暂无动态，下拉刷新')),
+          ],
+        ),
+      );
+    }
     final myUin = ref.read(myUinProvider);
     return Column(
       children: [
         Expanded(
-          child: RefreshIndicator(
-            onRefresh: _load,
-            child: MasonryGridView.count(
-              controller: _scroll,
-              physics: const AlwaysScrollableScrollPhysics(),
-              crossAxisCount: 2,
-              mainAxisSpacing: 8,
-              crossAxisSpacing: 8,
-              padding: const EdgeInsets.all(8),
-              itemCount: _posts.length,
-              itemBuilder: (context, i) => DynamicsCard(post: _posts[i], isMine: _posts[i].uin == myUin),
-            ),
-          ),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // 竖屏/窄 → 单列；横屏/宽 → 双列瀑布流
+            final wide = constraints.maxWidth >= 700;
+            return RefreshIndicator(
+              onRefresh: _load,
+              child: MasonryGridView.count(
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                crossAxisCount: wide ? 2 : 1,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                padding: const EdgeInsets.all(8),
+                itemCount: cache.posts.length,
+                itemBuilder: (context, i) => DynamicsCard(
+                  post: cache.posts[i],
+                  isMine: cache.posts[i].uin == myUin,
+                ),
+              ),
+            );
+          }),
         ),
-        if (_loadingMore) const LinearProgressIndicator(minHeight: 2),
+        if (cache.loading && cache.loadedOnce)
+          const LinearProgressIndicator(minHeight: 2),
+        if (cache.loadingMore) const LinearProgressIndicator(minHeight: 2),
       ],
     );
   }

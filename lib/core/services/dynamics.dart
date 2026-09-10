@@ -218,6 +218,17 @@ class DynamicsComment {
   /// 属地（location）。
   final String location;
 
+  // ── 父评论定位字段（回复接口 get_comment_rep 必需）────────────────────
+  /// 动态作者 uin（pid 前半段）与动态 ct（pid 后半段）。
+  final int pidUin;
+  final int pidCt;
+
+  /// 评论作者 uin（= uin，回复接口的 com_uin）。
+  final int opUin;
+
+  /// 评论 last_time（回复/分页游标用）。
+  final int lastTime;
+
   const DynamicsComment({
     required this.uin,
     required this.content,
@@ -227,35 +238,83 @@ class DynamicsComment {
     this.likeCount = 0,
     this.replyCount = 0,
     this.location = '',
+    this.pidUin = 0,
+    this.pidCt = 0,
+    this.opUin = 0,
+    this.lastTime = 0,
   });
+
+  /// 从多个候选 key 取首个数值。
+  static int _int(Map<String, Object?> m, List<String> keys) {
+    for (final k in keys) {
+      final v = m[k];
+      if (v is num) return v.toInt();
+      if (v is String) {
+        final n = int.tryParse(v);
+        if (n != null) return n;
+      }
+    }
+    return 0;
+  }
 
   static DynamicsComment? fromItem(Map<String, Object?> m) {
     final rawUin = m['uin'] ?? m['Uin'] ?? m['sender'] ?? 0;
     final uin = rawUin is num ? rawUin.toInt() : int.tryParse('$rawUin') ?? 0;
+    // 回复条目用 rep_uin（回复者）；评论用 uin。
+    final rawRep = m['rep_uin'];
+    final repUin = rawRep is num
+        ? rawRep.toInt()
+        : int.tryParse('$rawRep') ?? 0;
+    final authorUin = repUin != 0 ? repUin : uin;
     // content 是 URL 编码（UTF-8），需解码。
     final content = Uri.decodeComponent(m['content']?.toString() ?? '');
     if (content.isEmpty) return null;
     int time = 0;
-    final t = m['last_time'] ?? m['time'] ?? m['ct'];
+    // 评论/回复时间：评论用 last_time；回复用 rep_time。
+    final t = m['last_time'] ?? m['rep_time'] ?? m['time'] ?? m['ct'];
     if (t is num) {
       time = t.toInt();
     } else {
       time = int.tryParse('$t') ?? 0;
     }
-    final like = m['cai'] ?? m['like_count'] ?? 0;
+    // 回复数：评论用 com_cnt；回复条目可能无。
+    final like = m['cai'] ?? m['like_count'] ?? m['prize'] ?? 0;
     final reply = m['com_cnt'] ?? m['reply_count'] ?? 0;
+    // 父动态定位字段：优先条目自带 pid_uin/pid_ct；缺失时尝试从 pid
+    // （形如 "uin_ct"）拆出，兜底用 authorUin。
+    var pidUin = _int(m, ['pid_uin', 'p_uin', 'com_pid_uin']);
+    var pidCt = _int(m, ['pid_ct', 'com_pid_ct']);
+    if ((pidUin == 0 || pidCt == 0) && m['pid'] != null) {
+      final pidParts = '${m['pid']}'.split('_');
+      if (pidParts.isNotEmpty) {
+        pidUin = pidUin != 0 ? pidUin : int.tryParse(pidParts[0]) ?? 0;
+        if (pidCt == 0 && pidParts.length > 1) {
+          pidCt = int.tryParse(pidParts[1]) ?? 0;
+        }
+      }
+    }
+    final opUinRaw = m['op_uin'] ?? m['com_op_uin'];
+    final opUin = opUinRaw is num
+        ? opUinRaw.toInt()
+        : int.tryParse('$opUinRaw') ?? 0;
     return DynamicsComment(
-      uin: uin,
+      uin: authorUin,
       content: content,
       createTime: time,
       nickname: m['nickname']?.toString() ?? m['NickName']?.toString(),
       likeCount: like is num ? like.toInt() : 0,
       replyCount: reply is num ? reply.toInt() : 0,
       location: m['location']?.toString() ?? '',
+      pidUin: pidUin,
+      pidCt: pidCt,
+      // 回复/评论接口的 com_op_uin 通常=评论作者；缺省用作者 uin 兜底
+      opUin: opUin != 0 ? opUin : authorUin,
+      lastTime: _int(m, ['last_time', 'com_last_time']),
     );
   }
 
-  DynamicsComment withProfile({String? nickname, String? avatar}) => DynamicsComment(
+  DynamicsComment withProfile({String? nickname, String? avatar}) =>
+      DynamicsComment(
         uin: uin,
         content: content,
         createTime: createTime,
@@ -264,6 +323,10 @@ class DynamicsComment {
         likeCount: likeCount,
         replyCount: replyCount,
         location: location,
+        pidUin: pidUin,
+        pidCt: pidCt,
+        opUin: opUin,
+        lastTime: lastTime,
       );
 }
 
@@ -433,20 +496,42 @@ class DynamicsClient {
     return FeedResult(posts, nextCt);
   }
 
-  /// 拉取动态评论（act=get_comment）。响应结构未知，做尽力解析 + 原始日志。
-  Future<List<DynamicsComment>> fetchComments(String pid) async {
-    final url = _url('get_comment', {'pid': pid});
-    debugPrint('[Dynamics get_comment] url: $url');
+  /// 分页拉取动态评论。
+  ///
+  /// [latest]=false（默认）：走 get_recommend_comment，按 [offset] 翻页
+  /// （每页 20，offset = 已加载条数）；
+  /// [latest]=true（最新）：走 get_comment，按 [ct]（上页最后一条的
+  /// last_time）游标续拉。
+  ///
+  /// 对齐反编译 dynamics_detailsctrl.lua PullComments/RespPullComments：
+  /// - 默认排序 offset = commentList.page * 20；
+  /// - 最新排序 ct = 上页最后一条 last_time（curLastCommentCT）；
+  /// - 本页为空 → 没有更多（num<1 → curLastCommentCT=-1）。
+  Future<List<DynamicsComment>> fetchComments(
+    String pid, {
+    required bool latest,
+    int offset = 0,
+    int ct = 0,
+  }) async {
+    final params = <String, String>{
+      'pid': pid,
+      if (latest) ...{
+        if (ct > 0) 'ct': '$ct',
+      } else ...{
+        'offset': '$offset',
+      },
+    };
+    final url = _url(latest ? 'get_comment' : 'get_recommend_comment', params);
+    debugPrint('[Dynamics comment] url: $url');
     final resp = await _dio.get(url);
     final raw = resp.data;
-    debugPrint('[Dynamics get_comment] RAW: $raw');
+    debugPrint('[Dynamics comment] RAW: $raw');
 
     Object? decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is! Map) return [];
     final m = decoded.cast<String, Object?>();
-    if (((m['ret'] ?? m['code']) is num && (m['ret'] ?? m['code']) != 0)) {
-      return [];
-    }
+    final ret = m['ret'] ?? m['code'];
+    if (ret is num && ret != 0) return [];
 
     Object? data = m['data'];
     final roleMap = <int, Map<String, Object?>>{};
@@ -497,9 +582,22 @@ class DynamicsClient {
   Future<Map<String, Object?>> addComment(String pid, String content) =>
       _getMap(_url('add_comment', {'pid': pid, 'content': content}));
 
-  /// 拉取某条评论的回复（act=get_comment_rep）。op_uin 用评论发布者 uin。
-  Future<List<DynamicsComment>> fetchCommentReplies(String pid, int commentUin) async {
-    final url = _url('get_comment_rep', {'pid': pid, 'op_uin': '$commentUin'});
+  /// 拉取某条评论的回复（act=get_comment_rep）。
+  ///
+  /// 请求参数对齐反编译 dynamicsdatamanager.lua ReqCommentReply：
+  /// `com_pid_uin, com_pid_ct, com_uin, com_op_uin, com_last_time` 是父评论
+  /// 的定位字段（来自评论条目本身），**不是**动态 pid / 评论作者 uin。
+  /// 回复条目结构：{rep_id, rep_uin(回复者), op_uin(被回复者), content,
+  /// rep_time, prize, stat}，昵称/头像在 role_info_list（keyed by rep_uin）。
+  Future<List<DynamicsComment>> fetchCommentReplies(DynamicsComment comment) async {
+    final params = <String, String>{
+      'com_pid_uin': '${comment.pidUin}',
+      'com_pid_ct': '${comment.pidCt}',
+      'com_uin': '${comment.uin}',
+      'com_op_uin': '${comment.opUin}',
+      'com_last_time': '${comment.lastTime}',
+    };
+    final url = _url('get_comment_rep', params);
     debugPrint('[Dynamics get_comment_rep] url: $url');
     final resp = await _dio.get(url);
     final raw = resp.data;
@@ -507,15 +605,47 @@ class DynamicsClient {
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is! Map) return [];
     final m = decoded.cast<String, Object?>();
+    final ret = m['ret'] ?? m['code'];
+    if (ret is num && ret != 0) return [];
     Object? data = m['data'];
-    if (data is Map) data = data['list'];
+    final roleMap = <int, Map<String, Object?>>{};
+    if (data is Map) {
+      final rl = data['role_info_list'];
+      if (rl is Map) {
+        for (final e in rl.entries) {
+          final u = int.tryParse('${e.key}');
+          if (u != null && e.value is Map) {
+            roleMap[u] = (e.value as Map).cast<String, Object?>();
+          }
+        }
+      }
+      data = data['list'];
+    }
     if (data is! List) data = m['list'];
     if (data is! List) return [];
-    return data
-        .whereType<Map>()
-        .map((e) => DynamicsComment.fromItem(e.cast<String, Object?>()))
-        .whereType<DynamicsComment>()
-        .toList();
+
+    final out = <DynamicsComment>[];
+    for (final e in data) {
+      if (e is! Map) continue;
+      final c = DynamicsComment.fromItem(e.cast<String, Object?>());
+      if (c == null) continue;
+      final info = roleMap[c.uin];
+      String? avatar;
+      if (info != null) {
+        final pch = info['PersonCenterHead'];
+        if (pch is Map) {
+          final diy = pch['diy_header'];
+          if (diy is Map) avatar = diy['pass_url']?.toString();
+        }
+        out.add(c.withProfile(
+          nickname: info['NickName']?.toString(),
+          avatar: avatar,
+        ));
+      } else {
+        out.add(c);
+      }
+    }
+    return out;
   }
 
   // ── 内部 ──────────────────────────────────────────────────────────────

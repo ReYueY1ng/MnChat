@@ -3,14 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
 import '../state/providers.dart';
-import 'dynamics_page.dart';
 import 'family_page.dart';
-import 'friend_request_page.dart';
+import 'friend_request_page.dart' show showAddFriendDialog;
 import 'settings_page.dart';
 import 'widgets/avatar_view.dart';
 
 /// 会话列表页（左侧栏 / 手机单页）。
-/// 顶部用 AppBar（自动处理状态栏 SafeArea），操作按钮在 Drawer 侧边栏菜单。
+///
+/// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
+/// 群全部保留。顶部保留搜索框，排序等操作在抽屉菜单。
 class SessionListPage extends ConsumerStatefulWidget {
   final List<ChatSession> sessions;
 
@@ -22,8 +23,6 @@ class SessionListPage extends ConsumerStatefulWidget {
 
 class _SessionListPageState extends ConsumerState<SessionListPage> {
   String _search = '';
-  bool _onlyOnline = false;
-  String? _cat; // null=全部 / '好友' / '关注' / '黑名单'（按 relation 位）
 
   @override
   Widget build(BuildContext context) {
@@ -33,22 +32,11 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     final theme = Theme.of(context);
     final sessions = widget.sessions;
 
-    // 过滤：关系分类 + 只看在线（仅好友会话）+ 搜索（名称/迷你号）
+    // 搜索过滤（昵称/迷你号/群名）
     final filtered = sessions.where((s) {
-      switch (_cat) {
-        case '好友':
-          if (s.type != ChatSessionType.friend || (s.relation & 8) == 0) return false;
-        case '关注':
-          if (s.type != ChatSessionType.friend || (s.relation & 16) == 0) return false;
-        case '黑名单':
-          if (s.type != ChatSessionType.friend || (s.relation & 64) == 0) return false;
-      }
-      if (_onlyOnline && s.type == ChatSessionType.friend && !s.isOnline) return false;
-      if (_search.isNotEmpty) {
-        final q = _search.toLowerCase();
-        if (!s.name.toLowerCase().contains(q) && !'${s.id}'.contains(q)) return false;
-      }
-      return true;
+      if (_search.isEmpty) return true;
+      final q = _search.toLowerCase();
+      return s.name.toLowerCase().contains(q) || '${s.id}'.contains(q);
     }).toList();
 
     // 排序（time 模式对齐游戏：未读优先 → 最后消息时间倒序）
@@ -74,7 +62,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
       drawer: _buildDrawer(context, ref, auth),
       body: Column(
         children: [
-          _buildFilterBar(theme),
+          _buildSearchBar(theme),
           const Divider(height: 1),
           Expanded(
             child: sorted.isEmpty
@@ -105,78 +93,35 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     );
   }
 
-  /// 顶部：只看在线开关 + 搜索框 + 好友关系分类 chips。
-  Widget _buildFilterBar(ThemeData theme) {
-    return Column(
-      children: [
-        Padding(
-          padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-          child: Row(
-            children: [
-              // 只看在线
-              InkWell(
-                onTap: () => setState(() => _onlyOnline = !_onlyOnline),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-                  child: Row(
-                    children: [
-                      Icon(_onlyOnline ? Icons.visibility : Icons.visibility_off_outlined,
-                          size: 18, color: theme.colorScheme.primary),
-                      const SizedBox(width: 4),
-                      Text('只看在线', style: const TextStyle(fontSize: 13)),
-                    ],
-                  ),
+  /// 搜索框。
+  Widget _buildSearchBar(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+      child: TextField(
+        onChanged: (v) => setState(() => _search = v),
+        decoration: InputDecoration(
+          hintText: '搜索会话…',
+          isDense: true,
+          prefixIcon: const Icon(Icons.search, size: 20),
+          suffixIcon: _search.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear, size: 18),
+                  onPressed: () => setState(() => _search = ''),
                 ),
-              ),
-              Expanded(
-                child: TextField(
-                  onChanged: (v) => setState(() => _search = v),
-                  decoration: InputDecoration(
-                    hintText: '搜索会话…',
-                    isDense: true,
-                    prefixIcon: const Icon(Icons.search, size: 20),
-                    suffixIcon: _search.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear, size: 18),
-                            onPressed: () => setState(() => _search = ''),
-                          ),
-                    filled: true,
-                    fillColor: theme.colorScheme.surfaceContainerHighest,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(18),
-                      borderSide: BorderSide.none,
-                    ),
-                    contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                  ),
-                ),
-              ),
-            ],
+          filled: true,
+          fillColor: theme.colorScheme.surfaceContainerHighest,
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(18),
+            borderSide: BorderSide.none,
           ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
         ),
-        // 好友关系分类
-        SizedBox(
-          height: 40,
-          child: ListView(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-            children: const ['全部', '好友', '关注', '黑名单'].map((c) {
-              return Padding(
-                padding: const EdgeInsets.only(right: 8),
-                child: _CatChip(
-                  label: c,
-                  selected: _cat == (c == '全部' ? null : c),
-                  onTap: () => setState(() => _cat = c == '全部' ? null : c),
-                ),
-              );
-            }).toList(),
-          ),
-        ),
-      ],
+      ),
     );
   }
 
-  /// 侧边栏菜单：账号信息 / 排序 / 刷新 / 设置 / 退出登录。
+  /// 侧边栏菜单：账号信息 / 排序 / 刷新 / 家族 / 设置 / 退出登录。
   Drawer _buildDrawer(BuildContext context, WidgetRef ref, authState) {
     final theme = Theme.of(context);
     final sortMode = ref.watch(sessionSortModeProvider);
@@ -245,21 +190,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                 ref.read(chatServiceProvider).loadSessions();
               },
             ),
-            // 好友申请：红点显示待处理数
-            Badge(
-              isLabelVisible: ref.watch(friendRequestCountProvider) > 0,
-              label: Text('${ref.watch(friendRequestCountProvider)}'),
-              child: ListTile(
-                leading: const Icon(Icons.group_add),
-                title: const Text('好友申请'),
-                onTap: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const FriendRequestPage()),
-                  );
-                },
-              ),
-            ),
             ListTile(
               leading: const Icon(Icons.home),
               title: const Text('家族'),
@@ -267,16 +197,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const FamilyPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.public),
-              title: const Text('动态'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const DynamicsPage()),
                 );
               },
             ),
@@ -292,6 +212,15 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
             ),
             const Divider(height: 1),
             ListTile(
+              leading: const Icon(Icons.switch_account_outlined),
+              title: const Text('切换账号'),
+              subtitle: const Text('退出并回到登录页，可登录其他账号'),
+              onTap: () {
+                Navigator.of(context).pop();
+                ref.read(authProvider.notifier).logout();
+              },
+            ),
+            ListTile(
               leading: Icon(Icons.logout, color: theme.colorScheme.error),
               title: Text('退出登录',
                   style: TextStyle(color: theme.colorScheme.error)),
@@ -301,39 +230,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
               },
             ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 好友关系分类 chip（全部/好友/关注/黑名单）。
-class _CatChip extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onTap;
-
-  const _CatChip({required this.label, required this.selected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return InkWell(
-      borderRadius: BorderRadius.circular(14),
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-        decoration: BoxDecoration(
-          color: selected ? theme.colorScheme.primary : theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            fontSize: 13,
-            color: selected ? theme.colorScheme.onPrimary : theme.colorScheme.onSurface,
-            fontWeight: selected ? FontWeight.w600 : FontWeight.normal,
-          ),
         ),
       ),
     );
@@ -462,7 +358,7 @@ class _EmptySessions extends StatelessWidget {
         children: [
           Icon(Icons.inbox_outlined, size: 48, color: theme.colorScheme.outline),
           const SizedBox(height: 8),
-          const Text('暂无会话\n下拉刷新或点击刷新按钮'),
+          const Text('暂无会话\n聊过天的人会出现在这里'),
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: onAddFriend,
