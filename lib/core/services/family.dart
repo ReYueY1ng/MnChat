@@ -162,6 +162,28 @@ class FamilyClient {
   Future<Map<String, Object?>> applyJoin(Object familyId) =>
       _get(_url('apply_join', {'family_id': '$familyId'}), 'apply_join');
 
+  /// 通过/拒绝入族申请 (act=accept_join)。
+  /// 对齐 familyservice.lua AcceptJoin：reject=1 拒绝，nil/0 通过；
+  /// clear 传 1 时通过后清空其余申请。
+  Future<Map<String, Object?>> acceptJoin({
+    required Object target,
+    required Object familyId,
+    bool reject = false,
+    bool clear = false,
+  }) {
+    final params = <String, String>{
+      'target': '$target',
+      'family_id': '$familyId',
+      'reject': reject ? '1' : '0',
+      'clear': clear ? '1' : '0',
+    };
+    return _get(_url('accept_join', params), 'accept_join');
+  }
+
+  /// 邀请好友加入家族 (act=invite)。
+  Future<Map<String, Object?>> invite(Object target, Object familyId) =>
+      _get(_url('invite', {'target': '$target', 'family_id': '$familyId'}), 'invite');
+
   /// 退出家族。
   Future<Map<String, Object?>> quit(Object familyId) =>
       _get(_url('quit', {'family_id': '$familyId'}), 'quit');

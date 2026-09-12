@@ -87,6 +87,12 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
       padding: const EdgeInsets.all(16),
       child: Column(
         children: [
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : () => _showInviteDialog(service),
+            icon: const Icon(Icons.person_add_alt),
+            label: const Text('邀请好友入群'),
+          ),
+          const SizedBox(height: 8),
           if (isOwner) ...[
             FilledButton.icon(
               onPressed: _busy ? null : () => _showTransferDialog(members, creatorUin),
@@ -109,6 +115,103 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         ],
       ),
     );
+  }
+
+  /// 邀请好友入群：好友选择器（仅双向好友）→ join_group(op_uin)。
+  Future<void> _showInviteDialog(dynamic service) async {
+    final contacts = service.contacts
+        .where((c) => (c.relation & 8) != 0)
+        .toList()
+      ..sort(
+          (a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()));
+    if (contacts.isEmpty) {
+      _toast('暂无好友可邀请');
+      return;
+    }
+    final selected = <int>{};
+    final picked = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) => SafeArea(
+          child: SizedBox(
+            height: MediaQuery.of(ctx).size.height * 0.7,
+            child: Column(
+              children: [
+                const ListTile(
+                  title: Text('选择要邀请的好友', style: TextStyle(fontWeight: FontWeight.w600)),
+                ),
+                const Divider(height: 1),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: contacts.length,
+                    itemBuilder: (ctx, i) {
+                      final c = contacts[i];
+                      final name = c.nickname.isNotEmpty ? c.nickname : '${c.uin}';
+                      final checked = selected.contains(c.uin);
+                      return CheckboxListTile(
+                        value: checked,
+                        title: Text(name),
+                        subtitle: Text('迷你号 ${c.uin}'),
+                        secondary: AvatarView(name: name, radius: 20),
+                        onChanged: (v) {
+                          setSheetState(() {
+                            if (v == true) {
+                              selected.add(c.uin);
+                            } else {
+                              selected.remove(c.uin);
+                            }
+                          });
+                        },
+                      );
+                    },
+                  ),
+                ),
+                const Divider(height: 1),
+                Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text('已选 ${selected.length} 人'),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('取消'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () => Navigator.pop(ctx, true),
+                        child: const Text('邀请'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (picked != true || selected.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      final info = ref.read(chatServiceProvider).groupInfo(widget.groupId);
+      await ref.read(chatServiceProvider).group?.inviteToGroup(
+            groupId: widget.groupId,
+            uins: selected.toList(),
+            groupName: widget.name,
+            lord: info?.creatorUin ?? 0,
+            isAllowMemberInvite: 0,
+          );
+      _toast('已发送邀请');
+    } catch (e) {
+      _toast('邀请失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
   }
 
   String _displayName(int uin, dynamic service) {

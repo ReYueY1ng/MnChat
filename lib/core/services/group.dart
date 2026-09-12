@@ -5,7 +5,7 @@ library;
 
 import 'dart:convert';
 
-import '../crypto/encoding.dart' show urlsafeB64Urldecode;
+import '../crypto/encoding.dart' show luaUrlEncode, urlsafeB64Urldecode, urlsafeB64Urlencode;
 import 'gateway.dart';
 
 /// 群聊 URL 路径。
@@ -118,6 +118,101 @@ class GroupClient {
           jsonEncode({'query_info': queryInfo}),
           contentType: 'application/json;charset:utf-8');
 
+  // ── 群申请（对齐 newfriendservice.lua / friendservice.lua）───────────────
+
+  /// 拉取"邀请我入群"的申请列表 (act=query_user_groups_apply_list)。
+  /// 返回 data[]，字段：group_id, creator, group_name, invitor,
+  /// group_iconid, group_icontype, MemberNum。
+  Future<Map<String, Object?>> queryGroupApplyList() =>
+      _call('query_user_groups_apply_list', {'json': '1'});
+
+  /// 同意入群申请 (act=agree_group_apply)。成功 ret==0；ret==4 表示群已解散。
+  Future<Map<String, Object?>> agreeGroupApply(Object groupId) =>
+      _call('agree_group_apply', {'group_id': '$groupId', 'json': '1'});
+
+  /// 拒绝入群申请 (act=reject_group_apply)。成功 ret==0；ret==4 表示群已解散。
+  Future<Map<String, Object?>> rejectGroupApply(Object groupId) =>
+      _call('reject_group_apply', {'group_id': '$groupId', 'json': '1'});
+
+  /// 移除退群记录 (act=del_group_quit_list，对齐 ReqAgreeGroupMsg)。
+  Future<Map<String, Object?>> delGroupQuitList(Object groupId) =>
+      _call('del_group_quit_list', {'group_id': '$groupId', 'json': '1'});
+
+  // ── 建群 / 邀请入群（对齐 friendservice.lua ReqCreateChatGroup / ReqInviteToChatGroup）
+
+  /// 创建群 (act=create_group)。
+  ///
+  /// [members] 初始成员 uin 列表（含自己）；[iconId]/[iconType] 群图标；
+  /// [join]=1 允许成员自行邀请好友入群。
+  /// 参数对齐反编译 ReqCreateChatGroup：members=逗号分隔、group_name 先
+  /// url_encode、extend_data=url_encode(base64(JSON{Type,Lord,GroupName,
+  /// IconID,IconType,MemberList}))、join、json=1。
+  Future<Map<String, Object?>> createGroupWithMembers({
+    required String groupName,
+    required List<int> members,
+    int iconId = 2,
+    int iconType = 1,
+    int join = 0,
+    int pushChannel = 1,
+  }) {
+    final memberList = members.join(',');
+    final encodedName = luaUrlEncode(groupName);
+    final extend = <String, Object?>{
+      'Type': 'CreateGroup',
+      'Lord': '$uin',
+      'GroupName': encodedName,
+      'IconID': iconId,
+      'IconType': iconType,
+      'MemberList': memberList,
+    };
+    final encodeJsonStr = _encodeExtendData(extend);
+    return _call('create_group', {
+      'members': memberList,
+      'group_name': encodedName,
+      'group_icontype': '$iconType',
+      'group_iconid': '$iconId',
+      'join': '$join',
+      'extend_data': encodeJsonStr,
+      'json': '1',
+      'pushchannel': '$pushChannel',
+    });
+  }
+
+  /// 邀请好友入群 (act=join_group + op_uin)。
+  ///
+  /// 对齐 ReqInviteToChatGroup：op_uin=逗号分隔目标 uin，extend_data=
+  /// url_encode(base64(JSON{Type=InviteGroup,GroupID,GroupName,Lord,
+  /// isAllowMemberInvite,uin1,uin2,name1,MemberList}))。
+  Future<Map<String, Object?>> inviteToGroup({
+    required Object groupId,
+    required List<int> uins,
+    String groupName = '',
+    int lord = 0,
+    int isAllowMemberInvite = 0,
+    int pushChannel = 1,
+  }) {
+    final opUins = uins.join(',');
+    final extend = <String, Object?>{
+      'Type': 'InviteGroup',
+      'GroupID': '$groupId',
+      'GroupName': groupName,
+      'Lord': '$lord',
+      'isAllowMemberInvite': isAllowMemberInvite,
+      'uin1': '$uin',
+      'uin2': opUins,
+      'name1': '',
+      'MemberList': '',
+    };
+    final encodeJsonStr = _encodeExtendData(extend);
+    return _call('join_group', {
+      'group_id': '$groupId',
+      'op_uin': opUins,
+      'extend_data': encodeJsonStr,
+      'json': '1',
+      'pushchannel': '$pushChannel',
+    });
+  }
+
   // ── 内部 ─────────────────────────────────────────────────────────────────
 
   Future<Map<String, Object?>> _call(String act, [Map<String, String> params = const {}]) =>
@@ -138,7 +233,7 @@ class GroupClient {
         },
       );
 
-  /// extend_data 解码链：url_decode → base64_decode → JSON。
+  /// extend_data 编码链：url_decode → base64_decode → JSON。
   static Map<String, Object?>? _decodeExtendData(String raw) {
     final urldecoded = Uri.decodeComponent(raw);
     final bytes = urlsafeB64Urldecode(urldecoded);
@@ -146,5 +241,12 @@ class GroupClient {
     final decoded = jsonDecode(text);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return null;
+  }
+
+  /// extend_data 编码：JSON → base64 → url_encode（对齐 friendservice.lua）。
+  static String _encodeExtendData(Map<String, Object?> data) {
+    final jsonStr = jsonEncode(data);
+    final b64 = urlsafeB64Urlencode(utf8.encode(jsonStr));
+    return Uri.encodeQueryComponent(b64);
   }
 }

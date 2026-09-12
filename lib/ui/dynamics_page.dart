@@ -4,6 +4,8 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 import '../core/services/dynamics.dart';
 import '../state/providers.dart';
+import 'dynamics_notice_page.dart';
+import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
 
 /// 动态页 —— 瀑布流信息流（热门/关注/官方/我的）。
@@ -162,6 +164,32 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         appBar: AppBar(
           title: const Text('动态'),
           actions: [
+            IconButton(
+              tooltip: '动态通知',
+              icon: const Icon(Icons.notifications_outlined),
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DynamicsNoticePage()),
+              ),
+            ),
+            IconButton(
+              tooltip: '发布动态',
+              icon: const Icon(Icons.edit_outlined),
+              onPressed: () async {
+                final ok = await Navigator.of(context).push<bool>(
+                  MaterialPageRoute(
+                    builder: (_) => const PublishDynamicsPage(),
+                  ),
+                );
+                // 发布成功 → 刷新"我的"分类缓存
+                if (ok == true && mounted) {
+                  final i = _feedLabels.indexOf('我的');
+                  if (i >= 0) {
+                    _caches[i].loadedOnce = false;
+                    _switchTab(i);
+                  }
+                }
+              },
+            ),
             IconButton(
               tooltip: '刷新',
               icon: const Icon(Icons.refresh),

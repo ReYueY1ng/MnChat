@@ -138,6 +138,11 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
         title: const Text('家族'),
         actions: [
           IconButton(
+            tooltip: '入族申请',
+            icon: const Icon(Icons.person_add_alt_1_outlined),
+            onPressed: _loading ? null : _showApplyList,
+          ),
+          IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _load,
@@ -146,6 +151,94 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       ),
       body: _body(),
     );
+  }
+
+  /// 入族申请列表（仅族长可见审批按钮）。
+  Future<void> _showApplyList() async {
+    final client = _client;
+    final family = _family;
+    if (client == null || family == null) return;
+    final detail = await client.getFamilyDetail(family.familyId);
+    if (!mounted) return;
+    final data = detail['data'] ?? detail;
+    final applies = <Map<String, Object?>>[];
+    if (data is Map) {
+      final al = data['apply_list'];
+      if (al is List) {
+        for (final e in al) {
+          if (e is Map) applies.add(e.cast<String, Object?>());
+        }
+      }
+    }
+    if (applies.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('暂无入族申请')),
+      );
+      return;
+    }
+    final myUin = ref.read(myUinProvider);
+    final isLeader = family.leaderUin == myUin;
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('入族申请', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            const Divider(height: 1),
+            ...applies.map((a) {
+              final uin = (a['uin'] ?? a['Uin'] ?? 0) is num
+                  ? ((a['uin'] ?? a['Uin']) as num).toInt()
+                  : int.tryParse('${a['uin'] ?? a['Uin'] ?? 0}') ?? 0;
+              final name = a['NickName']?.toString() ?? '$uin';
+              return ListTile(
+                leading: AvatarView(name: name),
+                title: Text(name),
+                subtitle: Text('迷你号 $uin'),
+                trailing: isLeader
+                    ? Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            tooltip: '通过',
+                            icon: Icon(Icons.check,
+                                color: Colors.green.shade600),
+                            onPressed: () async {
+                              await client.acceptJoin(
+                                  target: uin, familyId: family.familyId);
+                              if (ctx.mounted) Navigator.of(ctx).pop();
+                              _toast('已通过');
+                            },
+                          ),
+                          IconButton(
+                            tooltip: '拒绝',
+                            icon: Icon(Icons.close,
+                                color: Theme.of(ctx).colorScheme.error),
+                            onPressed: () async {
+                              await client.acceptJoin(
+                                  target: uin,
+                                  familyId: family.familyId,
+                                  reject: true);
+                              if (ctx.mounted) Navigator.of(ctx).pop();
+                              _toast('已拒绝');
+                            },
+                          ),
+                        ],
+                      )
+                    : null,
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _toast(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   Widget _body() {

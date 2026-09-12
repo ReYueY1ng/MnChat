@@ -20,6 +20,12 @@ class SettingsKeys {
   static const String serverBase = 'server_base'; // 服务器地址（留空=默认）
   static const String notifyEnabled = 'notify_enabled'; // 新消息通知 '1'/'0'
   static const String sortMode = 'sort_mode'; // 'time'|'name'|'unread'
+  static const String quickPhrases = 'quick_phrases'; // JSON 数组：快捷短语
+  static const String mutedSessions = 'muted_sessions'; // JSON: {key: '1'} 免打扰
+  static const String pinnedSessions = 'pinned_sessions'; // JSON: {key: '1'} 置顶
+
+  /// 会话设置 key（免打扰/置顶），形如 "friend_123" / "group_456"。
+  static String sessionKey(String type, int id) => '${type}_$id';
 }
 
 /// 自动登录凭据。
@@ -176,4 +182,90 @@ class SettingsStore {
   Future<void> _saveAccounts(List<Map<String, Object?>> accounts) async {
     await setString(SettingsKeys.accounts, jsonEncode(accounts));
   }
+
+  // ── 快捷短语（对齐游戏 SecretQuickMsg 本地 kv）────────────────────────
+
+  /// 快捷短语列表（默认三条，与游戏一致）。
+  Future<List<String>> quickPhrases() async {
+    final raw = await getString(SettingsKeys.quickPhrases);
+    if (raw == null || raw.isEmpty) {
+      const defaults = ['嗨~', '一起来玩呀', '在干嘛'];
+      await setString(SettingsKeys.quickPhrases, jsonEncode(defaults));
+      return defaults;
+    }
+    try {
+      final d = jsonDecode(raw);
+      if (d is List) return d.map((e) => '$e').toList();
+    } catch (_) {}
+    return const ['嗨~', '一起来玩呀', '在干嘛'];
+  }
+
+  /// 新增快捷短语（去重，插到最前，最多 20 条）。返回是否成功。
+  Future<bool> addQuickPhrase(String text) async {
+    final t = text.trim();
+    if (t.isEmpty) return false;
+    final list = await quickPhrases();
+    if (list.contains(t)) return false;
+    list.remove(t);
+    list.insert(0, t);
+    if (list.length > 20) list.removeRange(20, list.length);
+    await setString(SettingsKeys.quickPhrases, jsonEncode(list));
+    return true;
+  }
+
+  /// 删除快捷短语。
+  Future<void> removeQuickPhrase(String text) async {
+    final list = await quickPhrases();
+    list.remove(text);
+    await setString(SettingsKeys.quickPhrases, jsonEncode(list));
+  }
+
+  // ── 会话免打扰 / 置顶（本地配置）───────────────────────────────────────
+
+  Future<Set<String>> _sessionFlagSet(String key) async {
+    final raw = await getString(key);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final d = jsonDecode(raw);
+      if (d is Map) {
+        final out = <String>{};
+        for (final e in d.entries) {
+          if (e.value.toString() == '1') out.add('${e.key}');
+        }
+        return out;
+      }
+    } catch (_) {}
+    return {};
+  }
+
+  Future<void> _setSessionFlag(String key, String sessionKey2, bool on) async {
+    final set = await _sessionFlagSet(key);
+    if (on) {
+      set.add(sessionKey2);
+    } else {
+      set.remove(sessionKey2);
+    }
+    final m = <String, Object?>{for (final k in set) k: '1'};
+    await setString(key, jsonEncode(m));
+  }
+
+  /// 会话是否免打扰。
+  Future<bool> isMuted(String sessionKey2) async {
+    final set = await _sessionFlagSet(SettingsKeys.mutedSessions);
+    return set.contains(sessionKey2);
+  }
+
+  /// 设置会话免打扰。
+  Future<void> setMuted(String sessionKey2, bool on) =>
+      _setSessionFlag(SettingsKeys.mutedSessions, sessionKey2, on);
+
+  /// 会话是否置顶。
+  Future<bool> isPinned(String sessionKey2) async {
+    final set = await _sessionFlagSet(SettingsKeys.pinnedSessions);
+    return set.contains(sessionKey2);
+  }
+
+  /// 设置会话置顶。
+  Future<void> setPinned(String sessionKey2, bool on) =>
+      _setSessionFlag(SettingsKeys.pinnedSessions, sessionKey2, on);
 }

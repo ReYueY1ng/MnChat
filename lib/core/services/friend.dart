@@ -47,6 +47,7 @@ class FriendClient {
     required String msg,
     int showType = 1,
     int msgtype = 1, // 1=文本（Lua 原码固定 msgtype=1）
+    int issys = 0, // 1=系统类分享消息（对齐 ReqSendInviteChatMessage）
     Object? extendData,
     Object? uinOverride,
   }) async {
@@ -72,6 +73,7 @@ class FriendClient {
       'game_session_id': gameSessionId,
       'cid': cid,
     };
+    if (issys != 0) params['issys'] = '$issys';
     if (extendData != null) {
       params['extend_data'] = extendData.toString();
     }
@@ -221,6 +223,98 @@ class FriendClient {
       server: _gw.resolve('HttpFriend'),
       path: kFriendPath,
       cmd: 'reject_apply',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  // ── 黑名单（对齐 friendservice.lua ReqAddBlacklist / ReqRemoveBlacklist / ReqClearBlacklist）
+
+  /// 加入黑名单 (cmd=handle_black, op_type=1)。
+  Future<Map<String, Object?>> addBlacklist(Object desUin) =>
+      _handleBlack(desUin, 1);
+
+  /// 移出黑名单 (cmd=handle_black, op_type=0)。
+  Future<Map<String, Object?>> removeBlacklist(Object desUin) =>
+      _handleBlack(desUin, 0);
+
+  Future<Map<String, Object?>> _handleBlack(Object desUin, int opType) async {
+    final params = <String, String>{
+      'apiid': apiId,
+      'country': country,
+      'des_uin': '$desUin',
+      'lang': lang,
+      'op_type': '$opType',
+      'src_uin': '$uin',
+      'ver': ver,
+      'game_session_id': gameSessionId,
+      'cid': cid,
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'handle_black',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  /// 清空黑名单 (cmd=clear_black)。
+  Future<Map<String, Object?>> clearBlacklist() async {
+    final params = <String, String>{
+      'src_uin': '$uin',
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'clear_black',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  // ── 关注 / 粉丝（对齐 friendservice.lua ReqFollowPlayer / get_user_fans_list）
+
+  /// 关注/取关玩家 (cmd=attention_friend)。[follow]=true 关注。
+  /// 对齐 ReqFollowPlayer：op_type 1=关注 0=取关，含 token 签名。
+  Future<Map<String, Object?>> attentionFriend(Object desUin,
+      {required bool follow}) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    final params = <String, String>{
+      'apiid': apiId,
+      'country': country,
+      'des_uin': '$desUin',
+      'lang': lang,
+      'op_type': follow ? '1' : '0',
+      's2t': s2t,
+      'src_uin': '$uin',
+      'time': '$now',
+      'token': token,
+      'uin': '$uin',
+      'ver': ver,
+      'game_session_id': gameSessionId,
+      'cid': cid,
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'attention_friend',
+      params: params,
+    );
+    return _get(url);
+  }
+
+  /// 拉取我的粉丝列表 (cmd=get_user_fans_list)。
+  /// 对齐 playercenterv2fanctrl.lua:63：仅传 uin。
+  Future<Map<String, Object?>> queryFansList() async {
+    final params = <String, String>{
+      'uin': '$uin',
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      cmd: 'get_user_fans_list',
       params: params,
     );
     return _get(url);

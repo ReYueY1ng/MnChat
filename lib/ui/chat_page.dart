@@ -8,7 +8,10 @@ import '../chat/message_adapter.dart';
 import '../core/chat_emoji.dart' show kGameEmojiCodes;
 import '../core/emoticon.dart' show EmoticonImage;
 import '../core/models/messages.dart';
+import '../core/services/dynamics.dart' show DynamicsClient;
+import '../core/services/rich_media.dart' show RichMedia;
 import '../state/providers.dart';
+import 'dynamics_detail_page.dart';
 import 'group_detail_page.dart';
 
 /// 聊天窗口（右侧）。
@@ -32,6 +35,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   bool _historyLoaded = false;
   final TextEditingController _composerController = TextEditingController();
 
+  /// 快捷短语（来自设置，可管理）。initState 异步加载。
+  List<String> _phrases = const ['嗨~', '一起来玩呀', '在干嘛'];
+
   /// 桥接层引用：在 [initState] 中保存，供 [dispose] 释放控制器使用——
   /// Riverpod 3.x 禁止在 State.dispose 中再访问 ref，必须提前持有。
   late final ChatBridge _bridge;
@@ -47,6 +53,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     _controller = _bridge.controllerFor(widget.type, widget.sessionId);
     // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）
     ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
+    // 加载快捷短语（用户可增删；失败/无存储环境保持默认，如 widget 测试）
+    try {
+      ref.read(settingsProvider).quickPhrases().then((list) {
+        if (mounted) setState(() => _phrases = list);
+      }).catchError((Object _) {});
+    } catch (_) {
+      // ProviderContainer 未注入 databaseProvider（如单元测试）→ 用默认短语
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_historyLoaded) return;
       _historyLoaded = true;
@@ -159,56 +173,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                     index, {
                     required isSentByMe,
                     groupStatus,
-                  }) => Align(
-                    alignment: isSentByMe
-                        ? Alignment.centerRight
-                        : Alignment.centerLeft,
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(
-                        maxWidth: MediaQuery.of(context).size.width * 0.62,
-                      ),
-                      child: Container(
-                        margin: const EdgeInsets.symmetric(
-                          vertical: 2,
-                          horizontal: 8,
-                        ),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: Theme.of(context)
-                              .colorScheme
-                              .surfaceContainerHighest,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: Theme.of(context).colorScheme.outlineVariant,
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: isSentByMe
-                              ? CrossAxisAlignment.end
-                              : CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (message.createdAt != null)
-                              Text(
-                                _fmtFullTime(message.createdAt!.toLocal()),
-                                style: Theme.of(context).textTheme.labelSmall
-                                    ?.copyWith(
-                                      color: Theme.of(context)
-                                          .colorScheme
-                                          .outline,
-                                    ),
-                              ),
-                            const SizedBox(height: 2),
-                            Text(
-                              customMessageText(message),
-                              style: const TextStyle(
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+                  }) => _RichMediaBubble(
+                    message: message,
+                    isSentByMe: isSentByMe,
+                    onOpenDynamics: widget.type == ChatSessionType.friend
+                        ? _openSharedDynamics
+                        : null,
                   ),
               composerBuilder: (context) => Composer(
                 textEditingController: _composerController,
@@ -216,7 +186,10 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                 sendButtonVisibilityMode: SendButtonVisibilityMode.disabled,
                 // 用 topWidget 承载快捷短语 + emoji/图片/礼物工具栏（不能包 Column，
                 // 否则破坏 flutter_chat_ui 内部 Positioned 与 Stack 的父子关系）。
-                topWidget: _ComposerBar(onInsert: _insertText),
+                topWidget: _ComposerBar(
+                  onInsert: _insertText,
+                  phrases: _phrases,
+                ),
               ),
               linkPreviewBuilder: (context, message, isSentByMe) => null,
             ),
@@ -284,15 +257,36 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       }
     }
   }
+
+  /// 点击分享的动态卡片 → 拉取动态后打开详情页。
+  Future<void> _openSharedDynamics(String pid) async {
+    final auth = ref.read(chatServiceProvider).auth;
+    if (auth == null) return;
+    final client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    try {
+      final post = await client.fetchPost(pid);
+      if (!mounted || post == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DynamicsDetailPage(post: post),
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('动态加载失败: $e')),
+        );
+      }
+    }
+  }
 }
 
 /// 表情按钮：收起为一个按钮，点击弹出游戏表情面板（#A1xx 代码，非标准 emoji）。
 class _ComposerBar extends StatelessWidget {
   final ValueChanged<String> onInsert;
+  final List<String> phrases;
 
-  const _ComposerBar({required this.onInsert});
-
-  static const _phrases = ['自定义', '嗨~', '一起来玩呀', '在干嘛'];
+  const _ComposerBar({required this.onInsert, required this.phrases});
 
   @override
   Widget build(BuildContext context) {
@@ -302,30 +296,31 @@ class _ComposerBar extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         // 快捷短语 chips
-        SizedBox(
-          height: 36,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            itemCount: _phrases.length,
-            separatorBuilder: (_, _) => const SizedBox(width: 6),
-            itemBuilder: (context, i) => InkWell(
-              borderRadius: BorderRadius.circular(14),
-              onTap: () => onInsert(_phrases[i]),
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 4,
+        if (phrases.isNotEmpty)
+          SizedBox(
+            height: 36,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              itemCount: phrases.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 6),
+              itemBuilder: (context, i) => InkWell(
+                borderRadius: BorderRadius.circular(14),
+                onTap: () => onInsert(phrases[i]),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(phrases[i], style: const TextStyle(fontSize: 13)),
                 ),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerHighest,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Text(_phrases[i], style: const TextStyle(fontSize: 13)),
               ),
             ),
           ),
-        ),
         // 工具栏：emoji / 图片 / 礼物
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
@@ -506,4 +501,209 @@ String _fmtFullTime(DateTime dt) {
   final l = dt.toLocal();
   String p(int v) => v.toString().padLeft(2, '0');
   return '${l.year}-${p(l.month)}-${p(l.day)} ${p(l.hour)}:${p(l.minute)}:${p(l.second)}';
+}
+
+/// 富媒体气泡（share / custom 消息卡片）。
+///
+/// 从 [CustomMessage.metadata] 的 `extend`（url→base64→JSON）解码 [RichMedia]：
+/// - 红包（Type=SendFriendRedPocket）→ 红包卡（点击占位提示，无法在外部客户端领取）
+/// - 动态通知/动态分享（shareType 19/18）→ 动态卡（点击打开详情）
+/// - 地图分享（shareType 1）→ 地图卡
+/// - 链接（shareType 9）→ 链接卡
+/// - 其余 → 回退为纯文本卡片。
+class _RichMediaBubble extends StatelessWidget {
+  final CustomMessage message;
+  final bool isSentByMe;
+
+  /// 点击动态卡片回调（仅好友会话有效；群会话不跳动态详情）。
+  final ValueChanged<String>? onOpenDynamics;
+
+  const _RichMediaBubble({
+    required this.message,
+    required this.isSentByMe,
+    this.onOpenDynamics,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final rawExt = message.metadata?['extend']?.toString();
+    final media = RichMedia.decode(rawExt);
+
+    return Align(
+      alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.62,
+        ),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
+          decoration: BoxDecoration(
+            color: isSentByMe
+                ? theme.colorScheme.primaryContainer
+                : theme.colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: media == null ? _plainText(theme) : _card(context, media, theme),
+        ),
+      ),
+    );
+  }
+
+  /// 无法解码 → 回退纯文本卡。
+  Widget _plainText(ThemeData theme) {
+    return Padding(
+      padding: const EdgeInsets.all(10),
+      child: Column(
+        crossAxisAlignment:
+            isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (message.createdAt != null)
+            Text(
+              _fmtFullTime(message.createdAt!.toLocal()),
+              style: theme.textTheme.labelSmall
+                  ?.copyWith(color: theme.colorScheme.outline),
+            ),
+          const SizedBox(height: 2),
+          Text(
+            customMessageText(message),
+            style: const TextStyle(fontStyle: FontStyle.italic),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _card(BuildContext context, RichMedia media, ThemeData theme) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: media.isDynamicNotice || media.isDynamics
+          ? (media.pid.isNotEmpty && onOpenDynamics != null
+              ? () => onOpenDynamics!(media.pid)
+              : null)
+          : media.isRedPacket
+              ? () {
+                  // 外部客户端无支付流，无法领取红包；仅提示。
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('红包需在游戏内领取')),
+                  );
+                }
+              : media.isRoomInvite
+                  ? () {
+                      // 外部客户端无法进入游戏房间；展示房间信息。
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                            '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}'
+                            '（需在游戏内加入）',
+                          ),
+                        ),
+                      );
+                    }
+                  : null,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment:
+              isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.createdAt != null)
+              Text(
+                _fmtFullTime(message.createdAt!.toLocal()),
+                style: theme.textTheme.labelSmall
+                    ?.copyWith(color: theme.colorScheme.outline),
+              ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(_iconFor(media), size: 18, color: theme.colorScheme.primary),
+                const SizedBox(width: 6),
+                Text(
+                  media.title,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            // 图片预览（动态/红包图）
+            if (media.picList.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    media.picList.first,
+                    width: 120,
+                    height: 90,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => Container(
+                      width: 120,
+                      height: 90,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Icon(Icons.image_outlined),
+                    ),
+                  ),
+                ),
+              ),
+            // 名称 / 内容摘要
+            if (media.name.isNotEmpty)
+              Text(
+                media.name,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodyMedium
+                    ?.copyWith(fontWeight: FontWeight.w500),
+              ),
+            if (media.author.isNotEmpty)
+              Text(
+                '作者: ${media.author}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.outline),
+              ),
+            if (media.content.isNotEmpty)
+              Text(
+                media.content,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+              ),
+            if (media.isUrl && media.url.isNotEmpty)
+              Text(
+                media.url,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.primary,
+                ),
+              ),
+            if (media.isRedPacket)
+              Text(
+                '金额 ¥${media.amount > 0 ? media.amount / 10 : '?'}',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.error,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _iconFor(RichMedia media) {
+    if (media.isRedPacket) return Icons.redeem;
+    if (media.isRoomInvite) return Icons.videogame_asset_outlined;
+    if (media.isDynamicNotice || media.isDynamics) return Icons.public;
+    if (media.isMap) return Icons.map_outlined;
+    if (media.isUrl) return Icons.link;
+    return Icons.article_outlined;
+  }
 }

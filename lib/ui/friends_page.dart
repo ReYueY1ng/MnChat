@@ -5,6 +5,9 @@ import '../core/models/messages.dart';
 import '../core/services/chat_service.dart' show SessionSnapshot;
 import '../state/providers.dart';
 import 'friend_request_page.dart' show FriendRequestPage, showAddFriendDialog;
+import 'blacklist_page.dart';
+import 'my_qr_page.dart';
+import 'player_home_page.dart';
 import 'widgets/avatar_view.dart';
 
 /// 好友页 —— 通讯录：全部联系人 + 关系分类 + 好友申请入口。
@@ -87,6 +90,42 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             tooltip: '添加好友',
             icon: const Icon(Icons.person_search_outlined),
             onPressed: () => showAddFriendDialog(context, ref),
+          ),
+          // 更多：黑名单 / 我的二维码
+          PopupMenuButton<String>(
+            tooltip: '更多',
+            onSelected: (v) {
+              switch (v) {
+                case 'blacklist':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const BlacklistPage()),
+                  );
+                case 'qr':
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const MyQrPage()),
+                  );
+              }
+            },
+            itemBuilder: (ctx) => const [
+              PopupMenuItem(
+                value: 'blacklist',
+                child: ListTile(
+                  leading: Icon(Icons.block),
+                  title: Text('黑名单'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+              PopupMenuItem(
+                value: 'qr',
+                child: ListTile(
+                  leading: Icon(Icons.qr_code),
+                  title: Text('我的二维码'),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -209,6 +248,15 @@ class _FriendTile extends StatelessWidget {
             ),
           ],
         ],
+      ),
+      trailing: IconButton(
+        tooltip: '查看主页',
+        icon: const Icon(Icons.account_circle_outlined, size: 22),
+        onPressed: () => Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => PlayerHomePage(targetUin: session.id),
+          ),
+        ),
       ),
       subtitle: Row(
         mainAxisSize: MainAxisSize.min,

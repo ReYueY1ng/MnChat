@@ -5,6 +5,8 @@
 /// URL 用 act + http_getParamMD5 签名。
 library;
 
+import 'dart:convert' show jsonDecode, jsonEncode;
+
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
 
@@ -330,6 +332,97 @@ class DynamicsComment {
       );
 }
 
+/// 动态通知频道（对齐 DynamicsChannelType）。
+class DynamicsNoticeChannel {
+  static const String rep = 'post_rep'; // 评论我的
+  static const String prize = 'post_prize'; // 点赞我的
+  static const String at = 'post_at'; // @我的
+  static const String fans = 'fans_change'; // 粉丝
+  static const String sys = 'post_sys'; // 系统
+  static const String mapInteract = 'map_interact'; // 地图互动
+
+  static const Map<String, String> labels = {
+    rep: '评论',
+    prize: '点赞',
+    at: '@我',
+    fans: '粉丝',
+    sys: '系统',
+    mapInteract: '地图',
+  };
+
+  static String label(String c) => labels[c] ?? c;
+}
+
+/// 一条动态通知（get_channel_msg_list 的 msg_list 条目）。
+///
+/// 原始结构：{msg_id, msg_type, data(JSON字符串), state, ...}，
+/// data 解码后与条目平铺（对齐 MergeInteractiveFunc：itemData[k]=v.data[k]，
+/// type=msg_type, status=state）。展示字段：uin/nickname/content/pid 等。
+class DynamicsNotice {
+  final String msgId;
+  final String channel;
+  final String msgType;
+  final int uin;
+  final String nickname;
+  final String content;
+  final String pid;
+  final int time;
+  final Map<String, Object?> data;
+
+  const DynamicsNotice({
+    required this.msgId,
+    required this.channel,
+    this.msgType = '',
+    this.uin = 0,
+    this.nickname = '',
+    this.content = '',
+    this.pid = '',
+    this.time = 0,
+    this.data = const {},
+  });
+
+  /// 从 msg_list 条目构造。data 是 JSON 字符串，解码后取展示字段。
+  static DynamicsNotice? fromItem(Map<String, Object?> m) {
+    final msgId = '${m['msg_id'] ?? m['msgid'] ?? ''}';
+    if (msgId.isEmpty || msgId == 'null') return null;
+    final channel = m['channel']?.toString() ?? '';
+
+    Map<String, Object?> flat = {};
+    final rawData = m['data'];
+    if (rawData is Map) {
+      flat = rawData.cast<String, Object?>();
+    } else if (rawData is String) {
+      try {
+        final decoded = jsonDecode(rawData);
+        if (decoded is Map) flat = decoded.cast<String, Object?>();
+      } catch (_) {}
+    }
+
+    int i(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
+    final content = _safeDecode(
+        (flat['content'] ?? flat['text'] ?? m['content'])?.toString() ?? '');
+    return DynamicsNotice(
+      msgId: msgId,
+      channel: channel,
+      msgType: (m['msg_type'] ?? flat['msg_type'] ?? '').toString(),
+      uin: i(flat['uin'] ?? m['uin'] ?? 0),
+      nickname: (flat['nickname'] ?? m['nickname'] ?? '').toString(),
+      content: content,
+      pid: (flat['pid'] ?? '').toString(),
+      time: i(flat['time'] ?? flat['create_time'] ?? m['ts'] ?? 0),
+      data: flat,
+    );
+  }
+
+  static String _safeDecode(String s) {
+    try {
+      return Uri.decodeComponent(s);
+    } catch (_) {
+      return s;
+    }
+  }
+}
+
 /// 动态客户端。
 class DynamicsClient {
   final int uin;
@@ -371,6 +464,78 @@ class DynamicsClient {
       'encrypt_ver=3',
     ];
     return '$base/$kPostingPath?${parts.join('&')}&md5=$md5';
+  }
+
+  /// 自定义路径的签名 URL（posting_topic / customize_vote 等）。
+  /// [path] 为相对路径（如 'posting_topic'）；path 尾随 '/' 时保留。
+  String _url2(String path, String act, [Map<String, String> params = const {}]) {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final all = <String, String>{
+      'act': act,
+      'uin': '$uin',
+      'apiid': kApiId,
+      'ver': kClientVersionStr,
+      'country': kCountry,
+      'lang': kLang,
+      ...params,
+    };
+    final md5 = httpGetParamMd5(all, timeVal: now, s2: s2, s2t: s2t, key: httpGetParamKey);
+    final parts = <String>[
+      ...all.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+      'time=$now',
+      's2t=$s2t',
+      'encrypt_ver=3',
+    ];
+    final p = path.endsWith('/') ? path : path;
+    return '$base/$p?${parts.join('&')}&md5=$md5';
+  }
+
+  /// 与 [_url2] 相同，但保证路径尾随 '/'（customize_vote/ 接口需要）。
+  String _url3(String path, String act, [Map<String, String> params = const {}]) {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final all = <String, String>{
+      'act': act,
+      'uin': '$uin',
+      'apiid': kApiId,
+      'ver': kClientVersionStr,
+      'country': kCountry,
+      'lang': kLang,
+      ...params,
+    };
+    final md5 = httpGetParamMd5(all, timeVal: now, s2: s2, s2t: s2t, key: httpGetParamKey);
+    final parts = <String>[
+      ...all.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+      'time=$now',
+      's2t=$s2t',
+      'encrypt_ver=3',
+    ];
+    final p = path.endsWith('/') ? path : '$path/';
+    return '$base/$p?${parts.join('&')}&md5=$md5';
+  }
+
+  /// 任意相对路径的签名 URL（msg_box 等，路径不含尾随斜杠）。
+  String _url4(String path, String act, [Map<String, String> params = const {}]) {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final all = <String, String>{
+      'act': act,
+      'uin': '$uin',
+      'apiid': kApiId,
+      'ver': kClientVersionStr,
+      'country': kCountry,
+      'lang': kLang,
+      ...params,
+    };
+    final md5 = httpGetParamMd5(all, timeVal: now, s2: s2, s2t: s2t, key: httpGetParamKey);
+    final parts = <String>[
+      ...all.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+      'time=$now',
+      's2t=$s2t',
+      'encrypt_ver=3',
+    ];
+    return '$base/$path?${parts.join('&')}&md5=$md5';
   }
 
   /// 拉动态列表。响应 `{ret:0, data:{list:[...], role_info_list:[...], ct:[游标]}}`。
@@ -577,6 +742,185 @@ class DynamicsClient {
   /// 点赞（act=like_posting）。返回服务器原始 map（含 ret）。
   Future<Map<String, Object?>> likePosting(String pid) =>
       _getMap(_url('like_posting', {'pid': pid}));
+
+  /// 按 pid 拉单条动态（act=get_posting）。返回 null 表示失败/不存在。
+  /// 对齐反编译 dynamicsdatamanager.lua ReqPostingInfo (act="get_posting")。
+  Future<DynamicsPost?> fetchPost(String pid) async {
+    final url = _url('get_posting', {'pid': pid});
+    debugPrint('[Dynamics get_posting] url: $url');
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    if (decoded is! Map) return null;
+    final m = decoded.cast<String, Object?>();
+    final ret = m['ret'] ?? m['code'];
+    if (ret is num && ret != 0) return null;
+    Object? data = m['data'] ?? m['posting'] ?? m;
+    if (data is Map) {
+      return DynamicsPost.fromItem(data.cast<String, Object?>());
+    }
+    return null;
+  }
+
+  // ── 发布 / 删除 / 置顶（对齐 dynamicsdatamanager.lua AddPosting / DeletePosting / SetTop）
+
+  /// 发布文字动态（act=add_posting）。
+  ///
+  /// [content] 正文；[topicId]/[topicName] 选填话题；[question]=true 发布为
+  /// 问答动态。对齐 AddPosting：content url_encode 参与签名（content 在
+  /// md5 exclude list 中，实际不参与），from 默认 0。
+  Future<Map<String, Object?>> addPosting(
+    String content, {
+    int? topicId,
+    String? topicName,
+    bool question = false,
+    int from = 0,
+  }) {
+    final params = <String, String>{
+      'content': Uri.encodeQueryComponent(content),
+      'from': '$from',
+      'homepage_hide': '0',
+    };
+    if (topicId != null && topicName != null) {
+      params['topic_list'] = jsonEncode([
+        {'topic_id': topicId, 'title': topicName},
+      ]);
+    }
+    if (question) params['question'] = '1';
+    return _getMap(_url('add_posting', params));
+  }
+
+  /// 删除动态（act=delete_posting）。
+  Future<Map<String, Object?>> deletePosting(String pid) =>
+      _getMap(_url('delete_posting', {'pid': pid}));
+
+  /// 用原始参数发布动态（act=add_posting）。供发布页组合
+  /// content/topic_list/vote_id/question 等字段。
+  Future<Map<String, Object?>> addPostingRaw(Map<String, Object?> params) =>
+      _getMap(_url('add_posting', params.map((k, v) => MapEntry(k, '$v'))));
+
+  /// 置顶/取消置顶动态（act=set_top）。[top]=true 置顶。
+  Future<Map<String, Object?>> setTop(String pid, {bool top = true}) =>
+      _getMap(_url('set_top', {'pid': pid, 'top': top ? '1' : '0'}));
+
+  // ── 话题（对齐 posting_topic 接口）─────────────────────────────────────
+
+  /// 搜索话题（act=search_topic，路径 /miniw/posting_topic）。
+  Future<Map<String, Object?>> searchTopic(String title, {int offset = 0}) =>
+      _getMap(_url2('posting_topic', 'search_topic', {
+        'title': Uri.encodeQueryComponent(title),
+        'offset': '$offset',
+      }));
+
+  /// 创建话题（act=create_topic，路径 /miniw/posting_topic）。
+  Future<Map<String, Object?>> createTopic(String title) =>
+      _getMap(_url2('posting_topic', 'create_topic', {
+        'title': Uri.encodeQueryComponent(title),
+      }));
+
+  // ── 投票（对齐 /miniw/customize_vote）──────────────────────────────────
+
+  /// 创建投票（act=create_vote）。[opts] 选项文本（≤4）；[multiMode] 多选；
+  /// [voteMode] 0=公开。返回响应（含 data.vote_info.vote_id）。
+  Future<Map<String, Object?>> createVote({
+    required String title,
+    required int endTime,
+    required List<String> opts,
+    int multiMode = 0,
+    int voteMode = 0,
+  }) {
+    final params = <String, String>{
+      'uin': '$uin',
+      'title': title,
+      'end_time': '$endTime',
+      'opt_num': '${opts.length}',
+      'multi_mode': '$multiMode',
+      'mode': '$voteMode',
+      'name': Uri.encodeQueryComponent(''),
+      'from': '0',
+    };
+    for (var i = 0; i < opts.length; i++) {
+      params['op${i + 1}'] = Uri.encodeQueryComponent(opts[i]);
+    }
+    return _getMap(_url3('customize_vote/', 'create_vote', params));
+  }
+
+  /// 投票（act=vote）。[opts] 逗号分隔选项序号（如 "1,3"）。
+  Future<Map<String, Object?>> vote({
+    required String voteId,
+    required String opts,
+    String? pid,
+    String share = '0',
+  }) {
+    final params = <String, String>{
+      'from_type': '1',
+      'vote_id': voteId,
+      'opts': opts,
+      'share': share,
+      'uin': '$uin',
+      'from': '0',
+    };
+    if (pid != null) params['from_id'] = pid;
+    return _getMap(_url3('customize_vote/', 'vote', params));
+  }
+
+  /// 查询投票信息（act=get_vote_info）。
+  Future<Map<String, Object?>> getVoteInfo(String voteId) =>
+      _getMap(_url3('customize_vote/', 'get_vote_info', {'vote_id': voteId}));
+
+  // ── 动态通知（对齐 /miniw/msg_box get_channel_msg_list）─────────────────
+
+  /// 拉取某频道（post_rep/post_prize/post_at/fans_change/post_sys）通知列表。
+  /// 返回 `(通知列表, next_offset)`；每个条目含 msg_id/msg_type + data(JSON)。
+  Future<(List<DynamicsNotice>, int)> fetchChannelNotice(
+    String channel, {
+    int offset = 0,
+  }) async {
+    final ret = await _getMap(_url4('miniw/msg_box', 'get_channel_msg_list', {
+      'uin': '$uin',
+      'channel': channel,
+      'offset': '$offset',
+    }));
+    if ((ret['code'] ?? ret['ret']) is num &&
+        (ret['code'] ?? ret['ret']) != 0) {
+      return (<DynamicsNotice>[], 0);
+    }
+    final data = ret['data'];
+    if (data is! Map) return (<DynamicsNotice>[], 0);
+    final dm = data.cast<String, Object?>();
+    final nextOffset = (dm['next_offset'] is num
+            ? (dm['next_offset'] as num)
+            : int.tryParse('${dm['next_offset']}') ?? 0)
+        .toInt();
+    final out = <DynamicsNotice>[];
+    final rawList = dm['msg_list'];
+    if (rawList is List) {
+      for (final e in rawList) {
+        if (e is! Map) continue;
+        final m = e.cast<String, Object?>();
+        final notice = DynamicsNotice.fromItem(m);
+        if (notice != null) out.add(notice);
+      }
+    }
+    return (out, nextOffset);
+  }
+
+  /// 标记频道通知已读（act=read_channel_msg）。
+  Future<bool> readChannelNotice(String channel, List<String> msgIds) async {
+    if (msgIds.isEmpty) return true;
+    final ret = await _getMap(_url4('miniw/msg_box', 'read_channel_msg', {
+      'uin': '$uin',
+      'channel': channel,
+      'msg_id_list': msgIds.join(','),
+    }));
+    return (ret['code'] ?? ret['ret']) is num &&
+        (ret['code'] ?? ret['ret']) == 0;
+  }
+
+  /// 动态红点（act=get_redpoint_notice_info，/miniw/posting）。
+  /// 返回 {new_posting_notice, posting_edit_info}。
+  Future<Map<String, Object?>> fetchRedpointNotice(String source) =>
+      _getMap(_url('get_redpoint_notice_info', {'source': source}));
 
   /// 发表评论（act=add_comment）。
   Future<Map<String, Object?>> addComment(String pid, String content) =>

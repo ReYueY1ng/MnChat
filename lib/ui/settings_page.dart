@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/net/config.dart';
 import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
+import 'social_sign_page.dart';
 
 /// 设置页：账号信息 / 自动登录 / 服务器地址 / 关于 / 退出登录。
 class SettingsPage extends ConsumerStatefulWidget {
@@ -159,6 +160,19 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               subtitle: const Text('应用在后台时收到新消息弹出系统通知'),
               value: ref.watch(notifyEnabledProvider),
               onChanged: _toggleNotify,
+            ),
+          ),
+          const SizedBox(height: 12),
+          // 交友标签（个性签名）
+          Card(
+            child: ListTile(
+              leading: const Icon(Icons.auto_awesome),
+              title: const Text('交友标签'),
+              subtitle: const Text('设置我的个性签名（想要/喜欢）'),
+              trailing: const Icon(Icons.chevron_right),
+              onTap: () => Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SocialSignPage()),
+              ),
             ),
           ),
           const SizedBox(height: 12),

@@ -2,9 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
+import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'family_page.dart';
 import 'friend_request_page.dart' show showAddFriendDialog;
+import 'mail_page.dart';
+import 'message_settings_page.dart';
 import 'settings_page.dart';
 import 'widgets/avatar_view.dart';
 
@@ -84,6 +87,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                         onTap: () => ref
                             .read(activeSessionProvider.notifier)
                             .open(s.type, s.id),
+                        onLongPress: () => _showSessionMenu(context, s),
                       );
                     },
                   ),
@@ -191,12 +195,43 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
               },
             ),
             ListTile(
+              leading: const Icon(Icons.group_add_outlined),
+              title: const Text('创建群'),
+              subtitle: const Text('建群并邀请好友'),
+              onTap: () {
+                Navigator.of(context).pop();
+                _showCreateGroupDialog(context, ref);
+              },
+            ),
+            ListTile(
               leading: const Icon(Icons.home),
               title: const Text('家族'),
               onTap: () {
                 Navigator.of(context).pop();
                 Navigator.of(context).push(
                   MaterialPageRoute(builder: (_) => const FamilyPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.mark_email_unread_outlined),
+              title: const Text('消息中心'),
+              subtitle: const Text('邮件 / 系统通知 / 礼物'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MailPage()),
+                );
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.settings_outlined),
+              title: const Text('消息设置'),
+              subtitle: const Text('快捷短语管理'),
+              onTap: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const MessageSettingsPage()),
                 );
               },
             ),
@@ -234,17 +269,183 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
       ),
     );
   }
+
+  /// 会话长按菜单：免打扰 / 置顶。
+  Future<void> _showSessionMenu(BuildContext context, ChatSession s) async {
+    final settings = ref.read(settingsProvider);
+    final key = SettingsKeys.sessionKey(s.type.name, s.id);
+    final muted = await settings.isMuted(key);
+    final pinned = await settings.isPinned(key);
+    if (!mounted || !context.mounted) return;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text(s.name),
+              dense: true,
+              enabled: false,
+            ),
+            const Divider(height: 1),
+            ListTile(
+              leading: Icon(
+                pinned ? Icons.push_pin : Icons.push_pin_outlined,
+                color: pinned ? Theme.of(ctx).colorScheme.primary : null,
+              ),
+              title: Text(pinned ? '取消置顶' : '置顶会话'),
+              onTap: () => Navigator.pop(ctx, 'pin'),
+            ),
+            ListTile(
+              leading: Icon(
+                muted ? Icons.notifications_off : Icons.notifications_outlined,
+                color: muted ? Theme.of(ctx).colorScheme.error : null,
+              ),
+              title: Text(muted ? '取消免打扰' : '免打扰'),
+              onTap: () => Navigator.pop(ctx, 'mute'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null || !mounted) return;
+    switch (action) {
+      case 'pin':
+        await settings.setPinned(key, !pinned);
+      case 'mute':
+        await settings.setMuted(key, !muted);
+    }
+    if (mounted) setState(() {}); // 刷新（置顶影响排序）
+  }
+
+  /// 创建群对话框：输入群名 + 勾选好友成员 → create_group。
+  Future<void> _showCreateGroupDialog(BuildContext context, WidgetRef ref) async {    final nameCtrl = TextEditingController();
+    final service = ref.read(chatServiceProvider);
+    final contacts = service.contacts
+        .where((c) => (c.relation & 8) != 0)
+        .toList()
+      ..sort((a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()));
+    final selected = <int>{};
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('创建群'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                TextField(
+                  controller: nameCtrl,
+                  maxLength: 20,
+                  decoration: const InputDecoration(
+                    labelText: '群名称',
+                    hintText: '输入群名称',
+                  ),
+                ),
+                if (contacts.isNotEmpty)
+                  Flexible(
+                    child: SizedBox(
+                      height: 260,
+                      child: ListView(
+                        shrinkWrap: true,
+                        children: [
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 4),
+                            child: Text('选择成员（可选）',
+                                style: TextStyle(fontWeight: FontWeight.w600)),
+                          ),
+                          ...contacts.map((c) {
+                            final name =
+                                c.nickname.isNotEmpty ? c.nickname : '${c.uin}';
+                            return CheckboxListTile(
+                              dense: true,
+                              value: selected.contains(c.uin),
+                              title: Text(name),
+                              subtitle: Text('迷你号 ${c.uin}'),
+                              onChanged: (v) => setDialogState(() {
+                                if (v == true) {
+                                  selected.add(c.uin);
+                                } else {
+                                  selected.remove(c.uin);
+                                }
+                              }),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('创建'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+    final name = nameCtrl.text.trim();
+    if (name.isEmpty) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('请输入群名称')),
+        );
+      }
+      return;
+    }
+    try {
+      final group = service.group;
+      if (group == null) throw StateError('未登录');
+      final members = <int>{service.myUin, ...selected}.toList();
+      final resp = await group.createGroupWithMembers(
+        groupName: name,
+        members: members,
+      );
+      if (!context.mounted) return;
+      final ret = resp['ret'];
+      if (ret is num && ret != 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('创建失败: ret=$ret')),
+        );
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('群已创建')),
+      );
+      service.loadSessions(); // 刷新群列表
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('创建失败: $e')),
+        );
+      }
+    }
+  }
 }
 
 class _SessionTile extends StatelessWidget {
   final ChatSession session;
   final bool isActive;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const _SessionTile({
     required this.session,
     required this.isActive,
     required this.onTap,
+    this.onLongPress,
   });
 
   @override
@@ -340,6 +541,7 @@ class _SessionTile extends StatelessWidget {
         ],
       ),
       onTap: onTap,
+      onLongPress: onLongPress,
     );
   }
 }

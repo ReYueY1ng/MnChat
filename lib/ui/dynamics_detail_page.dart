@@ -131,6 +131,66 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     }
   }
 
+  /// 分享到聊天：好友选择器 → sendDynamicsShare（DYNAMIC_NOTICE 卡片）。
+  Future<void> _shareToChat() async {
+    final service = ref.read(chatServiceProvider);
+    final contacts = service.contacts
+        .where((c) => (c.relation & 8) != 0)
+        .toList()
+      ..sort(
+          (a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()));
+    if (contacts.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('暂无好友可分享')),
+        );
+      }
+      return;
+    }
+    final picked = await showModalBottomSheet<int>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const ListTile(
+              title: Text('分享动态到…', style: TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            ...contacts.map(
+              (c) => ListTile(
+                leading: const Icon(Icons.person),
+                title: Text(c.nickname.isNotEmpty ? c.nickname : '${c.uin}'),
+                subtitle: Text('迷你号 ${c.uin}'),
+                onTap: () => Navigator.pop(ctx, c.uin),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    try {
+      final pics = widget.post.pics.map((p) => p.url).toList();
+      await service.sendDynamicsShare(
+        picked,
+        pid: widget.post.pid,
+        content: widget.post.content,
+        picList: pics,
+      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('已分享给 $picked')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('分享失败: $e')),
+        );
+      }
+    }
+  }
+
   /// 写评论：弹对话框 → addComment → 刷新。
   Future<void> _writeComment() async {
     final client = _client;
@@ -214,7 +274,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
           if (_likeCount > 0)
             Center(child: Text('$_likeCount', style: const TextStyle(fontSize: 13))),
           IconButton(icon: const Icon(Icons.mode_comment_outlined), onPressed: _writeComment),
-          IconButton(icon: const Icon(Icons.more_horiz), onPressed: () {}),
+          IconButton(
+            icon: const Icon(Icons.share_outlined),
+            tooltip: '分享到聊天',
+            onPressed: _shareToChat,
+          ),
           const SizedBox(width: 4),
         ],
       ),

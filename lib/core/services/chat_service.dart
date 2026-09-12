@@ -15,7 +15,10 @@ import 'auth.dart';
 import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
+import 'message_center.dart';
+import 'player_home.dart';
 import 'profile.dart';
+import 'social_sign.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 
 /// 服务状态。
@@ -60,6 +63,9 @@ class ChatService {
   late final ChatPushClient _chatpush;
   FriendClient? _friend;
   GroupClient? _group;
+  MessageCenterClient? _messageCenter;
+  SocialSignClient? _socialSign;
+  PlayerHomeClient? _playerHome;
 
   // ── 连接 ───────────────────────────────────────────────────────────────
   ChatPushConnection? _conn;
@@ -145,6 +151,18 @@ class ChatService {
   PlayerProfile? groupMemberProfile(int groupId, int uin) =>
       _groupMemberProfiles[groupId]?[uin];
 
+  /// 消息中心/邮件客户端（登录后可用，未登录返回 null）。
+  MessageCenterClient? get messageCenter => _messageCenter;
+
+  /// 群客户端（登录后可用，未登录返回 null）。
+  GroupClient? get group => _group;
+
+  /// 社交签名客户端（登录后可用，未登录返回 null）。
+  SocialSignClient? get socialSign => _socialSign;
+
+  /// 玩家主页客户端（登录后可用，未登录返回 null）。
+  PlayerHomeClient? get playerHome => _playerHome;
+
   /// 会话消息历史（按时间升序）。key = sessionKey(type, id)。
   /// 返回稳定升序副本（缓存以升序为规范，此处兜底保证对外契约）。
   List<ChatMessage> historyOf(ChatSessionType type, int id) =>
@@ -182,6 +200,9 @@ class ChatService {
       _auth = auth;
       _friend = FriendClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _group = GroupClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _messageCenter = MessageCenterClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _socialSign = SocialSignClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _playerHome = PlayerHomeClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _setState(ChatServiceState.connected);
       await _connectChatPush();
       await _bootstrapSessions();
@@ -588,6 +609,40 @@ class ChatService {
     return resp;
   }
 
+  /// 发送"动态分享"卡片消息（shareType=19 DYNAMIC_NOTICE）。
+  ///
+  /// extend_data 对齐反编译 DYNAMIC_NOTICE 分享：`url_encode(base64(JSON{
+  /// nickname, shareType:19, pid, content, pic_list}))`。对方客户端渲染为
+  /// 动态卡片，我方 RichMedia 解析同样识别。
+  Future<Map<String, Object?>> sendDynamicsShare(
+    int desUin, {
+    required String pid,
+    String content = '',
+    List<String> picList = const [],
+  }) async {
+    final friend = _friend;
+    final auth = _auth;
+    if (friend == null || auth == null) throw StateError('not logged in');
+    final tShare = <String, Object?>{
+      'nickname': auth.name,
+      'shareType': 19, // ShareType.DYNAMIC_NOTICE
+      'pid': pid,
+      'content': Uri.encodeQueryComponent(content),
+      'pic_list': picList,
+      'bubble': 0,
+    };
+    final raw = base64Encode(utf8.encode(jsonEncode(tShare)));
+    final extend = Uri.encodeQueryComponent(raw);
+    final resp = await friend.sendChatMsg(
+      desUin: desUin,
+      msg: '[动态] $content',
+      msgtype: 4, // 分享类消息（对齐 ReqSendInviteChatMessage）
+      issys: 1,
+      extendData: extend,
+    );
+    return resp;
+  }
+
   // ── 好友申请 ─────────────────────────────────────────────────────────
 
   /// 发起好友申请（按 uin 搜索添加）。
@@ -621,6 +676,46 @@ class ChatService {
     final group = _group;
     if (group == null) throw StateError('not logged in');
     return group.sendMsg(groupId: groupId, text: msg);
+  }
+
+  // ── 黑名单（对齐 friendservice.lua handle_black / clear_black）─────────
+
+  /// 加入黑名单（op_type=1）。成功后本地标记 relation 黑名单位并刷新列表。
+  Future<Map<String, Object?>> addBlacklist(int desUin) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.addBlacklist(desUin);
+    await loadSessions();
+    return resp;
+  }
+
+  /// 移出黑名单（op_type=0）。
+  Future<Map<String, Object?>> removeBlacklist(int desUin) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.removeBlacklist(desUin);
+    await loadSessions();
+    return resp;
+  }
+
+  /// 清空黑名单。
+  Future<Map<String, Object?>> clearBlacklist() async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.clearBlacklist();
+    await loadSessions();
+    return resp;
+  }
+
+  /// 关注/取关玩家（cmd=attention_friend）。
+  Future<Map<String, Object?>> followPlayer(int desUin,
+      {required bool follow}) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp =
+        await friend.attentionFriend(desUin, follow: follow);
+    await loadSessions(); // 关系变化后刷新（关注列表会出现在好友里）
+    return resp;
   }
 
   // ── 群管理 ───────────────────────────────────────────────────────────
@@ -1430,6 +1525,9 @@ class ChatService {
     _auth = null;
     _friend = null;
     _group = null;
+    _messageCenter = null;
+    _socialSign = null;
+    _playerHome = null;
     _friendSessions.clear();
     _groupSessions.clear();
     _contacts.clear();
