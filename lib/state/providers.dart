@@ -269,6 +269,13 @@ class NotifyEnabledNotifier extends Notifier<bool> {
 }
 
 /// 已登录用户 uin（供聊天页判断消息方向）。
+///
+/// 必须从 [authProvider]（Notifier）派生而非直接读 chatServiceProvider：
+/// 直接 `watch(chatServiceProvider).myUin` 时，依赖（单例 ChatService 实例）
+/// 永不变化 → 切账号后 provider 不重建、永远返回**旧账号** uin，导致
+/// newMsg 的 authorId 与新 currentUserId 不匹配，flutter_chat_ui 把"我发的"
+/// 判成"对方发的"（消息显示成旧账号发的）。
 final myUinProvider = Provider<int>((ref) {
-  return ref.watch(chatServiceProvider).myUin;
+  final auth = ref.watch(authProvider);
+  return auth.auth?.uin ?? 0;
 });
