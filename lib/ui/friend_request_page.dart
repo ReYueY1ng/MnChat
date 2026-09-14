@@ -4,7 +4,9 @@ import 'package:flutter/services.dart';
 
 import '../core/models/messages.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 好友/群申请列表页 —— 两个 tab：好友申请 + 群邀请。
 ///
@@ -51,7 +53,7 @@ class _FriendApplyTab extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final requests =
         ref.watch(friendRequestStreamProvider).asData?.value ??
-            const <FriendRequest>[];
+        const <FriendRequest>[];
     if (requests.isEmpty) {
       return const Center(child: Text('暂无待处理的好友申请'));
     }
@@ -138,22 +140,21 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
         widget.onChanged();
       } else {
         setState(() => _loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('操作失败: ret=$ret')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('操作失败: ret=$ret')));
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('操作失败: $e')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text('操作失败: $e')));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     if (_loading && _items == null) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -185,7 +186,9 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
               Icons.group_add_outlined,
               color: theme.colorScheme.primary,
             ),
-            title: Text(item.groupName.isNotEmpty ? item.groupName : '群 ${item.groupId}'),
+            title: Text(
+              item.groupName.isNotEmpty ? item.groupName : '群 ${item.groupId}',
+            ),
             subtitle: Text(
               '邀请人 ${item.invitor} · 成员 ${item.memberNum}',
               maxLines: 1,
@@ -196,7 +199,7 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
               children: [
                 IconButton(
                   tooltip: '同意',
-                  icon: Icon(Icons.check, color: Colors.green.shade600),
+                  icon: Icon(Icons.check, color: semantic.success),
                   onPressed: _loading ? null : () => _decide(item, true),
                 ),
                 IconButton(
@@ -237,7 +240,8 @@ class GroupApplyItem {
     int i(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
     return GroupApplyItem(
       groupId: '$rawId',
-      groupName: m['group_name']?.toString() ?? m['GroupName']?.toString() ?? '',
+      groupName:
+          m['group_name']?.toString() ?? m['GroupName']?.toString() ?? '',
       creator: i(rawCreator),
       invitor: i(rawInvitor),
       memberNum: i(rawMember),
@@ -261,7 +265,9 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await ref.read(chatServiceProvider).acceptFriendRequest(widget.request.uin);
+      await ref
+          .read(chatServiceProvider)
+          .acceptFriendRequest(widget.request.uin);
       _toast('已添加好友');
     } catch (e) {
       _toast('通过失败: $e');
@@ -274,7 +280,9 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
     if (_busy) return;
     setState(() => _busy = true);
     try {
-      await ref.read(chatServiceProvider).rejectFriendRequest(widget.request.uin);
+      await ref
+          .read(chatServiceProvider)
+          .rejectFriendRequest(widget.request.uin);
       _toast('已拒绝');
     } catch (e) {
       _toast('拒绝失败: $e');
@@ -291,20 +299,24 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final semantic = AppSemanticColors.of(context);
     final r = widget.request;
     return ListTile(
       leading: AvatarView(name: r.name.isNotEmpty ? r.name : '${r.uin}'),
-      title: Text(r.name.isNotEmpty ? r.name : '${r.uin}'),
+      title: RichTextView(r.name.isNotEmpty ? r.name : '${r.uin}'),
       subtitle: Text('Uin: ${r.uin} · ${_fmtTime(r.time)}'),
       trailing: _busy
           ? const SizedBox(
-              width: 32, height: 32, child: CircularProgressIndicator(strokeWidth: 2))
+              width: 32,
+              height: 32,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
                   tooltip: '通过',
-                  icon: Icon(Icons.check, color: Colors.green.shade600),
+                  icon: Icon(Icons.check, color: semantic.success),
                   onPressed: _accept,
                 ),
                 IconButton(
@@ -363,9 +375,8 @@ Future<bool> showAddFriendDialog(BuildContext context, WidgetRef ref) async {
   final uin = int.tryParse(text);
   if (uin == null || uin <= 0) {
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('请输入有效的迷你号')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('请输入有效的迷你号')));
     }
     return false;
   }
@@ -377,13 +388,19 @@ Future<bool> showAddFriendDialog(BuildContext context, WidgetRef ref) async {
 Future<void> _doApply(BuildContext context, int uin, WidgetRef ref) async {
   if (!context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
+  final scheme = Theme.of(context).colorScheme;
   try {
     await ref.read(chatServiceProvider).applyFriend(uin);
     messenger.showSnackBar(SnackBar(content: Text('已向 $uin 发送好友申请')));
   } catch (e) {
-    messenger.showSnackBar(SnackBar(
-      content: Text('发送申请失败: $e'),
-      backgroundColor: Colors.red.shade400,
-    ));
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          '发送申请失败: $e',
+          style: TextStyle(color: scheme.onError),
+        ),
+        backgroundColor: scheme.error,
+      ),
+    );
   }
 }

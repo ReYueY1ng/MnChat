@@ -17,12 +17,37 @@ class SettingsKeys {
   static const String savedPassword = 'saved_password'; // string
   static const String lastUin = 'last_uin'; // 最后登录账号（账号选择高亮）
   static const String accounts = 'accounts'; // JSON 数组：已保存的多账号
-  static const String serverBase = 'server_base'; // 服务器地址（留空=默认）
   static const String notifyEnabled = 'notify_enabled'; // 新消息通知 '1'/'0'
+  static const String themeMode = 'theme_mode'; // 'system'|'light'|'dark'
+  static const String keepAlive = 'keep_alive'; // 后台保活 '1'/'0'
   static const String sortMode = 'sort_mode'; // 'time'|'name'|'unread'
   static const String quickPhrases = 'quick_phrases'; // JSON 数组：快捷短语
   static const String mutedSessions = 'muted_sessions'; // JSON: {key: '1'} 免打扰
   static const String pinnedSessions = 'pinned_sessions'; // JSON: {key: '1'} 置顶
+
+  // ── 通用 / 显示 ─────────────────────────────────────────────────────
+  static const String animatedFrames = 'animated_frames'; // 头像框动画 '1'/'0'
+  static const String chatFontScale = 'chat_font_scale'; // 聊天字号缩放 double 字符串
+  static const String seedColor = 'seed_color'; // 主题强调色 ARGB int 字符串
+
+  // ── 消息与输入 ──────────────────────────────────────────────────────
+  static const String sendOnEnter = 'send_on_enter'; // 回车发送 '1'/'0'
+  static const String autoMarkRead = 'auto_mark_read'; // 进会话自动已读 '1'/'0'
+  static const String hideNotifyContent = 'hide_notify_content'; // 通知隐藏内容
+
+  // ── 免打扰时段 ──────────────────────────────────────────────────────
+  static const String dndEnabled = 'dnd_enabled'; // '1'/'0'
+  static const String dndStart = 'dnd_start'; // 分钟数 0..1439
+  static const String dndEnd = 'dnd_end'; // 分钟数 0..1439
+
+  // ── 隐私 ────────────────────────────────────────────────────────────
+  static const String lockEnabled = 'app_lock_enabled'; // 应用锁 '1'/'0'
+  static const String lockPinHash = 'app_lock_pin_hash'; // PIN 的 SHA-256
+  static const String lockPinSalt = 'app_lock_pin_salt'; // PIN 盐
+  static const String leaveVisitTrace = 'leave_visit_trace'; // 访问主页留下踪迹 '1'/'0'
+
+  // ── 桌面端 ──────────────────────────────────────────────────────────
+  static const String closeToTray = 'close_to_tray'; // 关闭到托盘 '1'/'0'
 
   /// 会话设置 key（免打扰/置顶），形如 "friend_123" / "group_456"。
   static String sessionKey(String type, int id) => '${type}_$id';
@@ -75,6 +100,18 @@ class SettingsStore {
 
   Future<void> setBool(String key, bool value) =>
       setString(key, value ? '1' : '0');
+
+  /// 读取 double 设置；不存在或非法返回 null。
+  Future<double?> getDouble(String key) async =>
+      double.tryParse(await getString(key) ?? '');
+
+  Future<void> setDouble(String key, double value) => setString(key, '$value');
+
+  /// 读取 int 设置；不存在或非法返回 null。
+  Future<int?> getInt(String key) async =>
+      int.tryParse(await getString(key) ?? '');
+
+  Future<void> setInt(String key, int value) => setString(key, '$value');
 
   /// 保存自动登录凭据（当前账号，密码加密落库）。
   Future<void> saveCredentials(int uin, String password) async {
@@ -268,4 +305,41 @@ class SettingsStore {
   /// 设置会话置顶。
   Future<void> setPinned(String sessionKey2, bool on) =>
       _setSessionFlag(SettingsKeys.pinnedSessions, sessionKey2, on);
+
+  // ── 好友备注 / 上线通知（本地，按 uin）─────────────────────────────────
+
+  /// 好友备注名（无则 null）。
+  Future<String?> friendNote(int uin) async {
+    final v = await getString('friend_note_$uin');
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// 设置好友备注名（空白则清除）。
+  Future<void> setFriendNote(int uin, String note) async {
+    final t = note.trim();
+    if (t.isEmpty) {
+      await _db.clearSetting('friend_note_$uin');
+    } else {
+      await setString('friend_note_$uin', t);
+    }
+  }
+
+  /// 是否开启该好友的上线通知。
+  Future<bool> friendOnlineNotify(int uin) => getBool('online_notify_$uin');
+
+  /// 设置好友上线通知。
+  Future<void> setFriendOnlineNotify(int uin, bool on) =>
+      setBool('online_notify_$uin', on);
+
+  // ── 访客记录（本地，按 uin）───────────────────────────────────────────
+
+  /// 上次向该玩家发送访问记录的时间（epoch 秒）；从未发送返回 0。
+  Future<int> visitSentAt(int uin) async {
+    final v = await getInt('visit_sent_$uin');
+    return v ?? 0;
+  }
+
+  /// 记录向该玩家发送访问记录的时间（epoch 秒），用于 24h 去重。
+  Future<void> setVisitSentAt(int uin, int epochSeconds) =>
+      setInt('visit_sent_$uin', epochSeconds);
 }

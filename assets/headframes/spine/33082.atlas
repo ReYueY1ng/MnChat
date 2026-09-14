@@ -1,0 +1,90 @@
+
+33082.png
+size: 844,276
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+1
+  rotate: false
+  xy: 568, 140
+  size: 138, 134
+  orig: 140, 140
+  offset: 2, 3
+  index: -1
+10
+  rotate: false
+  xy: 143, 139
+  size: 140, 135
+  orig: 140, 140
+  offset: 0, 2
+  index: -1
+11
+  rotate: false
+  xy: 2, 137
+  size: 139, 137
+  orig: 140, 140
+  offset: 1, 1
+  index: -1
+12
+  rotate: false
+  xy: 285, 138
+  size: 139, 136
+  orig: 140, 140
+  offset: 1, 2
+  index: -1
+2
+  rotate: false
+  xy: 2, 2
+  size: 138, 133
+  orig: 140, 140
+  offset: 2, 4
+  index: -1
+3
+  rotate: false
+  xy: 422, 2
+  size: 137, 133
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+4
+  rotate: false
+  xy: 561, 2
+  size: 137, 133
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+5
+  rotate: false
+  xy: 700, 2
+  size: 137, 133
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+6
+  rotate: true
+  xy: 708, 137
+  size: 137, 134
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+7
+  rotate: false
+  xy: 142, 2
+  size: 138, 133
+  orig: 140, 140
+  offset: 2, 4
+  index: -1
+8
+  rotate: false
+  xy: 282, 2
+  size: 138, 133
+  orig: 140, 140
+  offset: 2, 4
+  index: -1
+9
+  rotate: false
+  xy: 426, 140
+  size: 140, 134
+  orig: 140, 140
+  offset: 0, 3
+  index: -1

@@ -2,19 +2,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
-import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
-import 'family_page.dart';
 import 'friend_request_page.dart' show showAddFriendDialog;
-import 'mail_page.dart';
-import 'message_settings_page.dart';
-import 'settings_page.dart';
+import 'theme/app_tokens.dart';
+import 'widgets/account_menu.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/head_frame.dart';
+import 'widgets/player_info_sheet.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 会话列表页（左侧栏 / 手机单页）。
 ///
 /// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
-/// 群全部保留。顶部保留搜索框，排序等操作在抽屉菜单。
+/// 群全部保留。顶部保留搜索框，排序与快捷短语入口在设置页。
 class SessionListPage extends ConsumerStatefulWidget {
   final List<ChatSession> sessions;
 
@@ -29,11 +29,15 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authProvider);
     final active = ref.watch(activeSessionProvider);
     final sortMode = ref.watch(sessionSortModeProvider);
     final theme = Theme.of(context);
     final sessions = widget.sessions;
+
+    // 与 HomeShell 一致：横屏且够宽时账号入口在侧栏底部，AppBar 不再重复展示。
+    final railLayout =
+        MediaQuery.orientationOf(context) == Orientation.landscape &&
+        MediaQuery.sizeOf(context).width >= 800;
 
     // 搜索过滤（昵称/迷你号/群名）
     final filtered = sessions.where((s) {
@@ -43,42 +47,56 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     }).toList();
 
     // 排序（time 模式对齐游戏：未读优先 → 最后消息时间倒序）
-    final sorted = [...filtered]..sort((a, b) => switch (sortMode) {
-          SessionSortMode.name => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+    final sorted = [...filtered]
+      ..sort(
+        (a, b) => switch (sortMode) {
+          SessionSortMode.name => a.name.toLowerCase().compareTo(
+            b.name.toLowerCase(),
+          ),
           SessionSortMode.unread => b.unreadCount.compareTo(a.unreadCount),
           SessionSortMode.time => () {
-              // 未读会话置前（二元，同游戏 unReadStat），再按时间倒序
-              final au = a.unreadCount > 0 ? 0 : 1;
-              final bu = b.unreadCount > 0 ? 0 : 1;
-              if (au != bu) return au.compareTo(bu);
-              return (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0);
-            }(),
-        });
+            // 未读会话置前（二元，同游戏 unReadStat），再按时间倒序
+            final au = a.unreadCount > 0 ? 0 : 1;
+            final bu = b.unreadCount > 0 ? 0 : 1;
+            if (au != bu) return au.compareTo(bu);
+            return (b.lastMessage?.time ?? 0).compareTo(
+              a.lastMessage?.time ?? 0,
+            );
+          }(),
+        },
+      );
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          '会话',
-          style: TextStyle(fontWeight: FontWeight.bold),
-        ),
+        title: const Text('会话', style: TextStyle(fontWeight: FontWeight.bold)),
+        // 竖屏/窄屏：账号入口放 AppBar；横屏由侧栏底部承担。
+        actions: railLayout ? null : const [AccountAvatarButton()],
       ),
-      drawer: _buildDrawer(context, ref, auth),
       body: Column(
         children: [
           _buildSearchBar(theme),
           const Divider(height: 1),
           Expanded(
             child: sorted.isEmpty
-                ? _EmptySessions(onAddFriend: () => showAddFriendDialog(context, ref))
+                ? _EmptySessions(
+                    onAddFriend: () => showAddFriendDialog(context, ref),
+                  )
                 : ListView.separated(
+                    // 行改为圆角卡片后不再用 Divider 分隔；四边内缩到与
+                    // CardThemeData.margin 一致：左右避免圆角贴住面板边缘，
+                    // 上下避免首/末卡片贴住搜索框分隔线与窗口底边。
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.sm,
+                      vertical: AppSpacing.sm,
+                    ),
                     itemCount: sorted.length,
-                    separatorBuilder: (_, _) => Divider(
-                        height: 1,
-                        indent: 72,
-                        color: theme.colorScheme.outlineVariant),
+                    // 行间留白与 CardThemeData.margin.vertical 一致。
+                    separatorBuilder: (_, _) =>
+                        const SizedBox(height: AppSpacing.sm),
                     itemBuilder: (context, i) {
                       final s = sorted[i];
-                      final isActive = active != null &&
+                      final isActive =
+                          active != null &&
                           active.type == s.type &&
                           active.id == s.id;
                       return _SessionTile(
@@ -88,6 +106,21 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                             .read(activeSessionProvider.notifier)
                             .open(s.type, s.id),
                         onLongPress: () => _showSessionMenu(context, s),
+                        // 桌面端右键打开同一菜单
+                        onSecondaryTap: () => _showSessionMenu(context, s),
+                        // 点击好友头像：玩家简要信息卡
+                        onAvatarTap: s.type == ChatSessionType.friend
+                            ? () => showPlayerInfoSheet(
+                                context,
+                                ref,
+                                uin: s.id,
+                                name: s.name,
+                                avatarUrl: s.avatar,
+                                headType: s.headType,
+                                headId: s.headId,
+                                headFrameId: s.headFrameId,
+                              )
+                            : null,
                       );
                     },
                   ),
@@ -119,319 +152,27 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
             borderRadius: BorderRadius.circular(18),
             borderSide: BorderSide.none,
           ),
-          contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-        ),
-      ),
-    );
-  }
-
-  /// 侧边栏菜单：账号信息 / 排序 / 刷新 / 家族 / 设置 / 退出登录。
-  Drawer _buildDrawer(BuildContext context, WidgetRef ref, authState) {
-    final theme = Theme.of(context);
-    final sortMode = ref.watch(sessionSortModeProvider);
-    return Drawer(
-      child: SafeArea(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            // 头部：账号信息 + 状态
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
-              child: Row(
-                children: [
-                  AvatarView(
-                    avatarUrl: null,
-                    name: authState.auth?.name ?? '',
-                    radius: 28,
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          authState.auth?.name ?? '未登录',
-                          style: theme.textTheme.titleMedium,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'Uin: ${authState.auth?.uin ?? '-'}',
-                          style: theme.textTheme.bodySmall
-                              ?.copyWith(color: theme.colorScheme.outline),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            // 排序
-            ExpansionTile(
-              leading: const Icon(Icons.sort),
-              title: const Text('排序方式'),
-              subtitle: Text(sortMode.label),
-              children: [
-                for (final m in SessionSortMode.values)
-                  RadioListTile<SessionSortMode>(
-                    dense: true,
-                    title: Text(m.label),
-                    value: m,
-                    groupValue: sortMode,
-                    onChanged: (v) {
-                      if (v == null) return;
-                      ref.read(sessionSortModeProvider.notifier).setMode(v);
-                      Navigator.of(context).pop();
-                    },
-                  ),
-              ],
-            ),
-            ListTile(
-              leading: const Icon(Icons.refresh),
-              title: const Text('刷新会话'),
-              onTap: () {
-                Navigator.of(context).pop();
-                ref.read(chatServiceProvider).loadSessions();
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.group_add_outlined),
-              title: const Text('创建群'),
-              subtitle: const Text('建群并邀请好友'),
-              onTap: () {
-                Navigator.of(context).pop();
-                _showCreateGroupDialog(context, ref);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.home),
-              title: const Text('家族'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const FamilyPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.mark_email_unread_outlined),
-              title: const Text('消息中心'),
-              subtitle: const Text('邮件 / 系统通知 / 礼物'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MailPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('消息设置'),
-              subtitle: const Text('快捷短语管理'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const MessageSettingsPage()),
-                );
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.settings_outlined),
-              title: const Text('设置'),
-              onTap: () {
-                Navigator.of(context).pop();
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const SettingsPage()),
-                );
-              },
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: const Icon(Icons.switch_account_outlined),
-              title: const Text('切换账号'),
-              subtitle: const Text('退出并回到登录页，可登录其他账号'),
-              onTap: () {
-                Navigator.of(context).pop();
-                ref.read(authProvider.notifier).logout();
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.logout, color: theme.colorScheme.error),
-              title: Text('退出登录',
-                  style: TextStyle(color: theme.colorScheme.error)),
-              onTap: () {
-                Navigator.of(context).pop();
-                ref.read(authProvider.notifier).logout();
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 会话长按菜单：免打扰 / 置顶。
-  Future<void> _showSessionMenu(BuildContext context, ChatSession s) async {
-    final settings = ref.read(settingsProvider);
-    final key = SettingsKeys.sessionKey(s.type.name, s.id);
-    final muted = await settings.isMuted(key);
-    final pinned = await settings.isPinned(key);
-    if (!mounted || !context.mounted) return;
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(s.name),
-              dense: true,
-              enabled: false,
-            ),
-            const Divider(height: 1),
-            ListTile(
-              leading: Icon(
-                pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                color: pinned ? Theme.of(ctx).colorScheme.primary : null,
-              ),
-              title: Text(pinned ? '取消置顶' : '置顶会话'),
-              onTap: () => Navigator.pop(ctx, 'pin'),
-            ),
-            ListTile(
-              leading: Icon(
-                muted ? Icons.notifications_off : Icons.notifications_outlined,
-                color: muted ? Theme.of(ctx).colorScheme.error : null,
-              ),
-              title: Text(muted ? '取消免打扰' : '免打扰'),
-              onTap: () => Navigator.pop(ctx, 'mute'),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (action == null || !mounted) return;
-    switch (action) {
-      case 'pin':
-        await settings.setPinned(key, !pinned);
-      case 'mute':
-        await settings.setMuted(key, !muted);
-    }
-    if (mounted) setState(() {}); // 刷新（置顶影响排序）
-  }
-
-  /// 创建群对话框：输入群名 + 勾选好友成员 → create_group。
-  Future<void> _showCreateGroupDialog(BuildContext context, WidgetRef ref) async {    final nameCtrl = TextEditingController();
-    final service = ref.read(chatServiceProvider);
-    final contacts = service.contacts
-        .where((c) => (c.relation & 8) != 0)
-        .toList()
-      ..sort((a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()));
-    final selected = <int>{};
-
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('创建群'),
-          content: SizedBox(
-            width: 420,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: nameCtrl,
-                  maxLength: 20,
-                  decoration: const InputDecoration(
-                    labelText: '群名称',
-                    hintText: '输入群名称',
-                  ),
-                ),
-                if (contacts.isNotEmpty)
-                  Flexible(
-                    child: SizedBox(
-                      height: 260,
-                      child: ListView(
-                        shrinkWrap: true,
-                        children: [
-                          const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 4),
-                            child: Text('选择成员（可选）',
-                                style: TextStyle(fontWeight: FontWeight.w600)),
-                          ),
-                          ...contacts.map((c) {
-                            final name =
-                                c.nickname.isNotEmpty ? c.nickname : '${c.uin}';
-                            return CheckboxListTile(
-                              dense: true,
-                              value: selected.contains(c.uin),
-                              title: Text(name),
-                              subtitle: Text('迷你号 ${c.uin}'),
-                              onChanged: (v) => setDialogState(() {
-                                if (v == true) {
-                                  selected.add(c.uin);
-                                } else {
-                                  selected.remove(c.uin);
-                                }
-                              }),
-                            );
-                          }),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 6,
+            horizontal: 8,
           ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('创建'),
-            ),
-          ],
         ),
       ),
     );
-    if (ok != true || !mounted) return;
-    final name = nameCtrl.text.trim();
-    if (name.isEmpty) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('请输入群名称')),
-        );
-      }
-      return;
-    }
-    try {
-      final group = service.group;
-      if (group == null) throw StateError('未登录');
-      final members = <int>{service.myUin, ...selected}.toList();
-      final resp = await group.createGroupWithMembers(
-        groupName: name,
-        members: members,
-      );
-      if (!context.mounted) return;
-      final ret = resp['ret'];
-      if (ret is num && ret != 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('创建失败: ret=$ret')),
-        );
-        return;
-      }
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('群已创建')),
-      );
-      service.loadSessions(); // 刷新群列表
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('创建失败: $e')),
-        );
-      }
-    }
+  }
+
+  /// 会话长按 / 右键菜单：免打扰 / 置顶 + 好友专属操作（上线通知、备注、
+  /// 家园、删除好友）。
+  Future<void> _showSessionMenu(BuildContext context, ChatSession s) async {
+    await showFriendMenu(
+      context,
+      ref,
+      uin: s.id,
+      name: s.name,
+      type: s.type,
+      showMute: true,
+    );
+    if (mounted) setState(() {}); // 刷新（置顶影响排序）
   }
 }
 
@@ -441,11 +182,19 @@ class _SessionTile extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback? onLongPress;
 
+  /// 桌面端右键（secondary tap）打开与长按相同的菜单。
+  final VoidCallback? onSecondaryTap;
+
+  /// 点击头像打开玩家简要信息卡（仅好友会话传入）。
+  final VoidCallback? onAvatarTap;
+
   const _SessionTile({
     required this.session,
     required this.isActive,
     required this.onTap,
     this.onLongPress,
+    this.onSecondaryTap,
+    this.onAvatarTap,
   });
 
   @override
@@ -458,21 +207,50 @@ class _SessionTile extends StatelessWidget {
     final isFriend = session.type == ChatSessionType.friend;
     final statusText = isFriend
         ? (session.gameStatus != null && session.gameStatus!.isNotEmpty
-            ? session.gameStatus!
-            : (session.isOnline ? '在线' : '离线'))
+              ? session.gameStatus!
+              : (session.isOnline ? '在线' : '离线'))
         : null;
 
-    return ListTile(
+    // ListTile 给 leading 的高度上限是 (isDense ? 48 : 56) + 密度纵向调整，
+    // 桌面紧凑密度下只有 48，会把有框槽位（radius * 2 / 0.76 ≈ 63.2）压成
+    // 非正方形并被 cover 裁掉框外圈。故抬高纵向密度（见 [kAvatarListTileDensity]），
+    // 并用 minTileHeight 兜住行高，保证槽位完整可见。
+    final avatar = AvatarView(
+      avatarUrl: session.avatar,
+      name: session.name,
+      type: session.type,
+      radius: 24,
+      headType: session.headType,
+      headId: session.headId,
+      frameId: session.headFrameId,
+    );
+
+    final tile = ListTile(
       selected: isActive,
-      selectedTileColor: theme.colorScheme.secondaryContainer.withValues(alpha: 0.5),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      leading: AvatarView(
-        avatarUrl: session.avatar,
-        name: session.name,
-        type: session.type,
-        radius: 24,
+      selectedTileColor: theme.colorScheme.secondaryContainer,
+      // 与全局 cardTheme 一致：surfaceContainerLow 底色 + cardR 圆角 + 细描边，
+      // ListTile 的 shape 同时作为 InkWell 的 customBorder，选中 / 悬停 / 水波
+      // 反馈会被裁进圆角内（不会出现直角溢出）。
+      shape: _cardLikeShape(theme),
+      tileColor: theme.colorScheme.surfaceContainerLow,
+      // 与好友行一致：使用 listTilePadding（vertical 8）。此前手写的 vertical 4
+      // 会让行高只有 68（好友行 76），同样的 48px 头像在更矮的行里显得偏大。
+      contentPadding: AppSpacing.listTilePadding,
+      visualDensity: kAvatarListTileDensity,
+      minTileHeight: headFrameSlotSize(24),
+      // 头像可点击（仅好友）：opaque 保证不与整行 onTap 冲突
+      leading: onAvatarTap == null
+          ? avatar
+          : GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: onAvatarTap,
+              child: avatar,
+            ),
+      title: RichTextView(
+        session.name,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      title: Text(session.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: isFriend
           // 好友：在线绿点 + 状态 + 最后消息（两行紧凑显示）
           ? Row(
@@ -484,7 +262,7 @@ class _SessionTile extends StatelessWidget {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: session.isOnline
-                        ? Colors.green.shade400
+                        ? AppSemanticColors.of(context).success
                         : theme.colorScheme.outlineVariant,
                   ),
                 ),
@@ -496,7 +274,7 @@ class _SessionTile extends StatelessWidget {
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: session.isOnline
-                          ? Colors.green.shade400
+                          ? AppSemanticColors.of(context).success
                           : theme.colorScheme.outline,
                     ),
                   ),
@@ -535,13 +313,24 @@ class _SessionTile extends StatelessWidget {
               ),
               child: Text(
                 session.unreadCount > 99 ? '99+' : '${session.unreadCount}',
-                style: const TextStyle(color: Colors.white, fontSize: 11),
+                style: TextStyle(
+                  color: theme.colorScheme.onError,
+                  fontSize: 11,
+                ),
               ),
             ),
         ],
       ),
       onTap: onTap,
       onLongPress: onLongPress,
+    );
+
+    // 右键（桌面端）打开菜单：ListTile 不暴露 secondary tap，外层包一层
+    return GestureDetector(
+      onSecondaryTapDown: onSecondaryTap == null
+          ? null
+          : (_) => onSecondaryTap!(),
+      child: tile,
     );
   }
 }
@@ -558,7 +347,11 @@ class _EmptySessions extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.inbox_outlined, size: 48, color: theme.colorScheme.outline),
+          Icon(
+            Icons.inbox_outlined,
+            size: 48,
+            color: theme.colorScheme.outline,
+          ),
           const SizedBox(height: 8),
           const Text('暂无会话\n聊过天的人会出现在这里'),
           const SizedBox(height: 8),
@@ -577,9 +370,22 @@ class _EmptySessions extends StatelessWidget {
 String _fmtTime(int ts) {
   final dt = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
   final now = DateTime.now();
-  final sameDay = dt.year == now.year && dt.month == now.month && dt.day == now.day;
+  final sameDay =
+      dt.year == now.year && dt.month == now.month && dt.day == now.day;
   final hh = dt.hour.toString().padLeft(2, '0');
   final mm = dt.minute.toString().padLeft(2, '0');
   if (sameDay) return '$hh:$mm';
   return '${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
+}
+
+/// 复刻全局 `cardTheme` 的外形：cardR 圆角 + 同一条 1px 描边。
+///
+/// 优先取主题里 `CardThemeData.shape` 的描边，保证与全站卡片完全一致；
+/// 拿不到时退回到 `outlineVariant`（与 `buildAppTheme` 中的 border 同源）。
+RoundedRectangleBorder _cardLikeShape(ThemeData theme) {
+  final shape = theme.cardTheme.shape;
+  final side = shape is RoundedRectangleBorder
+      ? shape.side
+      : BorderSide(color: theme.colorScheme.outlineVariant);
+  return RoundedRectangleBorder(borderRadius: AppRadius.cardR, side: side);
 }

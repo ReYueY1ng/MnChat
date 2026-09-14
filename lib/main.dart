@@ -5,15 +5,19 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/models/messages.dart';
+import 'core/services/app_lock.dart';
 import 'core/services/chat_service.dart' show ChatEvent;
 import 'core/services/native_bridge.dart';
+import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
 import 'state/providers.dart';
 import 'ui/home_shell.dart' show MainShell;
+import 'ui/lock_page.dart';
 import 'ui/login_page.dart';
+import 'ui/theme/app_theme.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final db = AppDatabase(
     driftDatabase(
@@ -24,12 +28,33 @@ void main() {
       ),
     ),
   );
+  // 托盘/窗口初始化必须在 runApp **之后**、且不能 await：
+  // 它要走平台通道（window_manager）与根 bundle（图标解码），这两者在
+  // hot restart 后可能迟迟不返回；若像以前那样在 runApp 之前 await，
+  // runApp 永远执行不到，界面会卡在旧帧上（表现为"热重启后整个 UI 卡死"）。
+  // 放到首帧之后再初始化，最坏情况只是"没有托盘"，界面不受影响。
   runApp(
     ProviderScope(
       overrides: [databaseProvider.overrideWithValue(db)],
       child: const MnChatApp(),
     ),
   );
+  unawaited(_initDesktopShell(db));
+}
+
+/// 初始化桌面壳层（系统托盘 + 关闭到托盘）。
+///
+/// 仅在桌面端生效；任何失败（含资源缺失）都只记日志并降级，绝不抛出，
+/// 避免影响已经渲染出来的界面。
+Future<void> _initDesktopShell(AppDatabase db) async {
+  try {
+    final closeToTray = await SettingsStore(
+      db,
+    ).getBool(SettingsKeys.closeToTray, fallback: true);
+    await TrayService.init(closeToTray: closeToTray);
+  } catch (e) {
+    debugPrint('TrayService: 桌面壳层初始化失败（已忽略）: $e');
+  }
 }
 
 class MnChatApp extends ConsumerStatefulWidget {
@@ -46,6 +71,15 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 是否存在可用的自动登录凭据（启动时先读一次，用于跳过登录页停留）。
   bool _autoLoginAvailable = false;
 
+  /// 应用锁是否启用（启动时读一次，设置变更时同步）。
+  bool _lockEnabled = false;
+
+  /// 当前是否处于锁定态（启动 / 从后台回前台时置位）。
+  bool _locked = false;
+
+  /// 上一次的生命周期状态，用于判断"是否真的进过后台"。
+  AppLifecycleState? _lastLifecycle;
+
   /// 后台通知订阅（dispose 时必须取消，否则泄漏）。
   StreamSubscription<ChatEvent>? _notifySub;
 
@@ -61,6 +95,14 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         if (_autoLoginAvailable) setState(() => _autoLoginAvailable = false);
       }
     });
+    // 设置页开关变化即时同步（关闭时立刻取消锁定态）
+    ref.listenManual(lockEnabledProvider, (_, next) {
+      if (!mounted) return;
+      setState(() {
+        _lockEnabled = next;
+        if (!next) _locked = false;
+      });
+    });
     _prepareAutoLogin();
   }
 
@@ -69,9 +111,14 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     final settings = ref.read(settingsProvider);
     final enabled = await settings.getBool(SettingsKeys.autoLogin);
     final creds = enabled ? await settings.loadCredentials() : null;
+    // 应用锁：仅当开关开启且已设置密码时才需要解锁。
+    final lockOn = await settings.getBool(SettingsKeys.lockEnabled);
+    final hasPin = lockOn && await AppLockService(settings).isPinSet();
     if (!mounted) return;
     setState(() {
       _autoLoginAvailable = creds != null;
+      _lockEnabled = lockOn;
+      _locked = hasPin;
     });
     // 后台新消息通知监听
     _subscribeNotifications();
@@ -88,6 +135,11 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       if (!ref.read(notifyEnabledProvider)) return;
       // 自己发的消息不通知
       if (event.message.uin == service.myUin) return;
+      // 免打扰时段内不弹通知
+      if (ref.read(dndEnabledProvider) &&
+          ref.read(dndWindowProvider).contains(DateTime.now())) {
+        return;
+      }
       final lifecycle = WidgetsBinding.instance.lifecycleState;
       final inBackground =
           lifecycle == AppLifecycleState.paused ||
@@ -95,11 +147,17 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
           lifecycle == AppLifecycleState.detached ||
           lifecycle == AppLifecycleState.inactive;
       if (!inBackground) return; // 前台时由 UI 直接展示，不弹系统通知
-      final name = event.message.text.length > 30
-          ? '${event.message.text.substring(0, 30)}…'
-          : event.message.text;
+      // 「通知隐藏内容」开启时只提示有新消息，不泄露正文
+      final hide = ref.read(hideNotifyContentProvider);
+      final name = hide
+          ? '你有一条新消息'
+          : (event.message.text.length > 30
+                ? '${event.message.text.substring(0, 30)}…'
+                : event.message.text);
       NativeBridge.showNotification(
-        title: event.sessionType == ChatSessionType.group ? '群聊新消息' : '新消息',
+        title: hide
+            ? 'MnChat'
+            : (event.sessionType == ChatSessionType.group ? '群聊新消息' : '新消息'),
         text: name,
         sessionKey: '${event.sessionType.name}_${event.sessionId}',
       );
@@ -130,53 +188,41 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     // 回前台：若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
     if (state == AppLifecycleState.resumed) {
       ref.read(chatServiceProvider).ensureConnection();
+      // 仅当确实进过后台（paused/hidden）才重新上锁；inactive 只是失焦。
+      final wasBackground =
+          _lastLifecycle == AppLifecycleState.paused ||
+          _lastLifecycle == AppLifecycleState.hidden;
+      if (wasBackground && _lockEnabled && !_locked && mounted) {
+        setState(() => _locked = true);
+      }
     }
+    _lastLifecycle = state;
   }
 
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
+    final themeMode = ref.watch(appThemeModeProvider);
+    final accent = ref.watch(accentColorProvider);
+    final loggedIn = auth.isLoggedIn || _autoLoginAvailable;
+    final showLock = loggedIn && _lockEnabled && _locked;
 
     return MaterialApp(
       title: 'MnChat · 迷你世界外部聊天',
       debugShowCheckedModeBanner: false,
-      theme: _buildTheme(Brightness.light),
-      darkTheme: _buildTheme(Brightness.dark),
-      home: auth.isLoggedIn || _autoLoginAvailable
+      theme: buildAppTheme(Brightness.light, seedColor: accent),
+      darkTheme: buildAppTheme(Brightness.dark, seedColor: accent),
+      themeMode: switch (themeMode) {
+        AppThemeMode.system => ThemeMode.system,
+        AppThemeMode.light => ThemeMode.light,
+        AppThemeMode.dark => ThemeMode.dark,
+      },
+      home: !loggedIn
+          ? const LoginPage()
+          : showLock
+          ? LockPage(onUnlocked: () => setState(() => _locked = false))
           // 已登录或即将自动登录：直接进会话页，登录在后台完成
-          ? const MainShell()
-          : const LoginPage(),
-    );
-  }
-
-  ThemeData _buildTheme(Brightness brightness) {
-    final scheme = ColorScheme.fromSeed(
-      seedColor: const Color(0xFF00BFFF),
-      brightness: brightness,
-    );
-    return ThemeData(
-      useMaterial3: true,
-      colorScheme: scheme,
-      scaffoldBackgroundColor: scheme.surface,
-      appBarTheme: AppBarTheme(
-        backgroundColor: scheme.surfaceContainer,
-        elevation: 0,
-        centerTitle: false,
-      ),
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: scheme.surfaceContainerLow,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide.none,
-        ),
-      ),
-      listTileTheme: const ListTileThemeData(shape: RoundedRectangleBorder()),
+          : const MainShell(),
     );
   }
 }

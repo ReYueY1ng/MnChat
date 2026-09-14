@@ -59,6 +59,19 @@ enum DynamicsFeedType {
 }
 
 /// 一条动态。
+/// 从头像框字段解析 head_frame_id（数值或字符串；缺省/0 视为无框）。
+int? _headFrameId(Map<String, Object?> m) {
+  for (final k in ['head_frame_id', 'headFrameId']) {
+    final v = m[k];
+    if (v is num && v.toInt() > 0) return v.toInt();
+    if (v is String) {
+      final n = int.tryParse(v);
+      if (n != null && n > 0) return n;
+    }
+  }
+  return null;
+}
+
 class DynamicsPost {
   /// 动态 id，形如 `"<uin>_<ct>"`（如 "273640665_1787757890"）。
   final String pid;
@@ -68,6 +81,9 @@ class DynamicsPost {
   final int ctype;
   final String? nickname;
   final String? avatar;
+
+  /// 头像框 id（role_info_list.head_frame_id，对应 `assets/headframes/<id>.png`）。
+  final int? headFrameId;
 
   /// 图片列表（带宽高）。
   final List<PostImage> pics;
@@ -96,6 +112,7 @@ class DynamicsPost {
     this.ctype = 0,
     this.nickname,
     this.avatar,
+    this.headFrameId,
     this.pics = const [],
     this.city = '',
     this.location = '',
@@ -187,7 +204,12 @@ class DynamicsPost {
     );
   }
 
-  DynamicsPost withProfile({String? nickname, String? avatar}) => DynamicsPost(
+  DynamicsPost withProfile({
+    String? nickname,
+    String? avatar,
+    int? headFrameId,
+  }) =>
+      DynamicsPost(
         pid: pid,
         uin: uin,
         content: content,
@@ -195,6 +217,7 @@ class DynamicsPost {
         ctype: ctype,
         nickname: nickname ?? this.nickname,
         avatar: avatar ?? this.avatar,
+        headFrameId: headFrameId ?? this.headFrameId,
         pics: pics,
         city: city,
         location: location,
@@ -214,6 +237,9 @@ class DynamicsComment {
   final int createTime;
   final String? nickname;
   final String? avatar;
+
+  /// 头像框 id（role_info_list.head_frame_id）。
+  final int? headFrameId;
   final int likeCount;
   final int replyCount;
 
@@ -237,6 +263,7 @@ class DynamicsComment {
     this.createTime = 0,
     this.nickname,
     this.avatar,
+    this.headFrameId,
     this.likeCount = 0,
     this.replyCount = 0,
     this.location = '',
@@ -315,13 +342,18 @@ class DynamicsComment {
     );
   }
 
-  DynamicsComment withProfile({String? nickname, String? avatar}) =>
+  DynamicsComment withProfile({
+    String? nickname,
+    String? avatar,
+    int? headFrameId,
+  }) =>
       DynamicsComment(
         uin: uin,
         content: content,
         createTime: createTime,
         nickname: nickname ?? this.nickname,
         avatar: avatar ?? this.avatar,
+        headFrameId: headFrameId ?? this.headFrameId,
         likeCount: likeCount,
         replyCount: replyCount,
         location: location,
@@ -634,6 +666,7 @@ class DynamicsClient {
             posts.add(post.withProfile(
               nickname: info['NickName']?.toString(),
               avatar: avatar,
+              headFrameId: _headFrameId(info),
             ));
           } else {
             posts.add(post);
@@ -731,6 +764,7 @@ class DynamicsClient {
         out.add(c.withProfile(
           nickname: info['NickName']?.toString(),
           avatar: avatar,
+          headFrameId: _headFrameId(info),
         ));
       } else {
         out.add(c);
@@ -984,6 +1018,7 @@ class DynamicsClient {
         out.add(c.withProfile(
           nickname: info['NickName']?.toString(),
           avatar: avatar,
+          headFrameId: _headFrameId(info),
         ));
       } else {
         out.add(c);

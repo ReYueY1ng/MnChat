@@ -77,7 +77,8 @@ ChatSession chatSessionFromRecord(ChatSessionRecord r) {
   return ChatSession(
     id: id,
     type: type,
-    name: r.name,
+    // 好友会话名同样净化历史坏数据（见 [friendDisplayName]）；群名不动。
+    name: type == ChatSessionType.friend ? friendDisplayName(r.name, id) : r.name,
     avatar: r.avatar,
     lastReadTime: r.lastReadTime,
     unreadCount: r.unreadCount,
@@ -97,6 +98,19 @@ int _idFromSessionKey(String key) {
   final idx = key.lastIndexOf('_');
   if (idx < 0) return 0;
   return int.tryParse(key.substring(idx + 1)) ?? 0;
+}
+
+/// 好友显示名净化：缓存昵称来自 SQLite（好友表 / 会话表），历史上出现过
+/// 插值 bug（`'$r.uin'` 把整个 Drift 记录拼进字符串），库里已落下一部分
+/// `FriendRecord(...)` 字面量。读取时统一处理：
+/// - 昵称为空、或形如 `FriendRecord(` 的记录字面量 → 回退为迷你号字符串；
+/// - 其余原样返回。
+/// 注意：不修库、不加迁移；净化只发生在读取路径（下次 [_saveFriendCache]
+/// 会用净化后的值覆盖回写，坏数据自然消失）。
+String friendDisplayName(String cachedName, int uin) {
+  final name = cachedName.trim();
+  if (name.isEmpty || name.startsWith('FriendRecord(')) return '$uin';
+  return cachedName;
 }
 
 /// Contact → FriendRecord（入库用，记录拉取时间）。
@@ -124,7 +138,8 @@ FriendRecord friendToRecord(
 Contact friendFromRecord(FriendRecord r) {
   return Contact(
     uin: r.uin,
-    nickname: r.nickname,
+    // 净化历史坏数据（见 [friendDisplayName]）。
+    nickname: friendDisplayName(r.nickname, r.uin),
     avatar: r.avatar,
     relation: r.relation,
     mark: r.mark,

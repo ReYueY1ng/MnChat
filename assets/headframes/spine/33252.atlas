@@ -1,0 +1,153 @@
+
+33252.png
+size: 236,376
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+cexing
+  rotate: true
+  xy: 134, 233
+  size: 28, 34
+  orig: 32, 40
+  offset: 2, 3
+  index: -1
+dikuang
+  rotate: false
+  xy: 2, 246
+  size: 130, 128
+  orig: 134, 130
+  offset: 2, 2
+  index: -1
+hua
+  rotate: false
+  xy: 134, 263
+  size: 57, 48
+  orig: 58, 50
+  offset: 0, 0
+  index: -1
+huaban1
+  rotate: false
+  xy: 206, 324
+  size: 7, 4
+  orig: 7, 4
+  offset: 0, 0
+  index: -1
+huaban2
+  rotate: true
+  xy: 199, 322
+  size: 11, 5
+  orig: 11, 5
+  offset: 0, 0
+  index: -1
+huaban3
+  rotate: true
+  xy: 206, 338
+  size: 6, 9
+  orig: 6, 9
+  offset: 0, 0
+  index: -1
+piaodaishang
+  rotate: false
+  xy: 123, 120
+  size: 111, 111
+  orig: 111, 111
+  offset: 0, 0
+  index: -1
+piaodaishang2
+  rotate: false
+  xy: 2, 17
+  size: 116, 115
+  orig: 126, 126
+  offset: 3, 7
+  index: -1
+piaodaixia
+  rotate: true
+  xy: 120, 2
+  size: 116, 108
+  orig: 116, 108
+  offset: 0, 0
+  index: -1
+piaodaixia2
+  rotate: false
+  xy: 2, 134
+  size: 119, 110
+  orig: 134, 124
+  offset: 9, 6
+  index: -1
+yueqiu
+  rotate: true
+  xy: 170, 233
+  size: 28, 27
+  orig: 28, 27
+  offset: 0, 0
+  index: -1
+yueqiu1
+  rotate: false
+  xy: 216, 277
+  size: 18, 18
+  orig: 18, 18
+  offset: 0, 0
+  index: -1
+yueqiu2
+  rotate: true
+  xy: 216, 264
+  size: 11, 12
+  orig: 11, 12
+  offset: 0, 0
+  index: -1
+yueqiu3
+  rotate: true
+  xy: 206, 346
+  size: 8, 9
+  orig: 8, 9
+  offset: 0, 0
+  index: -1
+yueqiu4
+  rotate: true
+  xy: 206, 330
+  size: 6, 7
+  orig: 6, 7
+  offset: 0, 0
+  index: -1
+yunhou
+  rotate: false
+  xy: 134, 313
+  size: 63, 20
+  orig: 63, 20
+  offset: 0, 0
+  index: -1
+yunqian
+  rotate: true
+  xy: 199, 233
+  size: 23, 25
+  orig: 23, 25
+  offset: 0, 0
+  index: -1
+zhuzishang
+  rotate: true
+  xy: 199, 258
+  size: 62, 15
+  orig: 62, 15
+  offset: 0, 0
+  index: -1
+zhuzixia
+  rotate: false
+  xy: 134, 356
+  size: 82, 18
+  orig: 82, 18
+  offset: 0, 0
+  index: -1
+zhuziyou
+  rotate: false
+  xy: 218, 297
+  size: 15, 77
+  orig: 15, 77
+  offset: 0, 0
+  index: -1
+zhuzizuo
+  rotate: true
+  xy: 134, 335
+  size: 19, 70
+  orig: 19, 70
+  offset: 0, 0
+  index: -1

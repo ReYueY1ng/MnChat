@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/head_frame.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 群详情页 —— 成员列表 + 群主/管理操作（退出/解散/转让）。
 class GroupDetailPage extends ConsumerStatefulWidget {
@@ -22,11 +24,15 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
   void initState() {
     super.initState();
     // 拉一次群详情（query_group），刷新成员/群主信息
-    ref.read(chatServiceProvider).refreshGroupInfo(widget.groupId).catchError((_) => <String, Object?>{});
+    ref
+        .read(chatServiceProvider)
+        .refreshGroupInfo(widget.groupId)
+        .catchError((_) => <String, Object?>{});
   }
 
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
     final service = ref.watch(chatServiceProvider);
     final myUin = ref.watch(myUinProvider);
     final info = service.groupInfo(widget.groupId);
@@ -36,7 +42,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.name.isEmpty ? '群详情' : widget.name),
+        title: RichTextView(widget.name.isEmpty ? '群详情' : widget.name),
       ),
       body: ListView(
         children: [
@@ -47,16 +53,23 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             value: members.isEmpty ? '—' : '${members.length}',
           ),
           if (creatorUin != 0)
-            _InfoTile(icon: Icons.star, label: '群主', value: _displayName(creatorUin, service)),
+            _InfoTile(
+              icon: Icons.star,
+              label: '群主',
+              value: _displayName(creatorUin, service),
+            ),
 
           const Padding(
             padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
             child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
           if (members.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              child: Text('暂无成员信息（可能未拉取到）', style: TextStyle(color: Colors.grey)),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                '暂无成员信息（可能未拉取到）',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
             )
           else
             ...members.map((uin) {
@@ -65,6 +78,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                 uin: uin,
                 name: _displayName(uin, service),
                 avatarUrl: profile?.avatarUrl,
+                headType: profile?.headType,
+                headId: profile?.headId,
+                headFrameId: profile?.headFrameId,
                 isOwner: uin == creatorUin,
                 isSelf: uin == myUin,
               );
@@ -82,7 +98,14 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     );
   }
 
-  Widget _buildActions(bool isOwner, int myUin, int creatorUin, List<int> members, dynamic service) {
+  Widget _buildActions(
+    bool isOwner,
+    int myUin,
+    int creatorUin,
+    List<int> members,
+    dynamic service,
+  ) {
+    final scheme = Theme.of(context).colorScheme;
     return Padding(
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -95,7 +118,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
           const SizedBox(height: 8),
           if (isOwner) ...[
             FilledButton.icon(
-              onPressed: _busy ? null : () => _showTransferDialog(members, creatorUin),
+              onPressed: _busy
+                  ? null
+                  : () => _showTransferDialog(members, creatorUin),
               icon: const Icon(Icons.admin_panel_settings),
               label: const Text('转让群主'),
             ),
@@ -104,7 +129,10 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
               onPressed: _busy ? null : () => _confirmDissolve(service),
               icon: const Icon(Icons.delete_forever),
               label: const Text('解散群'),
-              style: FilledButton.styleFrom(backgroundColor: Colors.red.shade400),
+              style: FilledButton.styleFrom(
+                backgroundColor: scheme.error,
+                foregroundColor: scheme.onError,
+              ),
             ),
           ] else
             FilledButton.tonalIcon(
@@ -119,11 +147,11 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 邀请好友入群：好友选择器（仅双向好友）→ join_group(op_uin)。
   Future<void> _showInviteDialog(dynamic service) async {
-    final contacts = service.contacts
-        .where((c) => (c.relation & 8) != 0)
-        .toList()
-      ..sort(
-          (a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()));
+    final contacts =
+        service.contacts.where((c) => (c.relation & 8) != 0).toList()..sort(
+          (a, b) =>
+              a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()),
+        );
     if (contacts.isEmpty) {
       _toast('暂无好友可邀请');
       return;
@@ -139,7 +167,10 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             child: Column(
               children: [
                 const ListTile(
-                  title: Text('选择要邀请的好友', style: TextStyle(fontWeight: FontWeight.w600)),
+                  title: Text(
+                    '选择要邀请的好友',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
                 const Divider(height: 1),
                 Expanded(
@@ -147,13 +178,25 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                     itemCount: contacts.length,
                     itemBuilder: (ctx, i) {
                       final c = contacts[i];
-                      final name = c.nickname.isNotEmpty ? c.nickname : '${c.uin}';
+                      final name = c.nickname.isNotEmpty
+                          ? c.nickname
+                          : '${c.uin}';
                       final checked = selected.contains(c.uin);
                       return CheckboxListTile(
                         value: checked,
                         title: Text(name),
                         subtitle: Text('迷你号 ${c.uin}'),
-                        secondary: AvatarView(name: name, radius: 20),
+                        // secondary 同样受 ListTile 密度钳制（桌面紧凑密度下 48），
+                        // 会把有框槽位（radius * 2 / 0.76 ≈ 52.6）压成非正方形并
+                        // 裁掉框外圈；抬高纵向密度解决（见 [kAvatarListTileDensity]）。
+                        visualDensity: kAvatarListTileDensity,
+                        secondary: AvatarView(
+                          name: name,
+                          radius: 20,
+                          headType: c.headType,
+                          headId: c.headId,
+                          frameId: c.headFrameId,
+                        ),
                         onChanged: (v) {
                           setSheetState(() {
                             if (v == true) {
@@ -172,9 +215,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                   padding: const EdgeInsets.all(12),
                   child: Row(
                     children: [
-                      Expanded(
-                        child: Text('已选 ${selected.length} 人'),
-                      ),
+                      Expanded(child: Text('已选 ${selected.length} 人')),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
                         child: const Text('取消'),
@@ -199,7 +240,10 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     setState(() => _busy = true);
     try {
       final info = ref.read(chatServiceProvider).groupInfo(widget.groupId);
-      await ref.read(chatServiceProvider).group?.inviteToGroup(
+      await ref
+          .read(chatServiceProvider)
+          .group
+          ?.inviteToGroup(
             groupId: widget.groupId,
             uins: selected.toList(),
             groupName: widget.name,
@@ -219,7 +263,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     final profile = service.groupMemberProfile(widget.groupId, uin);
     if (profile != null && profile.nickname.isNotEmpty) return profile.nickname;
     // 其次好友会话缓存
-    final s = service.sessions.where((x) => x.type.name == 'friend' && x.id == uin).firstOrNull;
+    final s = service.sessions
+        .where((x) => x.type.name == 'friend' && x.id == uin)
+        .firstOrNull;
     if (s != null && s.name.isNotEmpty) return s.name;
     return '$uin';
   }
@@ -270,7 +316,12 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const ListTile(title: Text('选择新群主', style: TextStyle(fontWeight: FontWeight.w600))),
+            const ListTile(
+              title: Text(
+                '选择新群主',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
+            ),
             ...targets.map(
               (uin) => ListTile(
                 leading: const Icon(Icons.person),
@@ -283,7 +334,10 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
       ),
     );
     if (picked == null || _busy) return;
-    final ok = await _confirm('转让群主', '确认将群主转给 ${_displayName(picked, ref.read(chatServiceProvider))}？');
+    final ok = await _confirm(
+      '转让群主',
+      '确认将群主转给 ${_displayName(picked, ref.read(chatServiceProvider))}？',
+    );
     if (!ok) return;
     setState(() => _busy = true);
     try {
@@ -303,8 +357,14 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         title: Text(title),
         content: Text(message),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -322,14 +382,21 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoTile({required this.icon, required this.label, required this.value});
+  const _InfoTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon),
       title: Text(label),
-      trailing: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+      trailing: Text(
+        value,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
     );
   }
 }
@@ -338,6 +405,9 @@ class _MemberTile extends StatelessWidget {
   final int uin;
   final String name;
   final String? avatarUrl;
+  final int? headType;
+  final int? headId;
+  final int? headFrameId;
   final bool isOwner;
   final bool isSelf;
 
@@ -345,6 +415,9 @@ class _MemberTile extends StatelessWidget {
     required this.uin,
     required this.name,
     this.avatarUrl,
+    this.headType,
+    this.headId,
+    this.headFrameId,
     required this.isOwner,
     required this.isSelf,
   });
@@ -352,8 +425,19 @@ class _MemberTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      leading: AvatarView(name: name.isNotEmpty ? name : '$uin', avatarUrl: avatarUrl),
-      title: Text(isSelf ? '$name（我）' : name),
+      // 单行 ListTile 的 leading 上限与行高都受密度钳制（桌面紧凑密度下仅 48），
+      // 装不下框盒（radius * 2 / 0.76 ≈ 63.2）：抬高纵向密度把上限提到 68，
+      // 并用 minTileHeight 兜住行高，所有成员行高度一致（见 [kAvatarListTileDensity]）。
+      visualDensity: kAvatarListTileDensity,
+      minTileHeight: headFrameSlotSize(24),
+      leading: AvatarView(
+        name: name.isNotEmpty ? name : '$uin',
+        avatarUrl: avatarUrl,
+        headType: headType,
+        headId: headId,
+        frameId: headFrameId,
+      ),
+      title: RichTextView(isSelf ? '$name（我）' : name),
       trailing: isOwner
           ? const Chip(label: Text('群主'), visualDensity: VisualDensity.compact)
           : null,

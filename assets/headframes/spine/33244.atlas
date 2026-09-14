@@ -1,0 +1,125 @@
+
+33244.png
+size: 220,144
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+BianYou
+  rotate: true
+  xy: 102, 44
+  size: 45, 98
+  orig: 45, 98
+  offset: 0, 0
+  index: -1
+BianZuo
+  rotate: true
+  xy: 2, 43
+  size: 46, 98
+  orig: 46, 98
+  offset: 0, 0
+  index: -1
+Guang
+  rotate: false
+  xy: 2, 91
+  size: 140, 50
+  orig: 142, 52
+  offset: 1, 1
+  index: -1
+Shoushi
+  rotate: true
+  xy: 198, 115
+  size: 26, 13
+  orig: 28, 15
+  offset: 1, 1
+  index: -1
+Shoushi2
+  rotate: false
+  xy: 175, 2
+  size: 37, 40
+  orig: 39, 42
+  offset: 1, 1
+  index: -1
+ShoushiDian1
+  rotate: false
+  xy: 213, 135
+  size: 5, 6
+  orig: 7, 8
+  offset: 1, 1
+  index: -1
+ShoushiDian2
+  rotate: false
+  xy: 212, 71
+  size: 6, 6
+  orig: 8, 8
+  offset: 1, 1
+  index: -1
+ShoushiDian3
+  rotate: false
+  xy: 212, 63
+  size: 6, 6
+  orig: 8, 8
+  offset: 1, 1
+  index: -1
+ShoushiDian4
+  rotate: false
+  xy: 213, 127
+  size: 5, 6
+  orig: 7, 8
+  offset: 1, 1
+  index: -1
+ShoushiXing1
+  rotate: false
+  xy: 198, 94
+  size: 17, 19
+  orig: 20, 22
+  offset: 1, 2
+  index: -1
+ShoushiXing2
+  rotate: false
+  xy: 14, 3
+  size: 7, 9
+  orig: 9, 13
+  offset: 1, 2
+  index: -1
+ShoushiXing3
+  rotate: false
+  xy: 202, 68
+  size: 8, 9
+  orig: 12, 14
+  offset: 2, 1
+  index: -1
+ShoushiXing4
+  rotate: false
+  xy: 202, 79
+  size: 12, 13
+  orig: 15, 15
+  offset: 1, 1
+  index: -1
+ShoushiXing5
+  rotate: false
+  xy: 2, 2
+  size: 10, 10
+  orig: 12, 13
+  offset: 1, 2
+  index: -1
+ZhuZhu
+  rotate: false
+  xy: 2, 14
+  size: 112, 27
+  orig: 114, 29
+  offset: 1, 1
+  index: -1
+saoguang2
+  rotate: true
+  xy: 116, 8
+  size: 34, 57
+  orig: 38, 57
+  offset: 2, 0
+  index: -1
+yellowflare
+  rotate: false
+  xy: 144, 92
+  size: 52, 49
+  orig: 64, 64
+  offset: 7, 8
+  index: -1

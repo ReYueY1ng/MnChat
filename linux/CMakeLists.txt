@@ -74,6 +74,16 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# 第三方桌面插件（tray_manager / window_manager）使用了已弃用的 libappindicator
+# C API，会被 APPLY_STANDARD_SETTINGS 的 -Werror 拦下而构建失败。这里只对这两个
+# 插件目标放宽「弃用告警」，不影响本项目自身代码的 -Werror。
+foreach(_deprecated_tolerant_plugin tray_manager_plugin window_manager_plugin)
+  if(TARGET ${_deprecated_tolerant_plugin})
+    target_compile_options(${_deprecated_tolerant_plugin}
+      PRIVATE -Wno-deprecated-declarations)
+  endif()
+endforeach()
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 登录/切换账号页：选择已保存账号一键登录；也可添加新账号。
 ///
@@ -68,8 +69,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     setState(() => _busy = false);
     if (!ok) {
       final error = ref.read(authProvider).error;
+      final scheme = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error ?? '登录失败'), backgroundColor: Colors.red.shade400),
+        SnackBar(
+          content: Text(
+            error ?? '登录失败',
+            style: TextStyle(color: scheme.onError),
+          ),
+          backgroundColor: scheme.error,
+        ),
       );
     }
     // 登录成功：home 由 auth.isLoggedIn 驱动切到主界面，本页自动销毁
@@ -89,7 +97,10 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         title: const Text('移除账号'),
         content: Text('移除 ${acc.name ?? '${acc.uin}'}？\n（不影响游戏端账号）'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('移除'),
@@ -118,14 +129,20 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             constraints: const BoxConstraints(maxWidth: 420),
             child: Card(
               elevation: 2,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    Icon(Icons.chat_bubble, size: 48, color: theme.colorScheme.primary),
+                    Icon(
+                      Icons.chat_bubble,
+                      size: 48,
+                      color: theme.colorScheme.primary,
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'MnChat',
@@ -135,8 +152,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     Text(
                       '迷你世界外部聊天 · 选择账号登录',
                       textAlign: TextAlign.center,
-                      style: theme.textTheme.bodySmall
-                          ?.copyWith(color: theme.colorScheme.outline),
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.outline,
+                      ),
                     ),
                     const SizedBox(height: 20),
                     if (!_loaded)
@@ -174,29 +192,50 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       children: [
         if (_accounts.isEmpty) ...[
           const SizedBox(height: 8),
-          Text('还没有保存的账号', textAlign: TextAlign.center, style: theme.textTheme.bodyMedium),
+          Text(
+            '还没有保存的账号',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodyMedium,
+          ),
           const SizedBox(height: 4),
         ] else ...[
           const Text('选择账号', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: 8),
           ..._accounts.map((acc) {
-            final name = acc.name != null && acc.name!.isNotEmpty ? acc.name! : '${acc.uin}';
+            final name = acc.name != null && acc.name!.isNotEmpty
+                ? acc.name!
+                : '${acc.uin}';
             return Card(
               margin: const EdgeInsets.only(bottom: 8),
               elevation: 0,
               color: theme.colorScheme.surfaceContainerHighest,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 2,
+                ),
                 leading: AvatarView(name: name, radius: 20),
-                title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
+                title: RichTextView(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
                 subtitle: Text('迷你号 ${acc.uin}'),
                 trailing: IconButton(
                   tooltip: '移除',
-                  icon: Icon(Icons.delete_outline, size: 20, color: theme.colorScheme.outline),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 20,
+                    color: theme.colorScheme.outline,
+                  ),
                   onPressed: () => _removeAccount(acc),
                 ),
-                onTap: (_busy) ? null : () => _login(acc.uin, acc.password, name: acc.name),
+                onTap: (_busy)
+                    ? null
+                    : () => _login(acc.uin, acc.password, name: acc.name),
               ),
             );
           }),
@@ -221,9 +260,11 @@ class _LoginPageState extends ConsumerState<LoginPage> {
               prefixIcon: Icon(Icons.tag),
             ),
             validator: (v) =>
-                (v == null || v.trim().isEmpty || int.tryParse(v.trim()) == null)
-                    ? '请输入有效的迷你号'
-                    : null,
+                (v == null ||
+                    v.trim().isEmpty ||
+                    int.tryParse(v.trim()) == null)
+                ? '请输入有效的迷你号'
+                : null,
           ),
           const SizedBox(height: 12),
           TextFormField(

@@ -209,6 +209,13 @@ class ChatSession {
   /// 好友关系位掩码（仅好友会话；群为 0）。
   final int relation;
 
+  /// 头像本体 type/id（1=皮肤 3=坐骑 4=立绘）；用于本地渲染头像，无则 null。
+  final int? headType;
+  final int? headId;
+
+  /// 头像框 id（RoleInfo.head_frame_id）。
+  final int? headFrameId;
+
   const ChatSession({
     required this.id,
     required this.type,
@@ -220,6 +227,9 @@ class ChatSession {
     this.unreadCount = 0,
     this.lastReadTime = 0,
     this.relation = 0,
+    this.headType,
+    this.headId,
+    this.headFrameId,
   });
 
   ChatSession copyWith({
@@ -230,6 +240,9 @@ class ChatSession {
     int? lastReadTime,
     String? name,
     int? relation,
+    int? headType,
+    int? headId,
+    int? headFrameId,
   }) =>
       ChatSession(
         id: id,
@@ -242,6 +255,9 @@ class ChatSession {
         unreadCount: unreadCount ?? this.unreadCount,
         lastReadTime: lastReadTime ?? this.lastReadTime,
         relation: relation ?? this.relation,
+        headType: headType ?? this.headType,
+        headId: headId ?? this.headId,
+        headFrameId: headFrameId ?? this.headFrameId,
       );
 
   Map<String, Object?> toJson() => {
@@ -255,6 +271,9 @@ class ChatSession {
         'unread_count': unreadCount,
         'last_read_time': lastReadTime,
         'relation': relation,
+        'head_type': headType,
+        'head_id': headId,
+        'head_frame_id': headFrameId,
       };
 
   factory ChatSession.fromJson(Map<String, Object?> json) => ChatSession(
@@ -273,6 +292,9 @@ class ChatSession {
         unreadCount: (json['unread_count'] as num?)?.toInt() ?? 0,
         lastReadTime: (json['last_read_time'] as num?)?.toInt() ?? 0,
         relation: (json['relation'] as num?)?.toInt() ?? 0,
+        headType: (json['head_type'] as num?)?.toInt(),
+        headId: (json['head_id'] as num?)?.toInt(),
+        headFrameId: (json['head_frame_id'] as num?)?.toInt(),
       );
 }
 
@@ -290,12 +312,22 @@ class Contact {
   /// 成为好友/最近互动时间戳（relation&8 的好友有值，否则 0）。
   final int mark;
 
+  /// 头像本体 type/id（1=皮肤 3=坐骑 4=立绘）；无则 null。
+  final int? headType;
+  final int? headId;
+
+  /// 头像框 id。
+  final int? headFrameId;
+
   const Contact({
     required this.uin,
     required this.nickname,
     this.avatar,
     this.relation = 0,
     this.mark = 0,
+    this.headType,
+    this.headId,
+    this.headFrameId,
   });
 
   /// 是否双向好友（我的好友列表）。
@@ -310,8 +342,16 @@ class Contact {
   /// 是否对方申请我（待处理）。
   bool get isBeApply => (relation & 2) != 0;
 
-  Map<String, Object?> toJson() =>
-      {'uin': uin, 'nickname': nickname, 'avatar': avatar, 'relation': relation, 'mark': mark};
+  Map<String, Object?> toJson() => {
+        'uin': uin,
+        'nickname': nickname,
+        'avatar': avatar,
+        'relation': relation,
+        'mark': mark,
+        'head_type': headType,
+        'head_id': headId,
+        'head_frame_id': headFrameId,
+      };
 
   factory Contact.fromJson(Map<String, Object?> json) => Contact(
         uin: (json['uin'] as num).toInt(),
@@ -319,6 +359,9 @@ class Contact {
         avatar: json['avatar']?.toString(),
         relation: (json['relation'] as num?)?.toInt() ?? 0,
         mark: (json['mark'] as num?)?.toInt() ?? 0,
+        headType: (json['head_type'] as num?)?.toInt(),
+        headId: (json['head_id'] as num?)?.toInt(),
+        headFrameId: (json['head_frame_id'] as num?)?.toInt(),
       );
 }
 

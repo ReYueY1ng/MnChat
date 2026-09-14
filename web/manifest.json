@@ -1,11 +1,11 @@
 {
-    "name": "mnchat",
-    "short_name": "mnchat",
+    "name": "MnChat",
+    "short_name": "MnChat",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#FFFFFF",
+    "theme_color": "#108850",
+    "description": "迷你世界（Mini World）外部聊天客户端",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

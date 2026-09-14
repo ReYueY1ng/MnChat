@@ -16,9 +16,11 @@ import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
 import 'message_center.dart';
+import 'name_rules.dart';
 import 'player_home.dart';
 import 'profile.dart';
 import 'social_sign.dart';
+import 'title_config.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 
 /// 服务状态。
@@ -200,7 +202,11 @@ class ChatService {
       _auth = auth;
       _friend = FriendClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _group = GroupClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
-      _messageCenter = MessageCenterClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _messageCenter = MessageCenterClient(
+        uin: uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+      );
       _socialSign = SocialSignClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _playerHome = PlayerHomeClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _setState(ChatServiceState.connected);
@@ -271,12 +277,13 @@ class ChatService {
       final uins = _contacts.map((c) => c.uin).toList();
       await _probeBuddyMain(uins); // 在线/游玩状态经 chatpush 拉最新
       // 逐个好友补拉离线期间的消息历史（前 N 个会话）
-      final chatted = _friendSessions.values
-          .where((s) => s.lastMessage != null)
-          .toList()
-        ..sort(
-          (a, b) => (b.lastMessage?.time ?? 0).compareTo(a.lastMessage?.time ?? 0),
-        );
+      final chatted =
+          _friendSessions.values.where((s) => s.lastMessage != null).toList()
+            ..sort(
+              (a, b) => (b.lastMessage?.time ?? 0).compareTo(
+                a.lastMessage?.time ?? 0,
+              ),
+            );
       for (final s in chatted.take(20)) {
         try {
           await requestFriendHistory(s.id);
@@ -708,12 +715,13 @@ class ChatService {
   }
 
   /// 关注/取关玩家（cmd=attention_friend）。
-  Future<Map<String, Object?>> followPlayer(int desUin,
-      {required bool follow}) async {
+  Future<Map<String, Object?>> followPlayer(
+    int desUin, {
+    required bool follow,
+  }) async {
     final friend = _friend;
     if (friend == null) throw StateError('not logged in');
-    final resp =
-        await friend.attentionFriend(desUin, follow: follow);
+    final resp = await friend.attentionFriend(desUin, follow: follow);
     await loadSessions(); // 关系变化后刷新（关注列表会出现在好友里）
     return resp;
   }
@@ -885,17 +893,28 @@ class ChatService {
             _friendSessions[r.uin] = ChatSession(
               id: r.uin,
               type: ChatSessionType.friend,
-              name: r.nickname.isNotEmpty ? r.nickname : '$r.uin',
+              // 缓存昵称可能为空、或被历史插值 bug 写坏成 FriendRecord(...)，
+              // 统一净化（见 friendDisplayName），否则坏名字会直接显示出来。
+              name: friendDisplayName(r.nickname, r.uin),
               avatar: r.avatar,
               isOnline: r.isOnline,
               gameStatus: r.gameStatus,
               relation: r.relation,
             );
           } else {
+            // 净化缓存昵称与已有会话名：空值 / 被写坏的 FriendRecord(...) 都
+            // 视为无名字，优先沿用已有会话名，最后回退迷你号。
+            final uinText = '${r.uin}';
+            final cachedName = friendDisplayName(r.nickname, r.uin);
+            final prevName = friendDisplayName(existing.name, r.uin);
             _friendSessions[r.uin] = ChatSession(
               id: existing.id,
               type: existing.type,
-              name: r.nickname.isNotEmpty ? r.nickname : existing.name,
+              // cachedName 已净化：等于迷你号即表示缓存里没有有效昵称，
+              // 此时优先沿用已有会话名（可能来自服务端），最后才回退迷你号。
+              name: cachedName != uinText
+                  ? cachedName
+                  : (prevName != uinText ? prevName : uinText),
               avatar: r.avatar ?? existing.avatar,
               isOnline: r.isOnline,
               gameStatus: r.gameStatus,
@@ -903,6 +922,10 @@ class ChatService {
               unreadCount: existing.unreadCount,
               lastReadTime: existing.lastReadTime,
               relation: r.relation,
+              // 离线缓存里没有 head 字段（表未存），但内存中的旧值要保留。
+              headType: existing.headType,
+              headId: existing.headId,
+              headFrameId: existing.headFrameId,
             );
           }
         }
@@ -925,9 +948,7 @@ class ChatService {
       // 已聊过的好友会话不因刷新而消失：合并而不是全量清空重建。
       // 之前每次刷新 clear 后重建（无 lastMessage），会话列表短暂消失，
       // 直到历史请求逐个回填才恢复 —— 表现为"聊过的人闪现后消失"。
-      final oldContacts = <int, Contact>{
-        for (final c in _contacts) c.uin: c,
-      };
+      final oldContacts = <int, Contact>{for (final c in _contacts) c.uin: c};
       final oldSessions = <int, ChatSession>{..._friendSessions};
       final newContacts = <Contact>[];
       final newSessions = <int, ChatSession>{};
@@ -964,8 +985,9 @@ class ChatService {
         final oldContact = oldContacts[uin2];
         final nickname = _friendNickname(m);
         // 昵称/头像优先保留旧值（离线缓存/资料拉取已有），新列表给的可覆盖
-        final keepName =
-            nickname.isNotEmpty ? nickname : (oldSession?.name ?? '$uin2');
+        final keepName = nickname.isNotEmpty
+            ? nickname
+            : (oldSession?.name ?? '$uin2');
         // 保留聊天状态（最后消息/未读/已读时间），不清零
         final merged = ChatSession(
           id: uin2,
@@ -978,6 +1000,11 @@ class ChatService {
           lastMessage: oldSession?.lastMessage,
           unreadCount: oldSession?.unreadCount ?? 0,
           lastReadTime: oldSession?.lastReadTime ?? 0,
+          // 头像本体/头像框只在资料拉取时才有，必须透传旧值，
+          // 否则每次好友列表刷新都会把它们清掉（表现为"头像框不显示"）。
+          headType: oldSession?.headType,
+          headId: oldSession?.headId,
+          headFrameId: oldSession?.headFrameId,
         );
         newSessions[uin2] = merged;
         // 昵称以会话名为准（getProfileBatch3 回填到 session.name）
@@ -991,6 +1018,9 @@ class ChatService {
             avatar: oldContact?.avatar ?? merged.avatar,
             relation: relation,
             mark: mark,
+            headType: oldContact?.headType,
+            headId: oldContact?.headId,
+            headFrameId: oldContact?.headFrameId,
           ),
         );
       }
@@ -1001,7 +1031,8 @@ class ChatService {
       oldSessions.forEach((uin2, s) {
         if (seen.contains(uin2)) return;
         if (s.lastMessage == null &&
-            (_messagesCache[_sessionKey(ChatSessionType.friend, uin2)]?.isEmpty ??
+            (_messagesCache[_sessionKey(ChatSessionType.friend, uin2)]
+                    ?.isEmpty ??
                 true)) {
           _friendSessions.remove(uin2);
         } else {
@@ -1127,7 +1158,9 @@ class ChatService {
         }
       }
     }
-    if (direct != null && direct.toString().isNotEmpty) return direct.toString();
+    if (direct != null && direct.toString().isNotEmpty) {
+      return direct.toString();
+    }
     return null;
   }
 
@@ -1174,27 +1207,51 @@ class ChatService {
     var updated = false;
     await _fetchProfiles(
       uins,
-      onProfile: (p, diyAvatar) {
+      onProfile: (p, head) {
         final s = _friendSessions[p.uin];
         if (s == null) return;
         _friendSessions[p.uin] = ChatSession(
           id: s.id,
           type: s.type,
           name: p.nickname.isNotEmpty ? p.nickname : s.name,
-          avatar: diyAvatar ?? p.avatarUrl ?? s.avatar,
+          avatar: head?.diyUrl ?? p.avatarUrl ?? s.avatar,
           isOnline: s.isOnline, // 保留好友列表已有的在线状态
           gameStatus: s.gameStatus,
           lastMessage: s.lastMessage,
           unreadCount: s.unreadCount,
           lastReadTime: s.lastReadTime,
           relation: s.relation,
+          headType: head?.type ?? s.headType,
+          headId: head?.id ?? s.headId,
+          headFrameId: p.headFrameId ?? s.headFrameId,
         );
+        _updateContactHead(p.uin, head, p.headFrameId);
         updated = true;
       },
     );
     if (updated) {
       _emitSessionSnapshot();
       await _saveFriendCache(); // 头像/昵称更新持久化
+    }
+  }
+
+  /// 同步联系人（好友页数据源）的头像信息（DIY url + 头像本体 + 头像框）。
+  void _updateContactHead(int uin, HeadSlot? head, int? headFrameId) {
+    if (head == null && headFrameId == null) return;
+    for (var i = 0; i < _contacts.length; i++) {
+      final c = _contacts[i];
+      if (c.uin != uin) continue;
+      _contacts[i] = Contact(
+        uin: c.uin,
+        nickname: c.nickname,
+        avatar: head?.diyUrl ?? c.avatar,
+        relation: c.relation,
+        mark: c.mark,
+        headType: head?.type ?? c.headType,
+        headId: head?.id ?? c.headId,
+        headFrameId: headFrameId ?? c.headFrameId,
+      );
+      return;
     }
   }
 
@@ -1205,20 +1262,20 @@ class ChatService {
   /// 由调用方决定是否降级。
   Future<void> _fetchProfiles(
     List<int> uins, {
-    required void Function(PlayerProfile p, String? diyAvatar) onProfile,
+    required void Function(PlayerProfile p, HeadSlot? head) onProfile,
   }) async {
     final auth = _auth;
     if (auth == null || uins.isEmpty) return;
     try {
       final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
-      // ① 先拉 DIY 自定义头像（游戏主界面头像来源）
-      final diyAvatars = await profile.getPersonCenterHeadInfo(uins);
+      // ① 先拉头像槽位（DIY 自定义头像 + 头像本体 type/id）
+      final heads = await profile.getPersonCenterHeadInfos(uins);
       // ② 再拉普通资料（昵称 + header3/2/1 兜底头像），按 20 个一批
       for (var i = 0; i < uins.length; i += 20) {
         final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
         final infos = await profile.getProfileBatch3(batch);
         for (final p in infos) {
-          onProfile(p, diyAvatars[p.uin]);
+          onProfile(p, heads[p.uin]);
         }
       }
     } catch (e) {
@@ -1327,13 +1384,16 @@ class ChatService {
     if (uins.isEmpty) return;
     await _fetchProfiles(
       uins,
-      onProfile: (p, diyAvatar) {
+      onProfile: (p, head) {
         final member = _groupMemberProfiles[gid];
         if (member == null) return;
         member[p.uin] = PlayerProfile(
           uin: p.uin,
           nickname: p.nickname,
-          avatarUrl: diyAvatar ?? p.avatarUrl,
+          avatarUrl: head?.diyUrl ?? p.avatarUrl,
+          headType: head?.type,
+          headId: head?.id,
+          headFrameId: p.headFrameId,
         );
       },
     );
@@ -1455,7 +1515,9 @@ class ChatService {
     _persistHistory(type, id, sorted);
     // 回填会话摘要（最后一条消息）：否则网络历史拉回后会话列表
     // 不显示最近消息，也无法区分"已聊过"与"纯好友"。
-    final map = type == ChatSessionType.friend ? _friendSessions : _groupSessions;
+    final map = type == ChatSessionType.friend
+        ? _friendSessions
+        : _groupSessions;
     final existing = map[id];
     if (existing != null) {
       map[id] = existing.copyWith(lastMessage: sorted.last);
@@ -1486,7 +1548,12 @@ class ChatService {
     await db.replaceMessages(
       owner,
       key,
-      msgs.map((m) => chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner)).toList(),
+      msgs
+          .map(
+            (m) =>
+                chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner),
+          )
+          .toList(),
     );
   }
 
@@ -1511,6 +1578,88 @@ class ChatService {
     }
     _persistSession(type, id);
     _emitSessionSnapshot();
+  }
+
+  // ── 个人资料 ──────────────────────────────────────────────────────────
+
+  /// 修改当前账号昵称。
+  ///
+  /// 对齐反编译 `AccountManager:requestModifyRole`：
+  /// `remote_call("baseinfo", "rename", name, forfree, useChangeCard)`。
+  /// [useChangeCard] 为"改名卡"分支（有卡则免费）；返回业务码：
+  /// `0` 成功，其余见 [renameErrorText]。
+  ///
+  /// 注意：改名会真实作用于游戏账号，可能消耗迷你币并进入审核。
+  Future<int> renameSelf(String newName, {bool useChangeCard = false}) async {
+    final conn = _conn;
+    if (conn == null) return 20; // NOT_YET：未连接
+    final r = await conn.sendRpc('baseinfo', 'rename', [
+      newName,
+      useChangeCard,
+      useChangeCard,
+    ], timeout: const Duration(seconds: 12));
+    final code = extractRpcCode(code: r.code, result: r.result);
+    if (code == 0) applyLocalNickname(newName);
+    return code;
+  }
+
+  /// 改名成功后本地更新当前账号昵称，并广播状态让 UI（设置页/账号信息）刷新。
+  /// [MiniAuth] 不可变，故整体替换。
+  void applyLocalNickname(String name) {
+    final a = _auth;
+    if (a == null) return;
+    _auth = a.copyWith(name: name);
+    _emitSessionSnapshot();
+    _setState(_state);
+  }
+
+  /// 拉取某玩家的冒险家等级（`mini_season` get_other_player_score）。
+  Future<Map<String, Object?>?> otherPlayerScore(int uin) async {
+    final a = _auth;
+    if (a == null) return null;
+    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    return client.getOtherPlayerScore(uin);
+  }
+
+  /// 拉取玩家主页数据（get_user_homepage，默认模块）。
+  Future<Map<String, Object?>?> userHomepage(int uin) async {
+    final a = _auth;
+    if (a == null) return null;
+    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    return client.getUserHomepage(uin);
+  }
+
+  /// 拉取角色等级（miniw/upgrade get_level_info_batch）。无则返回 0。
+  Future<int> platformLevel(int uin) async {
+    final a = _auth;
+    if (a == null) return 0;
+    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    final map = await client.getPlatformLevels([uin]);
+    return map[uin] ?? 0;
+  }
+
+  /// 称号名称（远程 visual-cfg `title_manager`，进程内缓存）。无则 null。
+  Future<String?> titleName(int titleId) async {
+    final id = titleId;
+    if (id <= 0) return null;
+    return _titleConfigClient.titleName(id);
+  }
+
+  static final TitleConfigClient _titleConfigClient = TitleConfigClient();
+
+  /// 删除好友（对齐反编译 `buddysvr.buddy_rm`，参数 uin）。成功返回 true。
+  Future<bool> removeFriend(int uin) async {
+    final conn = _conn;
+    if (conn == null) return false;
+    final r = await conn.sendRpc('buddysvr', 'buddy_rm', [uin]);
+    final code = extractRpcCode(code: r.code, result: r.result);
+    if (code == 0) {
+      _friendSessions.remove(uin);
+      _contacts.removeWhere((c) => c.uin == uin);
+      _emitSessionSnapshot();
+      await _saveFriendCache();
+    }
+    return code == 0;
   }
 
   // ── 清理 ──────────────────────────────────────────────────────────────

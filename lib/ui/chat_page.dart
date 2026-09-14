@@ -10,9 +10,12 @@ import '../core/emoticon.dart' show EmoticonImage;
 import '../core/models/messages.dart';
 import '../core/services/dynamics.dart' show DynamicsClient;
 import '../core/services/rich_media.dart' show RichMedia;
+import '../core/storage/settings_store.dart' show SettingsKeys;
 import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'group_detail_page.dart';
+import 'theme/app_tokens.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 聊天窗口（右侧）。
 class ChatPage extends ConsumerStatefulWidget {
@@ -51,13 +54,33 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.initState();
     _bridge = ref.read(chatBridgeProvider);
     _controller = _bridge.controllerFor(widget.type, widget.sessionId);
-    // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）
-    ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
+    // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）；
+    // 由「进入会话自动已读」设置控制（默认开启，关闭后保留未读状态）。
+    // 测试环境可能未注入 databaseProvider → 回退为直接标记已读。
+    try {
+      ref
+          .read(settingsProvider)
+          .getBool(SettingsKeys.autoMarkRead, fallback: true)
+          .then((auto) {
+            if (auto && mounted) {
+              ref
+                  .read(chatServiceProvider)
+                  .markRead(widget.type, widget.sessionId);
+            }
+          })
+          .catchError((Object _) {});
+    } catch (_) {
+      ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
+    }
     // 加载快捷短语（用户可增删；失败/无存储环境保持默认，如 widget 测试）
     try {
-      ref.read(settingsProvider).quickPhrases().then((list) {
-        if (mounted) setState(() => _phrases = list);
-      }).catchError((Object _) {});
+      ref
+          .read(settingsProvider)
+          .quickPhrases()
+          .then((list) {
+            if (mounted) setState(() => _phrases = list);
+          })
+          .catchError((Object _) {});
     } catch (_) {
       // ProviderContainer 未注入 databaseProvider（如单元测试）→ 用默认短语
     }
@@ -84,6 +107,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   @override
   Widget build(BuildContext context) {
     final myUin = ref.watch(myUinProvider);
+    // 聊天字号缩放与"回车发送"开关：设置页修改后此处即时重建生效。
+    final chatFontScale = ref.watch(chatFontScaleProvider);
+    final sendOnEnter = ref.watch(sendOnEnterProvider);
     final displayName = widget.name.isEmpty
         ? (widget.type == ChatSessionType.group ? '群' : '好友')
         : widget.name;
@@ -115,7 +141,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                   ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
+                    child: RichTextView(
                       displayName,
                       style: const TextStyle(
                         fontSize: 18,
@@ -148,51 +174,78 @@ class _ChatPageState extends ConsumerState<ChatPage> {
         const Divider(height: 1),
         // 消息列表 + 输入区（flutter_chat_ui Chat 组件）
         Expanded(
-          child: Chat(
-            chatController: _controller,
-            currentUserId: myUin.toString(),
-            resolveUser: _resolveUser,
-            onMessageSend: _send,
-            theme: ChatTheme.fromThemeData(Theme.of(context)),
-            builders: Builders(
-              textMessageBuilder:
-                  (
-                    context,
-                    message,
-                    index, {
-                    required isSentByMe,
-                    groupStatus,
-                  }) => _InlineEmojiBubble(
-                    message: message,
-                    isSentByMe: isSentByMe,
+          child: Stack(
+            children: [
+              Chat(
+                chatController: _controller,
+                currentUserId: myUin.toString(),
+                resolveUser: _resolveUser,
+                onMessageSend: _send,
+                theme: ChatTheme.fromThemeData(Theme.of(context)),
+                builders: Builders(
+                  textMessageBuilder:
+                      (
+                        context,
+                        message,
+                        index, {
+                        required isSentByMe,
+                        groupStatus,
+                      }) => _InlineEmojiBubble(
+                        message: message,
+                        isSentByMe: isSentByMe,
+                      ),
+                  customMessageBuilder:
+                      (
+                        context,
+                        message,
+                        index, {
+                        required isSentByMe,
+                        groupStatus,
+                      }) => _RichMediaBubble(
+                        message: message,
+                        isSentByMe: isSentByMe,
+                        onOpenDynamics: widget.type == ChatSessionType.friend
+                            ? _openSharedDynamics
+                            : null,
+                      ),
+                  composerBuilder: (context) => Composer(
+                    textEditingController: _composerController,
+                    hintText: '输入消息…',
+                    // 桌面端回车发送：true 时 Enter 发送、Shift+Enter 换行；
+                    // false 时 Enter 换行（均交由 Composer 内部键盘处理，复用其
+                    // 已有的 onMessageSend 回调，避免自建第二套发送逻辑）。
+                    sendOnEnter: sendOnEnter,
+                    sendButtonVisibilityMode: SendButtonVisibilityMode.disabled,
+                    // 用 topWidget 承载快捷短语 + emoji/图片/礼物工具栏（不能包 Column，
+                    // 否则破坏 flutter_chat_ui 内部 Positioned 与 Stack 的父子关系）。
+                    topWidget: _ComposerBar(
+                      onInsert: _insertText,
+                      phrases: _phrases,
+                    ),
                   ),
-              customMessageBuilder:
-                  (
-                    context,
-                    message,
-                    index, {
-                    required isSentByMe,
-                    groupStatus,
-                  }) => _RichMediaBubble(
-                    message: message,
-                    isSentByMe: isSentByMe,
-                    onOpenDynamics: widget.type == ChatSessionType.friend
-                        ? _openSharedDynamics
-                        : null,
+                  // 仅对消息列表套用字号缩放：包住 ChatAnimatedList 而非整个 Chat，
+                  // 这样输入框、快捷短语与工具栏（Composer 在 Stack 中独立于列表）
+                  // 不会被连带缩放，保证输入不受影响。
+                  chatAnimatedListBuilder: (context, itemBuilder) => MediaQuery(
+                    data: MediaQuery.of(context).copyWith(
+                      textScaler: TextScaler.linear(chatFontScale),
+                    ),
+                    child: ChatAnimatedList(itemBuilder: itemBuilder),
                   ),
-              composerBuilder: (context) => Composer(
-                textEditingController: _composerController,
-                hintText: '输入消息…',
-                sendButtonVisibilityMode: SendButtonVisibilityMode.disabled,
-                // 用 topWidget 承载快捷短语 + emoji/图片/礼物工具栏（不能包 Column，
-                // 否则破坏 flutter_chat_ui 内部 Positioned 与 Stack 的父子关系）。
-                topWidget: _ComposerBar(
-                  onInsert: _insertText,
-                  phrases: _phrases,
+                  linkPreviewBuilder: (context, message, isSentByMe) => null,
                 ),
               ),
-              linkPreviewBuilder: (context, message, isSentByMe) => null,
-            ),
+              // 空状态中文化：flutter_chat_ui 内置文案为英文 "No messages yet"
+              // 且未暴露覆写参数 → 用同色遮罩覆盖并显示中文空态。
+              Positioned.fill(
+                child: StreamBuilder<void>(
+                  stream: _controller.operationsStream,
+                  builder: (context, _) => _controller.messages.isEmpty
+                      ? _EmptyChatState(onSayHi: () => _insertText('嗨~'))
+                      : const SizedBox.shrink(),
+                ),
+              ),
+            ],
           ),
         ),
       ],
@@ -248,10 +301,14 @@ class _ChatPageState extends ConsumerState<ChatPage> {
       service.addLocalMessage(widget.type, widget.sessionId, trimmed);
     } catch (e) {
       if (mounted) {
+        final scheme = Theme.of(context).colorScheme;
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('发送失败: $e'),
-            backgroundColor: Colors.red.shade400,
+            content: Text(
+              '发送失败: $e',
+              style: TextStyle(color: scheme.onError),
+            ),
+            backgroundColor: scheme.error,
           ),
         );
       }
@@ -266,18 +323,69 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     try {
       final post = await client.fetchPost(pid);
       if (!mounted || post == null) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DynamicsDetailPage(post: post),
-        ),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => DynamicsDetailPage(post: post)));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('动态加载失败: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('动态加载失败: $e')));
       }
     }
+  }
+}
+
+/// 中文空状态：覆盖 flutter_chat_ui 内置的英文 "No messages yet"。
+class _EmptyChatState extends StatelessWidget {
+  final VoidCallback onSayHi;
+
+  const _EmptyChatState({required this.onSayHi});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.colorScheme.surface,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.forum_outlined,
+                color: theme.colorScheme.onPrimaryContainer,
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text(
+              '暂无消息，打个招呼吧 👋',
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '发送第一条消息，开启你们的冒险',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
+            ),
+            const SizedBox(height: 14),
+            OutlinedButton.icon(
+              onPressed: onSayHi,
+              icon: const Icon(Icons.waving_hand_outlined, size: 16),
+              label: const Text('打个招呼'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -457,42 +565,22 @@ class _InlineEmojiBubble extends StatelessWidget {
                   ),
                 ),
               const SizedBox(height: 2),
-              Text.rich(TextSpan(children: _spans(raw, theme))),
+              // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
+              // @提及 等（见 rich_text_view.dart）。
+              Text.rich(
+                TextSpan(
+                  children: buildRichSpans(
+                    raw,
+                    context: context,
+                    emojiSize: 20,
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
     );
-  }
-
-  List<InlineSpan> _spans(String raw, ThemeData theme) {
-    final spans = <InlineSpan>[];
-    // 匹配表情码 #A1xx / #A3xx 或 @提及。
-    final re = RegExp(r'#A\d{3}|@[^\s]+');
-    var pos = 0;
-    for (final m in re.allMatches(raw)) {
-      if (m.start > pos) spans.add(TextSpan(text: raw.substring(pos, m.start)));
-      final tok = m.group(0)!;
-      if (kGameEmojiCodes.contains(tok)) {
-        spans.add(
-          WidgetSpan(
-            alignment: PlaceholderAlignment.middle,
-            child: EmoticonImage(code: tok, size: 20),
-          ),
-        );
-      } else {
-        // @提及 → 主题色高亮
-        spans.add(
-          TextSpan(
-            text: tok,
-            style: TextStyle(color: theme.colorScheme.primary),
-          ),
-        );
-      }
-      pos = m.end;
-    }
-    if (pos < raw.length) spans.add(TextSpan(text: raw.substring(pos)));
-    return spans;
   }
 }
 
@@ -544,7 +632,11 @@ class _RichMediaBubble extends StatelessWidget {
                 : theme.colorScheme.surfaceContainerHighest,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: media == null ? _plainText(theme) : _card(context, media, theme),
+          child: media == null
+              ? _plainText(theme)
+              : (media.isMap || media.isRoomInvite)
+              ? _mapCard(context, media, theme)
+              : _card(context, media, theme),
         ),
       ),
     );
@@ -555,15 +647,17 @@ class _RichMediaBubble extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.all(10),
       child: Column(
-        crossAxisAlignment:
-            isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: isSentByMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
           if (message.createdAt != null)
             Text(
               _fmtFullTime(message.createdAt!.toLocal()),
-              style: theme.textTheme.labelSmall
-                  ?.copyWith(color: theme.colorScheme.outline),
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
             ),
           const SizedBox(height: 2),
           Text(
@@ -575,51 +669,140 @@ class _RichMediaBubble extends StatelessWidget {
     );
   }
 
-  Widget _card(BuildContext context, RichMedia media, ThemeData theme) {
+  /// 地图 / 房间分享：两列卡（缩略图 + 标题 + 说明 + 标签），对齐游戏样式。
+  Widget _mapCard(BuildContext context, RichMedia media, ThemeData theme) {
+    final isRoom = media.isRoomInvite;
+    final title = isRoom
+        ? (media.roomName.isNotEmpty ? media.roomName : '房间邀请')
+        : (media.name.isNotEmpty ? media.name : '地图分享');
+    final desc = isRoom ? '邀请你一起玩 · 需在游戏内加入房间' : '邀请你一起玩 · 发现一个好玩的地图，快来一起吧';
     return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: media.isDynamicNotice || media.isDynamics
-          ? (media.pid.isNotEmpty && onOpenDynamics != null
-              ? () => onOpenDynamics!(media.pid)
-              : null)
-          : media.isRedPacket
-              ? () {
-                  // 外部客户端无支付流，无法领取红包；仅提示。
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('红包需在游戏内领取')),
-                  );
-                }
-              : media.isRoomInvite
-                  ? () {
-                      // 外部客户端无法进入游戏房间；展示房间信息。
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}'
-                            '（需在游戏内加入）',
-                          ),
-                        ),
-                      );
-                    }
-                  : null,
+      borderRadius: AppRadius.inputR,
+      onTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(isRoom ? '房间需在游戏内加入' : '地图需在游戏内打开')),
+        );
+      },
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
-          crossAxisAlignment:
-              isSentByMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
             if (message.createdAt != null)
               Text(
                 _fmtFullTime(message.createdAt!.toLocal()),
-                style: theme.textTheme.labelSmall
-                    ?.copyWith(color: theme.colorScheme.outline),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Container(
+                  width: 76,
+                  height: 58,
+                  decoration: BoxDecoration(
+                    borderRadius: AppRadius.inputR,
+                    color: theme.colorScheme.primaryContainer,
+                  ),
+                  child: Icon(
+                    isRoom ? Icons.meeting_room_outlined : Icons.map_outlined,
+                    color: theme.colorScheme.onPrimaryContainer,
+                    size: 22,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        desc,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isRoom ? '房间' : '地图',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card(BuildContext context, RichMedia media, ThemeData theme) {
+    return InkWell(
+      borderRadius: BorderRadius.circular(12),
+      onTap: media.isDynamicNotice || media.isDynamics
+          ? (media.pid.isNotEmpty && onOpenDynamics != null
+                ? () => onOpenDynamics!(media.pid)
+                : null)
+          : media.isRedPacket
+          ? () {
+              // 外部客户端无支付流，无法领取红包；仅提示。
+              ScaffoldMessenger.of(context)
+                  .showSnackBar(const SnackBar(content: Text('红包需在游戏内领取')));
+            }
+          : media.isRoomInvite
+          ? () {
+              // 外部客户端无法进入游戏房间；展示房间信息。
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(
+                    '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}'
+                    '（需在游戏内加入）',
+                  ),
+                ),
+              );
+            }
+          : null,
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(
+          crossAxisAlignment: isSentByMe
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (message.createdAt != null)
+              Text(
+                _fmtFullTime(message.createdAt!.toLocal()),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
               ),
             const SizedBox(height: 4),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(_iconFor(media), size: 18, color: theme.colorScheme.primary),
+                Icon(
+                  _iconFor(media),
+                  size: 18,
+                  color: theme.colorScheme.primary,
+                ),
                 const SizedBox(width: 6),
                 Text(
                   media.title,
@@ -657,16 +840,18 @@ class _RichMediaBubble extends StatelessWidget {
                 media.name,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium
-                    ?.copyWith(fontWeight: FontWeight.w500),
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             if (media.author.isNotEmpty)
               Text(
                 '作者: ${media.author}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.outline),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
               ),
             if (media.content.isNotEmpty)
               Text(

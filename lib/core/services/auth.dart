@@ -26,6 +26,10 @@ class MiniAuth {
   final String s2t;
   final String jwt;
 
+  /// 已拥有皮肤 id 集合（login `baseinfo.BillDataSvr.RoleSkinInfo`）。
+  /// 头像编辑时用于列出可选皮肤头像；空集表示未取到（不等于无皮肤）。
+  final Set<int> ownedSkinIds;
+
   const MiniAuth({
     required this.uin,
     required this.apiId,
@@ -33,7 +37,19 @@ class MiniAuth {
     required this.s2,
     required this.s2t,
     required this.jwt,
+    this.ownedSkinIds = const {},
   });
+
+  /// 复制并可选替换昵称（改名成功后本地更新用）。
+  MiniAuth copyWith({String? name}) => MiniAuth(
+    uin: uin,
+    apiId: apiId,
+    name: name ?? this.name,
+    s2: s2,
+    s2t: s2t,
+    jwt: jwt,
+    ownedSkinIds: ownedSkinIds,
+  );
 
   Map<String, Object?> toJson() => {
     'uin': uin,
@@ -42,6 +58,7 @@ class MiniAuth {
     's2': s2,
     's2t': s2t,
     'jwt': jwt,
+    'owned_skins': ownedSkinIds.toList(),
   };
 
   factory MiniAuth.fromJson(Map<String, Object?> json) => MiniAuth(
@@ -51,6 +68,10 @@ class MiniAuth {
     s2: json['s2'] as String? ?? '',
     s2t: json['s2t'] as String? ?? '',
     jwt: json['jwt'] as String? ?? '',
+    ownedSkinIds: {
+      for (final v in (json['owned_skins'] as List? ?? const []))
+        if (v is num) v.toInt(),
+    },
   );
 }
 
@@ -145,9 +166,28 @@ class LoginClient {
         s2: s2,
         s2t: s2t,
         jwt: authinfo['token'] as String? ?? '',
+        ownedSkinIds: _parseOwnedSkins(baseinfo),
       );
     }
     throw MiniAuthError('Login failed with code $code: ${data['msg']}');
+  }
+
+  /// 解析登录 `baseinfo.BillDataSvr.RoleSkinInfo` → 已拥有皮肤 id 集合。
+  static Set<int> _parseOwnedSkins(Map<String, Object?> baseinfo) {
+    final out = <int>{};
+    final bill = baseinfo['BillDataSvr'];
+    if (bill is Map) {
+      final list = bill['RoleSkinInfo'];
+      if (list is List) {
+        for (final e in list) {
+          if (e is Map) {
+            final sid = e['SkinID'];
+            if (sid is num) out.add(sid.toInt());
+          }
+        }
+      }
+    }
+    return out;
   }
 }
 

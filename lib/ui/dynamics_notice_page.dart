@@ -14,6 +14,7 @@ import '../core/services/dynamics.dart';
 import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/rich_text_view.dart';
 
 class DynamicsNoticePage extends ConsumerStatefulWidget {
   const DynamicsNoticePage({super.key});
@@ -90,16 +91,13 @@ class _DynamicsNoticePageState extends ConsumerState<DynamicsNoticePage>
     try {
       final post = await client.fetchPost(n.pid);
       if (!mounted || post == null) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => DynamicsDetailPage(post: post),
-        ),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => DynamicsDetailPage(post: post)));
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('动态加载失败: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('动态加载失败: $e')));
       }
     }
   }
@@ -113,15 +111,14 @@ class _DynamicsNoticePageState extends ConsumerState<DynamicsNoticePage>
           controller: _tab,
           isScrollable: true,
           tabs: [
-            for (final c in _channels) Tab(text: DynamicsNoticeChannel.label(c)),
+            for (final c in _channels)
+              Tab(text: DynamicsNoticeChannel.label(c)),
           ],
         ),
       ),
       body: TabBarView(
         controller: _tab,
-        children: [
-          for (final c in _channels) _buildChannel(c),
-        ],
+        children: [for (final c in _channels) _buildChannel(c)],
       ),
     );
   }
@@ -173,7 +170,7 @@ class _DynamicsNoticePageState extends ConsumerState<DynamicsNoticePage>
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
-            subtitle: Text('$name · ${_fmtTime(n.time)}'),
+            subtitle: RichTextView('$name · ${_fmtTime(n.time)}'),
             trailing: n.pid.isNotEmpty
                 ? const Icon(Icons.chevron_right, size: 18)
                 : null,

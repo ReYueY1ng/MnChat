@@ -37,13 +37,14 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return Scaffold(
-      backgroundColor: Colors.black,
+      backgroundColor: cs.surface,
       appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
+        backgroundColor: cs.surface,
+        foregroundColor: cs.onSurface,
         title: Text('${_index + 1}/${widget.urls.length}'),
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: IconThemeData(color: cs.onSurface),
       ),
       body: PageView.builder(
         controller: _controller,
@@ -54,7 +55,7 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
           child: InteractiveViewer(
             child: Center(
               child: Image.network(widget.urls[i], fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const Icon(Icons.broken_image, color: Colors.white, size: 48),
+                  errorBuilder: (_, _, _) => Icon(Icons.broken_image, color: cs.onSurface, size: 48),
                   loadingBuilder: (c, w, p) => p == null ? w : const Center(child: CircularProgressIndicator())),
             ),
           ),

@@ -1,0 +1,146 @@
+
+33228.png
+size: 688,564
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+1_00000
+  rotate: true
+  xy: 550, 149
+  size: 134, 132
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+1_00002
+  rotate: true
+  xy: 551, 289
+  size: 134, 132
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+1_00004
+  rotate: false
+  xy: 415, 285
+  size: 134, 135
+  orig: 140, 140
+  offset: 4, 4
+  index: -1
+1_00006
+  rotate: false
+  xy: 416, 425
+  size: 134, 135
+  orig: 140, 140
+  offset: 4, 4
+  index: -1
+1_00008
+  rotate: false
+  xy: 414, 7
+  size: 135, 135
+  orig: 140, 140
+  offset: 2, 4
+  index: -1
+1_00010
+  rotate: true
+  xy: 140, 2
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00012
+  rotate: true
+  xy: 142, 422
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00014
+  rotate: true
+  xy: 142, 282
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00016
+  rotate: true
+  xy: 142, 142
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00018
+  rotate: true
+  xy: 277, 2
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00020
+  rotate: true
+  xy: 279, 422
+  size: 138, 135
+  orig: 140, 140
+  offset: 1, 4
+  index: -1
+1_00022
+  rotate: false
+  xy: 2, 422
+  size: 138, 138
+  orig: 140, 140
+  offset: 1, 1
+  index: -1
+1_00024
+  rotate: false
+  xy: 2, 282
+  size: 138, 138
+  orig: 140, 140
+  offset: 1, 1
+  index: -1
+1_00026
+  rotate: false
+  xy: 2, 142
+  size: 138, 138
+  orig: 140, 140
+  offset: 1, 1
+  index: -1
+1_00028
+  rotate: false
+  xy: 2, 3
+  size: 136, 137
+  orig: 140, 140
+  offset: 3, 1
+  index: -1
+1_00030
+  rotate: false
+  xy: 279, 283
+  size: 134, 137
+  orig: 140, 140
+  offset: 5, 1
+  index: -1
+1_00032
+  rotate: false
+  xy: 279, 144
+  size: 134, 137
+  orig: 140, 140
+  offset: 4, 1
+  index: -1
+1_00034
+  rotate: false
+  xy: 415, 150
+  size: 133, 133
+  orig: 140, 140
+  offset: 4, 4
+  index: -1
+1_00036
+  rotate: true
+  xy: 551, 14
+  size: 133, 132
+  orig: 140, 140
+  offset: 3, 4
+  index: -1
+1_00038
+  rotate: true
+  xy: 552, 426
+  size: 134, 132
+  orig: 140, 140
+  offset: 3, 4
+  index: -1

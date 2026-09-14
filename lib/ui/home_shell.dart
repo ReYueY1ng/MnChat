@@ -8,6 +8,8 @@ import 'chat_page.dart';
 import 'dynamics_page.dart';
 import 'friends_page.dart';
 import 'session_list_page.dart';
+import 'theme/app_tokens.dart';
+import 'widgets/account_menu.dart';
 
 /// 主界面：会话 / 好友 / 动态 三入口。
 ///
@@ -33,8 +35,17 @@ class _MainShellState extends ConsumerState<MainShell> {
   @override
   void initState() {
     super.initState();
-    // 进入主界面后启动后台前台服务（保活收推送）
-    NativeBridge.startBackgroundService();
+    // 按设置启停后台前台服务（保活收推送），并监听设置变化即时生效
+    _applyKeepAlive(ref.read(keepAliveProvider));
+    ref.listenManual(keepAliveProvider, (_, next) => _applyKeepAlive(next));
+  }
+
+  void _applyKeepAlive(bool enabled) {
+    if (enabled) {
+      NativeBridge.startBackgroundService();
+    } else {
+      NativeBridge.stopBackgroundService();
+    }
   }
 
   void _switchTab(int index) {
@@ -157,6 +168,18 @@ class _MainShellState extends ConsumerState<MainShell> {
       selectedIndex: _tab,
       onDestinationSelected: _switchTab,
       labelType: NavigationRailLabelType.all,
+      // 账号头像固定在侧栏顶部（点击弹出账号菜单）。
+      leading: const Padding(
+        padding: EdgeInsets.only(top: AppSpacing.sm),
+        child: AccountAvatarButton(),
+      ),
+      // 菜单按钮固定在侧栏底部，与顶部头像打开同一菜单（QQ/微信 风格）。
+      // 与顶部头像对称加 AppSpacing.sm 底部留白，避免按钮贴住窗口底边。
+      trailing: const Padding(
+        padding: EdgeInsets.only(bottom: AppSpacing.sm),
+        child: AccountMenuButton(),
+      ),
+      trailingAtBottom: true,
       destinations: const [
         NavigationRailDestination(
           icon: Icon(Icons.forum_outlined),

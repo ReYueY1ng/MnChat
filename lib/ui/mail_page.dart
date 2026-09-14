@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/message_center.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 /// 消息中心主页面（AppBar 返回 + 频道切换）。
 class MailPage extends ConsumerStatefulWidget {
@@ -219,7 +220,7 @@ class _MailPageState extends ConsumerState<MailPage> {
                       size: 16,
                       color: item.attachmentTaken
                           ? Theme.of(context).colorScheme.outline
-                          : Colors.orange,
+                          : AppSemanticColors.of(context).warning,
                     ),
                   ),
               ],
@@ -357,7 +358,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                   Icons.card_giftcard,
                   color: _item.attachmentTaken
                       ? theme.colorScheme.outline
-                      : Colors.orange,
+                      : AppSemanticColors.of(context).warning,
                 ),
                 title: Text(a.name.isNotEmpty ? a.name : '物品 ${a.id}'),
                 trailing: a.count > 0 ? Text('×${a.count}') : null,

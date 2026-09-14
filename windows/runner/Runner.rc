@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "me.yuey1ng" "\0"
-            VALUE "FileDescription", "mnchat" "\0"
+            VALUE "FileDescription", "MnChat" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "mnchat" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 me.yuey1ng. All rights reserved." "\0"
             VALUE "OriginalFilename", "mnchat.exe" "\0"
-            VALUE "ProductName", "mnchat" "\0"
+            VALUE "ProductName", "MnChat" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

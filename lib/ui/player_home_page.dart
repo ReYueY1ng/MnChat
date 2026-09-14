@@ -17,6 +17,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/services/player_home.dart';
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
+import 'theme/app_tokens.dart';
+import 'widgets/rich_text_view.dart';
 
 class PlayerHomePage extends ConsumerStatefulWidget {
   final int targetUin;
@@ -62,8 +64,8 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
       final data = await client.getUserHomepage(widget.targetUin);
       // 关系状态：从 role_info.data.profile.relation 读取
       _syncRelation(data);
-      // 记一次访问（失败忽略）
-      unawaited(client.addVisitRecord(widget.targetUin));
+      // 记一次访问（受"留下踪迹"开关与 24h 去重约束，失败忽略）
+      unawaited(_recordVisitIfNeeded(client));
       if (!mounted) return;
       setState(() {
         _data = data;
@@ -75,6 +77,30 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
         _error = '$e';
         _loading = false;
       });
+    }
+  }
+
+  /// 必要时上报一次访问记录：受"留下踪迹"开关与 24h 去重约束，
+  /// 失败静默忽略，绝不向 [_load] 抛异常。
+  Future<void> _recordVisitIfNeeded(PlayerHomeClient client) async {
+    try {
+      final leaveTrace = ref.read(leaveVisitTraceProvider);
+      if (!leaveTrace) return;
+      final store = ref.read(settingsProvider);
+      final targetUin = widget.targetUin;
+      final lastSentAt = await store.visitSentAt(targetUin);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      if (!PlayerHomeClient.shouldRecordVisit(
+        leaveTrace: leaveTrace,
+        lastSentAt: lastSentAt,
+        now: now,
+      )) {
+        return;
+      }
+      final ok = await client.addVisitRecord(targetUin);
+      if (ok) await store.setVisitSentAt(targetUin, now);
+    } catch (_) {
+      // 失败忽略
     }
   }
 
@@ -146,22 +172,22 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
   }
 
   Future<bool?> _confirm(String title, String message) => showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('确定'),
-            ),
-          ],
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: Text(title),
+      content: Text(message),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(ctx, false),
+          child: const Text('取消'),
         ),
-      );
+        FilledButton(
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('确定'),
+        ),
+      ],
+    ),
+  );
 
   void _toast(String msg) {
     if (!mounted) return;
@@ -187,6 +213,26 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
       }
     }
     return '${widget.targetUin}';
+  }
+
+  int? get _headFrameId {
+    final roleInfo = _data['role_info'];
+    if (roleInfo is Map) {
+      final rd = roleInfo['data'];
+      if (rd is Map) {
+        final profile = rd['profile'];
+        if (profile is Map) {
+          final ri = (profile.cast<String, Object?>())['RoleInfo'];
+          if (ri is Map) {
+            final v = (ri.cast<String, Object?>())['head_frame_id'];
+            if (v is num && v.toInt() > 0) return v.toInt();
+            final n = int.tryParse('$v');
+            if (n != null && n > 0) return n;
+          }
+        }
+      }
+    }
+    return null;
   }
 
   String? get _avatarUrl {
@@ -243,7 +289,7 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
     final name = _nickname;
     return Scaffold(
       appBar: AppBar(
-        title: Text(name),
+        title: RichTextView(name),
         actions: [
           IconButton(
             tooltip: '刷新',
@@ -255,17 +301,22 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _error != null && _data.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(_error!),
-                      const SizedBox(height: 8),
-                      FilledButton(onPressed: _load, child: const Text('重试')),
-                    ],
-                  ),
-                )
-              : ListView(
+          ? Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_error!),
+                  const SizedBox(height: 8),
+                  FilledButton(onPressed: _load, child: const Text('重试')),
+                ],
+              ),
+            )
+          : Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: AppSizes.narrowContent,
+                ),
+                child: ListView(
                   padding: const EdgeInsets.all(16),
                   children: [
                     // 资料卡
@@ -275,16 +326,19 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
                           name: name,
                           avatarUrl: _avatarUrl,
                           radius: 36,
+                          frameId: _headFrameId,
                         ),
                         const SizedBox(width: 16),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(name,
-                                  style: theme.textTheme.titleLarge?.copyWith(
-                                    fontWeight: FontWeight.w600,
-                                  )),
+                              Text(
+                                name,
+                                style: theme.textTheme.titleLarge?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                               const SizedBox(height: 4),
                               Text(
                                 '迷你号 ${widget.targetUin}',
@@ -306,16 +360,18 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.home,
-                                        size: 14,
-                                        color: theme.colorScheme.outline),
+                                    Icon(
+                                      Icons.home,
+                                      size: 14,
+                                      color: theme.colorScheme.outline,
+                                    ),
                                     const SizedBox(width: 4),
                                     Text(
                                       '家族: $_familyName',
-                                      style:
-                                          theme.textTheme.bodySmall?.copyWith(
-                                        color: theme.colorScheme.outline,
-                                      ),
+                                      style: theme.textTheme.bodySmall
+                                          ?.copyWith(
+                                            color: theme.colorScheme.outline,
+                                          ),
                                     ),
                                   ],
                                 ),
@@ -332,9 +388,7 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
                         Expanded(
                           child: FilledButton.tonalIcon(
                             onPressed: _busy ? null : _toggleFollow,
-                            icon: Icon(_following
-                                ? Icons.check
-                                : Icons.add),
+                            icon: Icon(_following ? Icons.check : Icons.add),
                             label: Text(_following ? '已关注' : '关注'),
                           ),
                         ),
@@ -361,14 +415,14 @@ class _PlayerHomePageState extends ConsumerState<PlayerHomePage> {
                       trailing: const Icon(Icons.chevron_right),
                       onTap: () {
                         ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('动态列表请在「动态 → 我的」中查看'),
-                          ),
+                          const SnackBar(content: Text('动态列表请在「动态 → 我的」中查看')),
                         );
                       },
                     ),
                   ],
                 ),
+              ),
+            ),
     );
   }
 }

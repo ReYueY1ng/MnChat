@@ -1,86 +1,19 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/chat_emoji.dart' show kChatEmoji;
+import '../../core/models/messages.dart';
 import '../../core/services/dynamics.dart';
+import '../../state/providers.dart';
 import '../dynamics_detail_page.dart';
 import 'avatar_view.dart';
+import 'head_frame.dart';
 import 'image_viewer.dart';
-
-/// 把 Mini World 富文本（[color]/[b]/[i]/[u]/表情码）解析为 [TextSpan] 列表。
-/// 供动态卡片与详情页复用。
-List<TextSpan> dynamicsContentSpans(String content, BuildContext context) {
-  final spans = <TextSpan>[];
-  final re = RegExp(r'(\[[/]?[a-zA-Z=#0-9]*[^\]]*\]|<a>|</a>|#A\d{3})');
-  var pos = 0;
-  var color = Colors.transparent;
-  var bold = false;
-  var italic = false;
-  var underline = false;
-  for (final match in re.allMatches(content)) {
-    if (match.start > pos) {
-      spans.add(_plainSpan(content.substring(pos, match.start), color, bold, italic, underline));
-    }
-    final tag = match.group(0)!;
-    final lower = tag.toLowerCase();
-    if (lower.startsWith('[color')) {
-      if (tag.startsWith('[/')) {
-        color = Colors.transparent;
-      } else {
-        final inner = tag.replaceAll('[', '').replaceAll(']', '');
-        final eq = inner.indexOf('=');
-        if (eq >= 0) {
-          color = _parseColor(inner.substring(eq + 1));
-        } else {
-          color = Theme.of(context).colorScheme.primary;
-        }
-      }
-    } else if (lower.startsWith('[b')) {
-      bold = !lower.startsWith('[/');
-    } else if (lower.startsWith('[i')) {
-      italic = !lower.startsWith('[/');
-    } else if (lower.startsWith('[u')) {
-      underline = !lower.startsWith('[/');
-    } else if (lower.startsWith('[size') || lower.startsWith('<a') || lower.startsWith('</a')) {
-      // size/超链接 —— 忽略
-    } else if (kChatEmoji.containsKey(tag)) {
-      spans.add(TextSpan(text: kChatEmoji[tag]));
-    } else {
-      spans.add(TextSpan(text: tag));
-    }
-    pos = match.end;
-  }
-  if (pos < content.length) {
-    spans.add(_plainSpan(content.substring(pos), color, bold, italic, underline));
-  }
-  return spans;
-}
-
-TextSpan _plainSpan(String text, Color color, bool bold, bool italic, bool underline) {
-  return TextSpan(
-    text: text,
-    style: TextStyle(
-      color: color == Colors.transparent ? null : color,
-      fontWeight: bold ? FontWeight.bold : null,
-      fontStyle: italic ? FontStyle.italic : null,
-      decoration: underline ? TextDecoration.underline : null,
-    ),
-  );
-}
-
-Color _parseColor(String raw) {
-  var s = raw.trim();
-  if (s.startsWith('#')) s = s.substring(1);
-  try {
-    return Color(int.parse('FF$s', radix: 16));
-  } catch (_) {
-    return Colors.transparent;
-  }
-}
+import 'rich_text_view.dart';
 
 /// 动态卡片 —— 左上头像+徽标+昵称 / 相对时间·IP属地 / 内容(查看全文) / 图片 / 附加信息 / 右下操作区。
-class DynamicsCard extends StatelessWidget {
+class DynamicsCard extends ConsumerWidget {
   final DynamicsPost post;
 
   /// 是否我的动态（我自己的不显示「关注」按钮）。
@@ -89,9 +22,24 @@ class DynamicsCard extends StatelessWidget {
   const DynamicsCard({super.key, required this.post, this.isMine = false});
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final name = (post.nickname ?? '${post.uin}').isEmpty ? '${post.uin}' : (post.nickname ?? '${post.uin}');
+    final name = (post.nickname ?? '${post.uin}').isEmpty
+        ? '${post.uin}'
+        : (post.nickname ?? '${post.uin}');
+
+    // 关注按钮的显示条件：非本人，且作者与我既非好友(bit3=8)也非我关注(bit4=16)。
+    // 作者不在联系人列表（数据未加载 / 非好友）时保持原行为：显示。
+    final contacts = ref.watch(contactsProvider).value ?? const <Contact>[];
+    Contact? author;
+    for (final c in contacts) {
+      if (c.uin == post.uin) {
+        author = c;
+        break;
+      }
+    }
+    final relation = author?.relation ?? 0;
+    final showFollow = !isMine && (relation & 8) == 0 && (relation & 16) == 0;
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -99,16 +47,25 @@ class DynamicsCard extends StatelessWidget {
       child: InkWell(
         onTap: () => _openDetail(context),
         child: Padding(
-          padding: const EdgeInsets.all(10),
+          // 左上比右下收得更紧：玩家信息（头像 + 昵称/时间/属地）更贴近卡片
+          // 左上角（原来四边都是 10）。
+          padding: const EdgeInsets.fromLTRB(8, 6, 10, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 顶部：头像 + [徽标]昵称 / 相对时间·IP属地  + 关注按钮
+              // 顶部：头像 + [徽标]昵称 / 相对时间·IP属地  + 右上角关注按钮
+              // 头像槽位（headFrameSlotSize）比昵称/时间文字块高，用 center 让
+              // 文字块与槽位内居中的头像垂直对齐（start 会让文字块贴住槽位顶部）。
               Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  AvatarView(name: name, avatarUrl: post.avatar, radius: 20),
+                  AvatarView(
+            name: name,
+            avatarUrl: post.avatar,
+            radius: 20,
+            frameId: post.headFrameId,
+          ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -117,11 +74,14 @@ class DynamicsCard extends StatelessWidget {
                         Row(
                           children: [
                             Flexible(
-                              child: Text(
+                              child: RichTextView(
                                 name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w700),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
                             ),
                           ],
@@ -131,12 +91,25 @@ class DynamicsCard extends StatelessWidget {
                             _meta(),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
                           ),
                       ],
                     ),
                   ),
-                  if (!isMine) const _FollowButton(),
+                  if (showFollow)
+                    // 「关注」钉在行右上角：外层 SizedBox 取头像槽位高度
+                    // （行内最高子项），Align 因此获得有界高度、铺满行高，
+                    // 把按钮顶到行顶部；行本身仍是 center，文字块不受影响。
+                    // （行高无界时 Align 会收缩成按钮自身大小而回到居中。）
+                    SizedBox(
+                      height: headFrameSlotSize(20),
+                      child: const Align(
+                        alignment: Alignment.topCenter,
+                        child: _FollowButton(),
+                      ),
+                    ),
                 ],
               ),
               const SizedBox(height: 8),
@@ -149,8 +122,10 @@ class DynamicsCard extends StatelessWidget {
               // 图片（按宽高比）
               if (post.pics.isNotEmpty) _Images(pics: post.pics),
               // 附加信息：链接/作品卡
-              if (post.linkName != null && post.linkName!.isNotEmpty) _LinkCard(post: post),
-              if (post.isLottery) const _ChipLabel(icon: Icons.card_giftcard, text: '抽奖'),
+              if (post.linkName != null && post.linkName!.isNotEmpty)
+                _LinkCard(post: post),
+              if (post.isLottery)
+                const _ChipLabel(icon: Icons.card_giftcard, text: '抽奖'),
               const SizedBox(height: 6),
               // 右下角：操作区（点赞/评论/转发 + ···）
               _Actions(post: post),
@@ -172,9 +147,9 @@ class DynamicsCard extends StatelessWidget {
 
   /// 打开动态详情页。
   void _openDetail(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => DynamicsDetailPage(post: post)),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => DynamicsDetailPage(post: post)));
   }
 }
 
@@ -184,7 +159,11 @@ class _PostContent extends StatelessWidget {
   final TextStyle style;
   final VoidCallback onViewFull;
 
-  const _PostContent({required this.content, required this.style, required this.onViewFull});
+  const _PostContent({
+    required this.content,
+    required this.style,
+    required this.onViewFull,
+  });
 
   bool _overflows(double maxWidth) {
     final tp = TextPainter(
@@ -208,7 +187,7 @@ class _PostContent extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text.rich(
-                TextSpan(children: dynamicsContentSpans(content, context)),
+                TextSpan(children: buildRichSpans(content, context: context)),
                 style: style,
                 maxLines: 3,
                 overflow: TextOverflow.ellipsis,
@@ -216,7 +195,13 @@ class _PostContent extends StatelessWidget {
               if (over)
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
-                  child: Text('查看全文', style: TextStyle(fontSize: 12, color: theme.colorScheme.primary)),
+                  child: Text(
+                    '查看全文',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ),
                 ),
             ],
           ),
@@ -243,7 +228,11 @@ class _Images extends StatelessWidget {
         builder: (context, constraints) {
           final maxWidth = constraints.maxWidth;
           return single
-              ? _SingleImage(url: show.first.url, maxWidth: maxWidth, onTap: () => openImageViewer(context, urls, 0))
+              ? _SingleImage(
+                  url: show.first.url,
+                  maxWidth: maxWidth,
+                  onTap: () => openImageViewer(context, urls, 0),
+                )
               : _row(context, show, maxWidth, urls);
         },
       ),
@@ -251,7 +240,12 @@ class _Images extends StatelessWidget {
   }
 
   /// 多图（2-4）：排成一排，正方形，高度随单元格。
-  Widget _row(BuildContext context, List<PostImage> pics, double maxWidth, List<String> urls) {
+  Widget _row(
+    BuildContext context,
+    List<PostImage> pics,
+    double maxWidth,
+    List<String> urls,
+  ) {
     return Row(
       children: [
         for (var i = 0; i < pics.length; i++) ...[
@@ -263,9 +257,13 @@ class _Images extends StatelessWidget {
                 borderRadius: BorderRadius.circular(6),
                 child: AspectRatio(
                   aspectRatio: 1,
-                  child: Image.network(pics[i].url, fit: BoxFit.cover,
-                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
-                      loadingBuilder: (c, w, p) => p == null ? w : const SizedBox.shrink()),
+                  child: Image.network(
+                    pics[i].url,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    loadingBuilder: (c, w, p) =>
+                        p == null ? w : const SizedBox.shrink(),
+                  ),
                 ),
               ),
             ),
@@ -283,7 +281,11 @@ class _SingleImage extends StatefulWidget {
   final double maxWidth;
   final VoidCallback onTap;
 
-  const _SingleImage({required this.url, required this.maxWidth, required this.onTap});
+  const _SingleImage({
+    required this.url,
+    required this.maxWidth,
+    required this.onTap,
+  });
 
   @override
   State<_SingleImage> createState() => _SingleImageState();
@@ -338,9 +340,13 @@ class _SingleImageState extends State<_SingleImage> {
         child: SizedBox(
           width: width,
           height: tileH,
-          child: Image.network(widget.url, fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              loadingBuilder: (c, w, p) => p == null ? w : const SizedBox.shrink()),
+          child: Image.network(
+            widget.url,
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            loadingBuilder: (c, w, p) =>
+                p == null ? w : const SizedBox.shrink(),
+          ),
         ),
       ),
     );
@@ -350,14 +356,14 @@ class _SingleImageState extends State<_SingleImage> {
 class _LinkCard extends StatelessWidget {
   final DynamicsPost post;
 
-  const _LinkCard({required this.post});  @override
+  const _LinkCard({required this.post});
+  @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return InkWell(
       onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('打开作品/地图：${post.linkName}')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('打开作品/地图：${post.linkName}')));
       },
       child: Container(
         margin: const EdgeInsets.only(top: 8),
@@ -368,16 +374,30 @@ class _LinkCard extends StatelessWidget {
         ),
         child: Row(
           children: [
-            Icon(Icons.map_outlined, size: 18, color: theme.colorScheme.primary),
+            Icon(
+              Icons.map_outlined,
+              size: 18,
+              color: theme.colorScheme.primary,
+            ),
             const SizedBox(width: 6),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(post.linkName!, maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
+                  Text(
+                    post.linkName!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
                   if (post.linkAuthor != null)
-                    Text('作者 ${post.linkAuthor}', style: theme.textTheme.labelSmall),
+                    Text(
+                      '作者 ${post.linkAuthor}',
+                      style: theme.textTheme.labelSmall,
+                    ),
                 ],
               ),
             ),
@@ -409,7 +429,13 @@ class _ChipLabel extends StatelessWidget {
         children: [
           Icon(icon, size: 14, color: theme.colorScheme.onTertiaryContainer),
           const SizedBox(width: 4),
-          Text(text, style: TextStyle(fontSize: 12, color: theme.colorScheme.onTertiaryContainer)),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: 12,
+              color: theme.colorScheme.onTertiaryContainer,
+            ),
+          ),
         ],
       ),
     );
@@ -431,8 +457,14 @@ class _FollowButton extends StatelessWidget {
           color: theme.colorScheme.primaryContainer,
           borderRadius: BorderRadius.circular(14),
         ),
-        child: Text('关注',
-            style: TextStyle(fontSize: 12, color: theme.colorScheme.onPrimaryContainer, fontWeight: FontWeight.w600)),
+        child: Text(
+          '关注',
+          style: TextStyle(
+            fontSize: 12,
+            color: theme.colorScheme.onPrimaryContainer,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
@@ -449,7 +481,10 @@ class _Actions extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.end,
       children: [
         _ActionIcon(icon: Icons.thumb_up_alt_outlined, count: post.likeCount),
-        _ActionIcon(icon: Icons.mode_comment_outlined, count: post.commentCount),
+        _ActionIcon(
+          icon: Icons.mode_comment_outlined,
+          count: post.commentCount,
+        ),
         _ActionIcon(icon: Icons.reply_outlined, count: post.shareCount),
         IconButton(
           visualDensity: VisualDensity.compact,
@@ -479,7 +514,12 @@ class _ActionIcon extends StatelessWidget {
           Icon(icon, size: 16, color: theme.colorScheme.outline),
           if (count > 0) ...[
             const SizedBox(width: 3),
-            Text('$count', style: theme.textTheme.labelSmall?.copyWith(color: theme.colorScheme.outline)),
+            Text(
+              '$count',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.outline,
+              ),
+            ),
           ],
         ],
       ),
@@ -490,7 +530,9 @@ class _ActionIcon extends StatelessWidget {
 /// 相对时间：刚刚 / X分钟前 / X小时前 / X天前 / X月前 / X年前。
 String _relativeTime(int ts) {
   if (ts <= 0) return '';
-  final diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ts * 1000));
+  final diff = DateTime.now().difference(
+    DateTime.fromMillisecondsSinceEpoch(ts * 1000),
+  );
   if (diff.inMinutes < 1) return '刚刚';
   if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
   if (diff.inHours < 24) return '${diff.inHours}小时前';

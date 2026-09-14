@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/family.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/rich_text_view.dart';
 
 /// 家族页 —— 我的家族信息 + 成员列表 + 家族消息。
 class FamilyPage extends ConsumerStatefulWidget {
@@ -75,7 +77,8 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   FamilyInfo? _findMyFamily(Map<String, Object?> resp) {
     if (FamilyInfo.fromJson(resp) case final f?) return f;
     final family = resp['family'];
-    if (family is Map) return FamilyInfo.fromJson(family.cast<String, Object?>());
+    if (family is Map)
+      return FamilyInfo.fromJson(family.cast<String, Object?>());
     final list = resp['families'] ?? resp['data'];
     if (list is List) {
       for (final e in list) {
@@ -99,7 +102,8 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       await client.sendFamilyMsg(family.familyId, t);
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('发送失败: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('发送失败: $e')));
       }
     }
   }
@@ -114,8 +118,14 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
         title: const Text('退出家族'),
         content: Text('确定退出「${family.name}」吗？'),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('取消')),
-          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('确定')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确定'),
+          ),
         ],
       ),
     );
@@ -125,7 +135,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       await client.quit(family.familyId);
       if (mounted) _load();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('退出失败: $e')));
+      if (mounted)
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('退出失败: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -171,9 +183,8 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       }
     }
     if (applies.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('暂无入族申请')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('暂无入族申请')));
       return;
     }
     final myUin = ref.read(myUinProvider);
@@ -185,7 +196,10 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
           shrinkWrap: true,
           children: [
             const ListTile(
-              title: Text('入族申请', style: TextStyle(fontWeight: FontWeight.w600)),
+              title: Text(
+                '入族申请',
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
             ),
             const Divider(height: 1),
             ...applies.map((a) {
@@ -203,24 +217,31 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                         children: [
                           IconButton(
                             tooltip: '通过',
-                            icon: Icon(Icons.check,
-                                color: Colors.green.shade600),
+                            icon: Icon(
+                              Icons.check,
+                              color: AppSemanticColors.of(ctx).success,
+                            ),
                             onPressed: () async {
                               await client.acceptJoin(
-                                  target: uin, familyId: family.familyId);
+                                target: uin,
+                                familyId: family.familyId,
+                              );
                               if (ctx.mounted) Navigator.of(ctx).pop();
                               _toast('已通过');
                             },
                           ),
                           IconButton(
                             tooltip: '拒绝',
-                            icon: Icon(Icons.close,
-                                color: Theme.of(ctx).colorScheme.error),
+                            icon: Icon(
+                              Icons.close,
+                              color: Theme.of(ctx).colorScheme.error,
+                            ),
                             onPressed: () async {
                               await client.acceptJoin(
-                                  target: uin,
-                                  familyId: family.familyId,
-                                  reject: true);
+                                target: uin,
+                                familyId: family.familyId,
+                                reject: true,
+                              );
                               if (ctx.mounted) Navigator.of(ctx).pop();
                               _toast('已拒绝');
                             },
@@ -252,14 +273,23 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     if (family == null) return const Center(child: Text('你尚未加入任何家族'));
     final myUin = ref.watch(myUinProvider);
     final isLeader = family.leaderUin == myUin;
+    final scheme = Theme.of(context).colorScheme;
     return Column(
       children: [
         Expanded(
           child: ListView(
             children: [
               _InfoTile(icon: Icons.home, label: '家族', value: family.name),
-              _InfoTile(icon: Icons.star, label: '族长', value: '${family.leaderUin}'),
-              _InfoTile(icon: Icons.groups, label: '成员数', value: '${family.memberCount}'),
+              _InfoTile(
+                icon: Icons.star,
+                label: '族长',
+                value: '${family.leaderUin}',
+              ),
+              _InfoTile(
+                icon: Icons.groups,
+                label: '成员数',
+                value: '${family.memberCount}',
+              ),
               if (family.notice != null && family.notice!.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.campaign),
@@ -270,33 +300,56 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               if (family.members.isNotEmpty) ...[
                 const Padding(
                   padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-                  child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
+                  child: Text(
+                    '成员',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
                 ),
-                ...family.members.map((m) => ListTile(
-                      leading: AvatarView(name: m.nickname.isNotEmpty ? m.nickname : '${m.uin}'),
-                      title: Text(m.nickname.isNotEmpty ? m.nickname : '${m.uin}'),
-                      trailing: m.isLeader
-                          ? const Chip(label: Text('族长'), visualDensity: VisualDensity.compact)
-                          : null,
-                    )),
+                ...family.members.map(
+                  (m) => ListTile(
+                    leading: AvatarView(
+                      name: m.nickname.isNotEmpty ? m.nickname : '${m.uin}',
+                    ),
+                    title: RichTextView(
+                      m.nickname.isNotEmpty ? m.nickname : '${m.uin}',
+                    ),
+                    trailing: m.isLeader
+                        ? const Chip(
+                            label: Text('族长'),
+                            visualDensity: VisualDensity.compact,
+                          )
+                        : null,
+                  ),
+                ),
               ],
               const Divider(),
               // 家族消息
               const Padding(
                 padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
-                child: Text('家族消息', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: Text(
+                  '家族消息',
+                  style: TextStyle(fontWeight: FontWeight.w600),
+                ),
               ),
               if (_messages.isEmpty)
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Text('暂无家族消息', style: TextStyle(color: Colors.grey)),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    '暂无家族消息',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
                 )
               else
-                ..._messages.map((m) => ListTile(
-                      dense: true,
-                      leading: const Icon(Icons.chat_bubble_outline, size: 18),
-                      title: Text(m),
-                    )),
+                ..._messages.map(
+                  (m) => ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.chat_bubble_outline, size: 18),
+                    title: Text(m),
+                  ),
+                ),
             ],
           ),
         ),
@@ -359,14 +412,21 @@ class _InfoTile extends StatelessWidget {
   final String label;
   final String value;
 
-  const _InfoTile({required this.icon, required this.label, required this.value});
+  const _InfoTile({
+    required this.icon,
+    required this.label,
+    required this.value,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
       leading: Icon(icon),
       title: Text(label),
-      trailing: Text(value, style: const TextStyle(fontWeight: FontWeight.w500)),
+      trailing: Text(
+        value,
+        style: const TextStyle(fontWeight: FontWeight.w500),
+      ),
     );
   }
 }

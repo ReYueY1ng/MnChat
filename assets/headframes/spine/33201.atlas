@@ -1,0 +1,41 @@
+
+33201.png
+size: 324,128
+format: RGBA8888
+filter: Linear,Linear
+repeat: none
+dingkuang
+  rotate: false
+  xy: 136, 3
+  size: 131, 28
+  orig: 131, 28
+  offset: 0, 0
+  index: -1
+kuang2
+  rotate: false
+  xy: 2, 2
+  size: 132, 123
+  orig: 132, 123
+  offset: 0, 0
+  index: -1
+particle_flare_004
+  rotate: false
+  xy: 278, 80
+  size: 44, 45
+  orig: 47, 49
+  offset: 2, 3
+  index: -1
+soaguang
+  rotate: true
+  xy: 136, 33
+  size: 92, 140
+  orig: 140, 140
+  offset: 25, 0
+  index: -1
+yj
+  rotate: true
+  xy: 278, 15
+  size: 63, 17
+  orig: 63, 17
+  offset: 0, 0
+  index: -1

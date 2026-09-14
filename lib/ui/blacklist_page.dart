@@ -11,6 +11,7 @@ import '../core/models/messages.dart';
 import '../core/services/chat_service.dart' show SessionSnapshot;
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/rich_text_view.dart';
 
 class BlacklistPage extends ConsumerStatefulWidget {
   const BlacklistPage({super.key});
@@ -26,8 +27,9 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
   List<ChatSession> _black(SessionSnapshot? snap) {
     if (snap == null) return const [];
     return snap.sessions
-        .where((s) =>
-            s.type == ChatSessionType.friend && (s.relation & 64) != 0)
+        .where(
+          (s) => s.type == ChatSessionType.friend && (s.relation & 64) != 0,
+        )
         .toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
   }
@@ -154,7 +156,7 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
                   final name = s.name.isNotEmpty ? s.name : '${s.id}';
                   return ListTile(
                     leading: AvatarView(name: name, radius: 24),
-                    title: Text(name),
+                    title: RichTextView(name),
                     subtitle: Text('迷你号 ${s.id}'),
                     trailing: _busy
                         ? const SizedBox(
