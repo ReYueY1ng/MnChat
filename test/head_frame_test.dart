@@ -41,6 +41,34 @@ void main() {
         expect(file.lengthSync(), greaterThan(0), reason: '动画头像框 $id 为空');
       }
     });
+
+    test('每个动画 id 均有对应静态 PNG（128x128、非空）', () {
+      for (final id in kAnimatedFrameIds) {
+        final file = File(headFrameStaticAsset(id));
+        expect(file.existsSync(), isTrue, reason: '缺少静态头像框 $id');
+        final bytes = file.readAsBytesSync();
+        // PNG 签名 + IHDR 尺寸（大端，偏移 16/20）。
+        expect(bytes.length, greaterThan(24), reason: '静态头像框 $id 过小');
+        expect(bytes.length, greaterThan(1000), reason: '静态头像框 $id 疑似空白');
+        int be32(int o) =>
+            (bytes[o] << 24) |
+            (bytes[o + 1] << 16) |
+            (bytes[o + 2] << 8) |
+            bytes[o + 3];
+        expect(be32(16), 128, reason: '静态头像框 $id 宽度非 128');
+        expect(be32(20), 128, reason: '静态头像框 $id 高度非 128');
+      }
+    });
+
+    test('此前缺失静态图的 6 个动画 id 现已补齐', () {
+      for (final id in [20265, 20267, 20279, 20280, 20281, 20290]) {
+        expect(
+          File(headFrameStaticAsset(id)).existsSync(),
+          isTrue,
+          reason: '缺少静态头像框 $id',
+        );
+      }
+    });
   });
 
   group('HeadFrameOverlay', () {
