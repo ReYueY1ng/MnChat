@@ -27,6 +27,7 @@ class SettingsKeys {
 
   // ── 通用 / 显示 ─────────────────────────────────────────────────────
   static const String animatedFrames = 'animated_frames'; // 头像框动画 '1'/'0'
+  static const String richTextRaw = 'rich_text_raw'; // 富文本显示原文本 '1'/'0'
   static const String chatFontScale = 'chat_font_scale'; // 聊天字号缩放 double 字符串
   static const String seedColor = 'seed_color'; // 主题强调色 ARGB int 字符串
 

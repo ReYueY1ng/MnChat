@@ -68,11 +68,27 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (profile != null) {
         avatarUrl ??= profile.avatarUrl;
         frameId = profile.headFrameId;
-        ownedFrames = profile.ownedHeadFrameIds;
+        ownedFrames = {...profile.ownedHeadFrameIds};
       }
-    } catch (_) {
+    } catch (e) {
       // 忽略：资料拉取失败时展示首字占位头像
+      debugPrint('ProfilePage: getMyProfile 失败: $e');
     }
+
+    // 兜底：单个资料接口有时不下发 head_frames（表现：选择器只剩默认框 1）。
+    // 再用批量资料接口取一次并集，并打印数量便于定位问题。
+    if (ownedFrames.length <= 1) {
+      try {
+        final list = await client.getProfileBatch3([auth.uin]);
+        if (list.isNotEmpty) {
+          frameId ??= list.first.headFrameId;
+          ownedFrames.addAll(list.first.ownedHeadFrameIds);
+        }
+      } catch (e) {
+        debugPrint('ProfilePage: getProfileBatch3 补头像框失败: $e');
+      }
+    }
+    debugPrint('ProfilePage: 已拥有头像框 ${ownedFrames.length} 个');
 
     int? headType;
     int? headId;

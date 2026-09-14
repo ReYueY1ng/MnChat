@@ -405,6 +405,20 @@ class AnimatedFramesNotifier extends _BoolSettingNotifier {
   bool get fallback => true;
 }
 
+/// 富文本显示原文本：开启后昵称 / 消息名原样显示标签串
+/// （如 `[i][color][b]顾念`），不再解析颜色 / 加粗 / 表情。
+/// 默认关闭：与旧行为一致，展示解析后的富文本。
+final richTextRawProvider = NotifierProvider<RichTextRawNotifier, bool>(
+  RichTextRawNotifier.new,
+);
+
+class RichTextRawNotifier extends _BoolSettingNotifier {
+  @override
+  String get key => SettingsKeys.richTextRaw;
+  @override
+  bool get fallback => false;
+}
+
 /// 回车发送（桌面端）。
 final sendOnEnterProvider = NotifierProvider<SendOnEnterNotifier, bool>(
   SendOnEnterNotifier.new,

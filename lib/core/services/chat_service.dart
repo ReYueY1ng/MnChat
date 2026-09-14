@@ -1210,6 +1210,14 @@ class ChatService {
       onProfile: (p, head) {
         final s = _friendSessions[p.uin];
         if (s == null) return;
+        // 人物中心头信息缺失 / type=2（头套无 2D 资源）时，用资料的
+        // RoleInfo.SkinID / Model 回退角色头像（官方 GetPlayerHeadPath 降级链）。
+        final fallback = PlayerProfile.resolveRoleHeadFallback(
+          headType: head?.type,
+          headId: head?.id,
+          skinId: p.headSkinId,
+          model: p.headModel,
+        );
         _friendSessions[p.uin] = ChatSession(
           id: s.id,
           type: s.type,
@@ -1221,11 +1229,17 @@ class ChatService {
           unreadCount: s.unreadCount,
           lastReadTime: s.lastReadTime,
           relation: s.relation,
-          headType: head?.type ?? s.headType,
-          headId: head?.id ?? s.headId,
+          headType: fallback?.type ?? s.headType,
+          headId: fallback?.id ?? s.headId,
           headFrameId: p.headFrameId ?? s.headFrameId,
         );
-        _updateContactHead(p.uin, head, p.headFrameId);
+        _updateContactHead(
+          p.uin,
+          head,
+          p.headFrameId,
+          fallbackType: fallback?.type,
+          fallbackId: fallback?.id,
+        );
         updated = true;
       },
     );
@@ -1236,8 +1250,18 @@ class ChatService {
   }
 
   /// 同步联系人（好友页数据源）的头像信息（DIY url + 头像本体 + 头像框）。
-  void _updateContactHead(int uin, HeadSlot? head, int? headFrameId) {
-    if (head == null && headFrameId == null) return;
+  ///
+  /// [fallbackType]/[fallbackId]：人物中心头信息不可用（缺失 / type=2）时，
+  /// 由 [PlayerProfile.resolveRoleHeadFallback] 从资料 SkinID/Model 解析出的
+  /// 角色头像回退；为空则保留联系人旧值。
+  void _updateContactHead(
+    int uin,
+    HeadSlot? head,
+    int? headFrameId, {
+    int? fallbackType,
+    int? fallbackId,
+  }) {
+    if (head == null && headFrameId == null && fallbackType == null) return;
     for (var i = 0; i < _contacts.length; i++) {
       final c = _contacts[i];
       if (c.uin != uin) continue;
@@ -1247,8 +1271,8 @@ class ChatService {
         avatar: head?.diyUrl ?? c.avatar,
         relation: c.relation,
         mark: c.mark,
-        headType: head?.type ?? c.headType,
-        headId: head?.id ?? c.headId,
+        headType: fallbackType ?? c.headType,
+        headId: fallbackId ?? c.headId,
         headFrameId: headFrameId ?? c.headFrameId,
       );
       return;
@@ -1387,13 +1411,22 @@ class ChatService {
       onProfile: (p, head) {
         final member = _groupMemberProfiles[gid];
         if (member == null) return;
+        // 与好友同源：人物中心缺失/type=2 时用资料 SkinID/Model 回退角色头像。
+        final fallback = PlayerProfile.resolveRoleHeadFallback(
+          headType: head?.type,
+          headId: head?.id,
+          skinId: p.headSkinId,
+          model: p.headModel,
+        );
         member[p.uin] = PlayerProfile(
           uin: p.uin,
           nickname: p.nickname,
           avatarUrl: head?.diyUrl ?? p.avatarUrl,
-          headType: head?.type,
-          headId: head?.id,
+          headType: fallback?.type,
+          headId: fallback?.id,
           headFrameId: p.headFrameId,
+          headSkinId: p.headSkinId,
+          headModel: p.headModel,
         );
       },
     );

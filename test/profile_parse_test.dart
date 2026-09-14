@@ -87,6 +87,64 @@ void main() {
     });
   });
 
+  group('PlayerProfile RoleInfo 角色头像字段解析', () {
+    test('读取 RoleInfo.SkinID / Model（真实资料结构）', () {
+      // 官方角色头像链路的数据源：roleicons/<Model>.png 或
+      // roleicons/<roleskin[SkinID].Head>.png。
+      final p = PlayerProfile.fromItem({
+        'uin': 123,
+        'profile': {
+          'head_frame_id': 20201,
+          'RoleInfo': {'NickName': '小明', 'SkinID': 33, 'Model': 2},
+          'header': {'url': 'https://example.com/a.png'},
+        },
+      });
+
+      expect(p, isNotNull);
+      expect(p!.headSkinId, 33);
+      expect(p.headModel, 2);
+    });
+
+    test('兼容小写/别名拼写（skin_id / skinId / model）', () {
+      final p = PlayerProfile.fromItem({
+        'uin': 1,
+        'profile': {
+          'RoleInfo': {'NickName': 'a', 'skin_id': 12, 'model': 3},
+        },
+      });
+      expect(p!.headSkinId, 12);
+      expect(p.headModel, 3);
+
+      final alias = PlayerProfile.fromItem({
+        'uin': 1,
+        'profile': {
+          'RoleInfo': {'NickName': 'a', 'skinId': 13},
+        },
+      });
+      expect(alias!.headSkinId, 13);
+    });
+
+    test('缺失或非正数归一为 null（不产出无效头像 id）', () {
+      final missing = PlayerProfile.fromItem({
+        'uin': 1,
+        'profile': {
+          'RoleInfo': {'NickName': 'a'},
+        },
+      });
+      expect(missing!.headSkinId, isNull);
+      expect(missing.headModel, isNull);
+
+      final nonPositive = PlayerProfile.fromItem({
+        'uin': 1,
+        'profile': {
+          'RoleInfo': {'NickName': 'a', 'SkinID': 0, 'Model': -1},
+        },
+      });
+      expect(nonPositive!.headSkinId, isNull);
+      expect(nonPositive.headModel, isNull);
+    });
+  });
+
   group('resolveDiyUrl DIY 头像解析（pre_url 仅本人可见）', () {
     test('仅 pass_url：本人与他人一律用 pass', () {
       final info = <String, Object?>{

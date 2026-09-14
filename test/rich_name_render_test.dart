@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/ui/widgets/avatar_view.dart';
 import 'package:mnchat/ui/widgets/rich_text_view.dart';
@@ -7,8 +8,10 @@ import 'package:mnchat/ui/widgets/rich_text_view.dart';
 void main() {
   Future<void> pump(WidgetTester tester, Widget child) {
     return tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(body: Center(child: child)),
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(body: Center(child: child)),
+        ),
       ),
     );
   }

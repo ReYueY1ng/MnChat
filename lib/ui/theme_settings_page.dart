@@ -31,6 +31,7 @@ class ThemeSettingsPage extends ConsumerWidget {
     final mode = ref.watch(appThemeModeProvider);
     final accent = ref.watch(accentColorProvider);
     final fontScale = ref.watch(chatFontScaleProvider);
+    final rawText = ref.watch(richTextRawProvider);
 
     // 用当前强调色 + 当前明暗模式现算预览配色，无需等待全局主题重建。
     final previewScheme = ColorScheme.fromSeed(
@@ -53,6 +54,8 @@ class ThemeSettingsPage extends ConsumerWidget {
               _accentCard(context, ref, accent),
               const SizedBox(height: AppSpacing.md),
               _fontScaleCard(context, ref, fontScale),
+              const SizedBox(height: AppSpacing.md),
+              _rawTextCard(context, ref, rawText),
             ],
           ),
         ),
@@ -308,6 +311,20 @@ class ThemeSettingsPage extends ConsumerWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+
+  /// 富文本显示原文本：开启后昵称等不再解析标签，直接显示源字符串。
+  Widget _rawTextCard(BuildContext context, WidgetRef ref, bool rawText) {
+    final theme = Theme.of(context);
+    return Card(
+      child: SwitchListTile(
+        secondary: Icon(Icons.code, color: theme.colorScheme.primary),
+        title: const Text('富文本显示原文本'),
+        subtitle: const Text('开启后，[i][color][b] 等游戏标签原样显示，不再渲染颜色、加粗或表情'),
+        value: rawText,
+        onChanged: (v) => ref.read(richTextRawProvider.notifier).set(v),
       ),
     );
   }

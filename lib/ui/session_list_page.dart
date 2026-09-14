@@ -1,31 +1,89 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
+import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'friend_request_page.dart' show showAddFriendDialog;
 import 'theme/app_tokens.dart';
 import 'widgets/account_menu.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
-import 'widgets/player_info_sheet.dart';
 import 'widgets/rich_text_view.dart';
+import 'widgets/session_menu.dart';
+import 'widgets/session_player_info_popup.dart';
 
 /// 会话列表页（左侧栏 / 手机单页）。
 ///
 /// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
-/// 群全部保留。顶部保留搜索框，排序与快捷短语入口在设置页。
+/// 群全部保留。顶部工具条对齐游戏好友列表：在线计数 / 刷新 / 只看在线 /
+/// 排序 / 可展开搜索（占位「支持迷你号和昵称查找」+ 取消）。
 class SessionListPage extends ConsumerStatefulWidget {
   final List<ChatSession> sessions;
 
-  const SessionListPage({super.key, required this.sessions});
+  /// 点击会话卡片的回调；为空时回退到 [activeSessionProvider].open。
+  ///
+  /// HomeShell 传入以实现"再次点击当前会话关闭聊天"的切换逻辑。
+  final ValueChanged<ChatSession>? onOpenChat;
+
+  const SessionListPage({super.key, required this.sessions, this.onOpenChat});
 
   @override
   ConsumerState<SessionListPage> createState() => _SessionListPageState();
 }
 
+/// 工具条排序方式（文案对齐游戏好友列表）。
+///
+/// 会话数据层只有时间 / 名称 / 未读三种排序（[SessionSortMode]，设置页可配），
+/// 参考列表的其余三项没有对应字段（默契度 / 登录时间），选中后仅切换标签、
+/// 顺序仍沿用设置里的排序（no-op）。
+enum _SessionSortMode {
+  byDefault('好友默认排序'),
+  tacitDesc('默契度从高到低'),
+  loginRecent('登录从近到远'),
+  loginOld('登录从远到近');
+
+  const _SessionSortMode(this.label);
+  final String label;
+}
+
+/// 「移除会话」本地持久化 key：JSON 对象 `{type_id: '1'}`。
+///
+/// core 层没有暴露删除 / 隐藏会话的接口且不允许改动，因此移除实现为本地
+/// 隐藏：通过 UI 已可达的 `SettingsStore.getString/setString`（与好友备注 /
+/// 置顶同一套通用字符串设置）落库，重启后仍隐藏；服务端的好友 / 群数据不动，
+/// 下次 loadSessions 重建会话时由过滤器继续挡掉。
+const String _removedSessionsSettingKey = 'session_removed_keys';
+
+/// 已移除会话（`type_id`）的进程内缓存：页面重建（横竖屏切换等）立即生效。
+final Set<String> _removedSessionKeys = <String>{};
+
 class _SessionListPageState extends ConsumerState<SessionListPage> {
   String _search = '';
+  final TextEditingController _searchCtrl = TextEditingController();
+
+  /// 搜索框是否展开（折叠时工具条只显示放大镜图标）。
+  bool _searchOpen = false;
+
+  /// 只看在线。
+  bool _onlyOnline = false;
+
+  /// 当前选中的排序（仅「好友默认排序」有真实数据支持）。
+  _SessionSortMode _sort = _SessionSortMode.byDefault;
+
+  @override
+  void initState() {
+    super.initState();
+    _restoreRemovedSessions();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -39,8 +97,14 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         MediaQuery.orientationOf(context) == Orientation.landscape &&
         MediaQuery.sizeOf(context).width >= 800;
 
-    // 搜索过滤（昵称/迷你号/群名）
+    // 过滤：已移除 → 只看在线 → 搜索（昵称 / 迷你号 / 群名）
     final filtered = sessions.where((s) {
+      if (_removedSessionKeys.contains(
+        SettingsKeys.sessionKey(s.type.name, s.id),
+      )) {
+        return false;
+      }
+      if (_onlyOnline && !s.isOnline) return false;
       if (_search.isEmpty) return true;
       final q = _search.toLowerCase();
       return s.name.toLowerCase().contains(q) || '${s.id}'.contains(q);
@@ -66,6 +130,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         },
       );
 
+    final online = sessions.where((s) => s.isOnline).length;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('会话', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -74,8 +140,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
       ),
       body: Column(
         children: [
-          _buildSearchBar(theme),
-          const Divider(height: 1),
+          _buildToolbar(theme, online, sessions.length),
           Expanded(
             child: sorted.isEmpty
                 ? _EmptySessions(
@@ -84,7 +149,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                 : ListView.separated(
                     // 行改为圆角卡片后不再用 Divider 分隔；四边内缩到与
                     // CardThemeData.margin 一致：左右避免圆角贴住面板边缘，
-                    // 上下避免首/末卡片贴住搜索框分隔线与窗口底边。
+                    // 上下避免首/末卡片贴住工具条与窗口底边。
                     padding: const EdgeInsets.symmetric(
                       horizontal: AppSpacing.sm,
                       vertical: AppSpacing.sm,
@@ -102,24 +167,22 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
                       return _SessionTile(
                         session: s,
                         isActive: isActive,
-                        onTap: () => ref
-                            .read(activeSessionProvider.notifier)
-                            .open(s.type, s.id),
-                        onLongPress: () => _showSessionMenu(context, s),
-                        // 桌面端右键打开同一菜单
-                        onSecondaryTap: () => _showSessionMenu(context, s),
-                        // 点击好友头像：玩家简要信息卡
+                        onTap: () {
+                          final open = widget.onOpenChat;
+                          if (open != null) {
+                            open(s);
+                          } else {
+                            ref
+                                .read(activeSessionProvider.notifier)
+                                .open(s.type, s.id);
+                          }
+                        },
+                        // 长按 / 桌面右键：指针位置弹出浮动菜单
+                        onLongPress: (pos) => _showSessionMenu(s, pos),
+                        onSecondaryTap: (pos) => _showSessionMenu(s, pos),
+                        // 点击好友头像：浮动的玩家简要信息卡
                         onAvatarTap: s.type == ChatSessionType.friend
-                            ? () => showPlayerInfoSheet(
-                                context,
-                                ref,
-                                uin: s.id,
-                                name: s.name,
-                                avatarUrl: s.avatar,
-                                headType: s.headType,
-                                headId: s.headId,
-                                headFrameId: s.headFrameId,
-                              )
+                            ? (pos) => _showPlayerInfo(s, pos)
                             : null,
                       );
                     },
@@ -130,28 +193,83 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     );
   }
 
-  /// 搜索框。
-  Widget _buildSearchBar(ThemeData theme) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+  /// 顶部工具条（对齐游戏好友列表形态）：在线计数 / 刷新 / 只看在线 / 排序 /
+  /// 可展开搜索（占位「支持迷你号和昵称查找」+ 取消）。
+  ///
+  /// 与好友页同样用页面底色铺底，避免卡片从工具条下透出；按需求不再在工具条
+  /// 与列表之间加 Divider。
+  Widget _buildToolbar(ThemeData theme, int online, int total) {
+    return ColoredBox(
+      color: theme.scaffoldBackgroundColor,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        child: _searchOpen
+            // 展开态：搜索框 + 取消（替代工具条其余内容，避免窄侧栏溢出）
+            ? Row(
+                children: [
+                  Expanded(child: _buildSearchField()),
+                  TextButton(onPressed: _closeSearch, child: const Text('取消')),
+                ],
+              )
+            // 折叠态：计数 + 刷新 + 只看在线 + 排序（可换行）+ 搜索图标
+            : Row(
+                children: [
+                  Expanded(
+                    child: Wrap(
+                      spacing: AppSpacing.sm,
+                      runSpacing: AppSpacing.xs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        Text(
+                          '在线好友 $online / $total',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: '刷新',
+                          visualDensity: VisualDensity.compact,
+                          icon: const Icon(Icons.refresh, size: 18),
+                          onPressed: () =>
+                              ref.read(chatServiceProvider).loadSessions(),
+                        ),
+                        FilterChip(
+                          visualDensity: VisualDensity.compact,
+                          label: const Text(
+                            '只看在线',
+                            style: TextStyle(fontSize: 12),
+                          ),
+                          selected: _onlyOnline,
+                          onSelected: (v) => setState(() => _onlyOnline = v),
+                        ),
+                        _buildSortMenu(theme),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: '搜索',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.search),
+                    onPressed: () => setState(() => _searchOpen = true),
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  /// 展开后的搜索框：占位「支持迷你号和昵称查找」。
+  Widget _buildSearchField() {
+    return SizedBox(
+      height: 36,
       child: TextField(
+        controller: _searchCtrl,
+        autofocus: true,
         onChanged: (v) => setState(() => _search = v),
         decoration: InputDecoration(
-          hintText: '搜索会话…',
+          hintText: '支持迷你号和昵称查找',
           isDense: true,
-          prefixIcon: const Icon(Icons.search, size: 20),
-          suffixIcon: _search.isEmpty
-              ? null
-              : IconButton(
-                  icon: const Icon(Icons.clear, size: 18),
-                  onPressed: () => setState(() => _search = ''),
-                ),
-          filled: true,
-          fillColor: theme.colorScheme.surfaceContainerHighest,
-          border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(18),
-            borderSide: BorderSide.none,
-          ),
+          prefixIcon: const Icon(Icons.search, size: 18),
           contentPadding: const EdgeInsets.symmetric(
             vertical: 6,
             horizontal: 8,
@@ -161,18 +279,127 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     );
   }
 
-  /// 会话长按 / 右键菜单：免打扰 / 置顶 + 好友专属操作（上线通知、备注、
-  /// 家园、删除好友）。
-  Future<void> _showSessionMenu(BuildContext context, ChatSession s) async {
-    await showFriendMenu(
+  /// 排序下拉：四项参考文案；仅「好友默认排序」有真实数据支持。
+  Widget _buildSortMenu(ThemeData theme) {
+    return PopupMenuButton<_SessionSortMode>(
+      tooltip: '排序方式',
+      onSelected: _selectSort,
+      itemBuilder: (ctx) => [
+        for (final m in _SessionSortMode.values)
+          PopupMenuItem(
+            value: m,
+            child: Row(
+              children: [
+                if (m == _sort)
+                  Icon(Icons.check, size: 16, color: theme.colorScheme.primary)
+                else
+                  const SizedBox(width: 16),
+                const SizedBox(width: AppSpacing.sm),
+                Text(m.label),
+              ],
+            ),
+          ),
+      ],
+      child: Chip(
+        visualDensity: VisualDensity.compact,
+        avatar: const Icon(Icons.sort, size: 16),
+        label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
+      ),
+    );
+  }
+
+  /// 选择排序：数据层没有默契度 / 登录时间字段，其余三项只切标签不改顺序。
+  void _selectSort(_SessionSortMode mode) {
+    setState(() => _sort = mode);
+    if (mode != _SessionSortMode.byDefault) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('该排序暂不支持，仍按默认顺序排列')),
+      );
+    }
+  }
+
+  /// 取消搜索：清空关键字并收起搜索框。
+  void _closeSearch() {
+    _searchCtrl.clear();
+    setState(() {
+      _search = '';
+      _searchOpen = false;
+    });
+  }
+
+  /// 恢复本地「移除会话」标记（设置读取失败时保持进程内缓存）。
+  Future<void> _restoreRemovedSessions() async {
+    try {
+      final raw = await ref
+          .read(settingsProvider)
+          .getString(_removedSessionsSettingKey);
+      if (raw == null || raw.isEmpty || !mounted) return;
+      final decoded = jsonDecode(raw);
+      if (decoded is! Map) return;
+      final restored = <String>{
+        for (final e in decoded.entries)
+          if (e.value.toString() == '1') '${e.key}',
+      };
+      final added = restored.difference(_removedSessionKeys);
+      if (added.isEmpty) return;
+      setState(() => _removedSessionKeys.addAll(added));
+    } catch (_) {
+      // 设置不可用（测试等）时保持默认：不隐藏任何会话。
+    }
+  }
+
+  /// 移除会话：加入本地隐藏集合并持久化；若正在聊天则一并关闭。
+  Future<void> _removeSession(ChatSession s) async {
+    final key = SettingsKeys.sessionKey(s.type.name, s.id);
+    setState(() => _removedSessionKeys.add(key));
+    final active = ref.read(activeSessionProvider);
+    if (active != null && active.type == s.type && active.id == s.id) {
+      ref.read(activeSessionProvider.notifier).close();
+    }
+    try {
+      final settings = ref.read(settingsProvider);
+      final raw = await settings.getString(_removedSessionsSettingKey);
+      final map = <String, Object?>{};
+      if (raw != null && raw.isNotEmpty) {
+        final decoded = jsonDecode(raw);
+        if (decoded is Map) map.addAll(decoded.cast<String, Object?>());
+      }
+      map[key] = '1';
+      await settings.setString(_removedSessionsSettingKey, jsonEncode(map));
+    } catch (_) {
+      // 持久化失败仅影响重启后的可见性；本次进程内已移除。
+    }
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已移除会话')));
+    }
+  }
+
+  /// 长按 / 右键：在指针位置弹出浮动会话菜单。
+  Future<void> _showSessionMenu(ChatSession s, Offset globalPosition) {
+    return showSessionMenu(
+      context,
+      ref,
+      session: s,
+      globalPosition: globalPosition,
+      onRemoved: () => _removeSession(s),
+    );
+  }
+
+  /// 点击头像：头像附近弹出玩家信息浮窗（内容进程内缓存，重开不重复请求）。
+  Future<void> _showPlayerInfo(ChatSession s, Offset globalPosition) {
+    return showSessionPlayerInfoPopup(
       context,
       ref,
       uin: s.id,
       name: s.name,
-      type: s.type,
-      showMute: true,
+      anchor: Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 1, 1),
+      avatarUrl: s.avatar,
+      headType: s.headType,
+      headId: s.headId,
+      headFrameId: s.headFrameId,
     );
-    if (mounted) setState(() {}); // 刷新（置顶影响排序）
   }
 }
 
@@ -180,13 +407,13 @@ class _SessionTile extends StatelessWidget {
   final ChatSession session;
   final bool isActive;
   final VoidCallback onTap;
-  final VoidCallback? onLongPress;
 
-  /// 桌面端右键（secondary tap）打开与长按相同的菜单。
-  final VoidCallback? onSecondaryTap;
+  /// 长按（移动端）/ 桌面右键：参数为指针全局坐标，作为浮动菜单锚点。
+  final ValueChanged<Offset>? onLongPress;
+  final ValueChanged<Offset>? onSecondaryTap;
 
-  /// 点击头像打开玩家简要信息卡（仅好友会话传入）。
-  final VoidCallback? onAvatarTap;
+  /// 点击头像（仅好友会话传入）：参数为指针全局坐标，作为浮窗锚点。
+  final ValueChanged<Offset>? onAvatarTap;
 
   const _SessionTile({
     required this.session,
@@ -238,12 +465,13 @@ class _SessionTile extends StatelessWidget {
       contentPadding: AppSpacing.listTilePadding,
       visualDensity: kAvatarListTileDensity,
       minTileHeight: headFrameSlotSize(24),
-      // 头像可点击（仅好友）：opaque 保证不与整行 onTap 冲突
+      // 头像可点击（仅好友）：opaque 保证不与整行 onTap 冲突；onTapUp 带全局
+      // 坐标，用于把信息浮窗锚到头像附近。
       leading: onAvatarTap == null
           ? avatar
           : GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: onAvatarTap,
+              onTapUp: (details) => onAvatarTap!(details.globalPosition),
               child: avatar,
             ),
       title: RichTextView(
@@ -322,14 +550,17 @@ class _SessionTile extends StatelessWidget {
         ],
       ),
       onTap: onTap,
-      onLongPress: onLongPress,
     );
 
-    // 右键（桌面端）打开菜单：ListTile 不暴露 secondary tap，外层包一层
+    // 右键（桌面端）/ 长按（移动端）打开浮动菜单：ListTile 不暴露 secondary
+    // tap，长按也拿不到指针坐标，外层包一层统一取全局坐标。
     return GestureDetector(
+      onLongPressStart: onLongPress == null
+          ? null
+          : (d) => onLongPress!(d.globalPosition),
       onSecondaryTapDown: onSecondaryTap == null
           ? null
-          : (_) => onSecondaryTap!(),
+          : (d) => onSecondaryTap!(d.globalPosition),
       child: tile,
     );
   }

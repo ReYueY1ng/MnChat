@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/chat_emoji.dart' show kChatEmoji;
 import '../../core/emoticon.dart' show EmoticonImage;
 import '../../core/models/nickname.dart';
+import '../../state/providers.dart';
 
 /// 迷你世界富文本 → [InlineSpan] 的统一解析。
 ///
@@ -143,7 +145,8 @@ Color _parseColor(String raw) {
 /// 富文本展示组件：自动清洗标记并按需渲染表情 / 话题 / 颜色。
 ///
 /// 无标记时退化为普通 [Text]，避免不必要的 span 开销（列表滚动友好）。
-class RichTextView extends StatelessWidget {
+/// 「富文本显示原文本」开启时跳过全部解析，原样显示源字符串（含标签）。
+class RichTextView extends ConsumerWidget {
   final String? text;
   final TextStyle? style;
   final int? maxLines;
@@ -162,10 +165,20 @@ class RichTextView extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final raw = text ?? '';
     if (raw.isEmpty) {
       return Text('', style: style, maxLines: maxLines, overflow: overflow);
+    }
+    // 「富文本显示原文本」开启：不解析标记，原样显示。
+    if (ref.watch(richTextRawProvider)) {
+      return Text(
+        raw,
+        style: style,
+        maxLines: maxLines,
+        overflow: overflow,
+        textAlign: textAlign,
+      );
     }
     if (!hasRichMarkup(raw)) {
       return Text(

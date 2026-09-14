@@ -59,6 +59,21 @@ class _MainShellState extends ConsumerState<MainShell> {
     if (_tab != 0) setState(() => _tab = 0);
   }
 
+  /// 点击会话卡片：已是当前会话则关闭聊天面板（桌面端再点一次收起），
+  /// 否则打开该会话。
+  ///
+  /// 宽屏常驻聊天面板由 [_chatInstance] 渲染，关闭时一并清掉缓存实例，
+  /// 否则面板仍显示上一次的聊天内容（只是选中高亮消失，看不到"关闭"）。
+  void _toggleSession(ChatSession s) {
+    final active = ref.read(activeSessionProvider);
+    if (active != null && active.type == s.type && active.id == s.id) {
+      ref.read(activeSessionProvider.notifier).close();
+      setState(() => _chatInstance = null);
+    } else {
+      ref.read(activeSessionProvider.notifier).open(s.type, s.id);
+    }
+  }
+
   /// 会话列表：好友只显示已聊过天的，群全部保留。
   static List<ChatSession> _conversations(List<ChatSession> all) => [
     for (final s in all)
@@ -114,6 +129,7 @@ class _MainShellState extends ConsumerState<MainShell> {
         chatPane: chatPane,
         chatOpen: chatOpen,
         wide: sessionWide,
+        onOpenSession: _toggleSession,
       );
       final friendsTab = FriendsPage(onOpenChat: (uin) {
         _openChat(ChatSessionType.friend, uin);
@@ -168,10 +184,10 @@ class _MainShellState extends ConsumerState<MainShell> {
       selectedIndex: _tab,
       onDestinationSelected: _switchTab,
       labelType: NavigationRailLabelType.all,
-      // 账号头像固定在侧栏顶部（点击弹出账号菜单）。
+      // 账号头像固定在侧栏顶部（点击显示本人的玩家信息浮窗）。
       leading: const Padding(
         padding: EdgeInsets.only(top: AppSpacing.sm),
-        child: AccountAvatarButton(),
+        child: AccountAvatarButton(showSelfInfo: true),
       ),
       // 菜单按钮固定在侧栏底部，与顶部头像打开同一菜单（QQ/微信 风格）。
       // 与顶部头像对称加 AppSpacing.sm 底部留白，避免按钮贴住窗口底边。
@@ -244,11 +260,15 @@ class _SessionsTab extends StatelessWidget {
   final bool chatOpen;
   final bool wide;
 
+  /// 点击会话卡片的回调（HomeShell 负责"再次点击当前会话关闭"的切换）。
+  final ValueChanged<ChatSession> onOpenSession;
+
   const _SessionsTab({
     required this.sessions,
     required this.chatPane,
     required this.chatOpen,
     required this.wide,
+    required this.onOpenSession,
   });
 
   @override
@@ -260,7 +280,10 @@ class _SessionsTab extends StatelessWidget {
         children: [
           SizedBox(
             width: 320,
-            child: SessionListPage(sessions: sessions),
+            child: SessionListPage(
+              sessions: sessions,
+              onOpenChat: onOpenSession,
+            ),
           ),
           const VerticalDivider(width: 1),
           Expanded(child: chatPane),
@@ -271,7 +294,7 @@ class _SessionsTab extends StatelessWidget {
     return IndexedStack(
       index: chatOpen ? 1 : 0,
       children: [
-        SessionListPage(sessions: sessions),
+        SessionListPage(sessions: sessions, onOpenChat: onOpenSession),
         chatPane,
       ],
     );

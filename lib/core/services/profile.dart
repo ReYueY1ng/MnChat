@@ -33,6 +33,14 @@ class PlayerProfile {
   final int? headType;
   final int? headId;
 
+  /// 穿戴中的角色皮肤 ID（`RoleInfo.SkinID`）；0/缺失归一为 null。
+  /// 本地图标需经 `kSkinHeadIcon` 映射到 `roleicons/<Head>.png`。
+  final int? headSkinId;
+
+  /// 角色本体模型 ID（`RoleInfo.Model`，官方默认 2）；0/缺失归一为 null。
+  /// 未穿皮肤时官方用它兜底 `roleicons/<Model>.png`。
+  final int? headModel;
+
   const PlayerProfile({
     required this.uin,
     required this.nickname,
@@ -41,7 +49,40 @@ class PlayerProfile {
     this.ownedHeadFrameIds = const {},
     this.headType,
     this.headId,
+    this.headSkinId,
+    this.headModel,
   });
+
+  /// 角色头像本地回退解析（对齐官方 `headinfosysmgr.lua:GetPlayerHeadPath`）。
+  ///
+  /// 人物中心头信息（[headType]/[headId]）可用时原样返回；否则从资料字段
+  /// 补一个可本地渲染的 (type,id)：
+  /// - 可用的头类型：1（皮肤）/3（坐骑）/4（立绘）且 id>0——它们分别经
+  ///   `roleicons/<kSkinHeadIcon[id]>.png`、`rideicons/<id>.png`、
+  ///   `roleicons/<id>.png` 落到本地资源；
+  /// - 不可用时优先 `RoleInfo.SkinID` → type 1（皮肤 ID 仍需映射到 Head 图标）；
+  /// - 无皮肤再用 `RoleInfo.Model` → type 4（id 直接寻址 `roleicons/<model>.png`），
+  ///   这正是官方在未穿皮肤时的角色本体兜底路径；
+  /// - 都没有返回 null，由调用方保留原值（最终回退网络头像/首字占位）。
+  ///
+  /// 注意：**绝不产出 type 2**（头套是 3D 组合部件，没有 2D 图标；
+  /// 产出它只会挡住网络头像回退，渲染不出任何东西）。
+  static ({int type, int id})? resolveRoleHeadFallback({
+    int? headType,
+    int? headId,
+    int? skinId,
+    int? model,
+  }) {
+    if (headType != null &&
+        (headType == 1 || headType == 3 || headType == 4) &&
+        headId != null &&
+        headId > 0) {
+      return (type: headType, id: headId);
+    }
+    if (skinId != null && skinId > 0) return (type: 1, id: skinId);
+    if (model != null && model > 0) return (type: 4, id: model);
+    return null;
+  }
 
   /// 从 getProfileBatch3 响应项解析。
   /// 结构（LuaTable）: {profile: {uin, RoleInfo: {NickName, ...},
@@ -59,6 +100,8 @@ class PlayerProfile {
     if (uin2 == 0) return null;
 
     var nickname = '';
+    var skinId = 0;
+    var model = 0;
     // 反编译 friendservice.lua:RespPlayerDatas 证实：`head_frame_id` 在
     // **profile 层**（与 RoleInfo 同级），RoleInfo 里只有 NickName/SkinID/Model。
     // 此前误从 RoleInfo 里取，导致好友/会话列表的头像框永远为 null（不显示）。
@@ -67,6 +110,9 @@ class PlayerProfile {
     if (ri is Map) {
       final r = ri.cast<String, Object?>();
       nickname = r['NickName']?.toString() ?? '';
+      // 角色头像兜底数据（官方 GetPlayerHeadPath 的型号来源）。
+      skinId = _firstInt(r, ['SkinID', 'skin_id', 'skinId', 'skinid']);
+      model = _firstInt(r, ['Model', 'model']);
       // 兼容个别响应把字段放进 RoleInfo 的情况
       if (headFrameId == 0) {
         headFrameId = _firstInt(r, ['head_frame_id', 'headFrameId']);
@@ -81,6 +127,8 @@ class PlayerProfile {
       avatarUrl: avatar,
       headFrameId: headFrameId <= 0 ? null : headFrameId,
       ownedHeadFrameIds: _parseOwnedFrames(p),
+      headSkinId: skinId <= 0 ? null : skinId,
+      headModel: model <= 0 ? null : model,
     );
   }
 
@@ -283,8 +331,19 @@ class ProfileClient {
     final decoded = decodeHttpResponse(text);
     if (decoded is! Map) return null;
     final m = decoded.cast<String, Object?>();
-    if (m['profile'] is! Map) return null;
-    return PlayerProfile.fromItem(m);
+    // 兼容两种信封：`{profile:{...}}` 与 `{data:{profile:{...}}}`（不同网关/版本
+    // 会不一样）。此前只认前者，取不到时整个资料为 null，导致头像框选择器
+    // 只剩默认框 1（用户反馈「只显示一个头像框」）。
+    Object? rawProfile = m['profile'];
+    final data = m['data'];
+    if (rawProfile is! Map && data is Map) {
+      rawProfile = (data.cast<String, Object?>())['profile'];
+    }
+    if (rawProfile is! Map) return null;
+    return PlayerProfile.fromItem(<String, Object?>{
+      'uin': uin,
+      'profile': rawProfile,
+    });
   }
 
   /// 设置当前账号头像框。

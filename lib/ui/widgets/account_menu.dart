@@ -8,6 +8,7 @@ import '../profile_page.dart';
 import '../settings_page.dart';
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
+import 'session_player_info_popup.dart';
 
 /// 账号菜单操作项。
 enum _AccountAction {
@@ -265,11 +266,16 @@ Future<void> _showCreateGroupDialog(
   }
 }
 
-/// 账号头像按钮：点击在自身位置弹出 [showAccountMenu]。
+/// 账号头像按钮：点击默认在自身位置弹出 [showAccountMenu]。
 ///
 /// 横屏侧边栏顶部与竖屏 AppBar 共用，悬停提示为"账号"。
+/// [showSelfInfo] 为 true 时改弹当前账号的玩家信息浮窗（横屏侧栏头像），
+/// 竖屏 AppBar 保持账号菜单行为不变。
 class AccountAvatarButton extends ConsumerStatefulWidget {
-  const AccountAvatarButton({super.key});
+  /// true：点击显示本人玩家信息浮窗；false（默认）：打开账号菜单。
+  final bool showSelfInfo;
+
+  const AccountAvatarButton({super.key, this.showSelfInfo = false});
 
   @override
   ConsumerState<AccountAvatarButton> createState() =>
@@ -285,6 +291,22 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
     final anchor = box == null
         ? null
         : box.localToGlobal(Offset.zero) & box.size;
+    // 侧栏头像：显示本人玩家信息浮窗；未登录（uin=0）时退回账号菜单。
+    if (widget.showSelfInfo) {
+      final uin = ref.read(myUinProvider);
+      if (uin > 0) {
+        await showSessionPlayerInfoPopup(
+          context,
+          ref,
+          uin: uin,
+          name: ref.read(authProvider).auth?.name ?? '',
+          anchor: anchor,
+          // 本人信息卡只展示资料，不带好友操作（备注 / 删除好友等对本人无意义）。
+          showActions: false,
+        );
+        return;
+      }
+    }
     await showAccountMenu(context, ref, anchor: anchor);
   }
 
@@ -292,7 +314,7 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
     return Tooltip(
-      message: '账号',
+      message: widget.showSelfInfo ? '我的资料' : '账号',
       child: InkWell(
         onTap: _open,
         customBorder: const CircleBorder(),
