@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 
 import '../core/services/dynamics.dart';
+import '../core/services/msg_box.dart' show MsgBoxEntry;
 import '../state/providers.dart';
-import 'dynamics_notice_page.dart';
+import 'mail_page.dart' show MailPage, MailSelection;
 import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
 
@@ -167,8 +168,14 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
             IconButton(
               tooltip: '动态通知',
               icon: const Icon(Icons.notifications_outlined),
+              // 动态通知统一进消息中心：顶部"动态互动"入口
+              //（post_rep/post_prize/post_at + fans_change 同源）。
               onPressed: () => Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DynamicsNoticePage()),
+                MaterialPageRoute(
+                  builder: (_) => const MailPage(
+                    focus: MailSelection.entry(MsgBoxEntry.dynamics),
+                  ),
+                ),
               ),
             ),
             IconButton(

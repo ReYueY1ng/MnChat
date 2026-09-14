@@ -11,6 +11,9 @@ import '../chat/chat_bridge.dart';
 import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
+import '../core/services/dynamics.dart';
+import '../core/services/message_center.dart';
+import '../core/services/msg_box.dart';
 import '../core/services/partner.dart';
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
@@ -620,6 +623,36 @@ class DndWindowNotifier extends Notifier<DndWindow> {
     await settings.setInt(SettingsKeys.dndEnd, w.end);
   }
 }
+
+// ── 消息中心 / 互动通知 ─────────────────────────────────────────────────
+
+/// 消息中心（/miniw/msgcenter）客户端（未登录返回 null）。
+final messageCenterClientProvider = Provider<MessageCenterClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return MessageCenterClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
+/// 互动通知（/miniw/msg_box，顶部 3 入口 + 动态助手频道）客户端。
+final msgBoxClientProvider = Provider<MsgBoxClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return MsgBoxClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
+/// 动态客户端（消息中心 `详情` 跳转动态详情用；未登录返回 null）。
+final dynamicsClientProvider = Provider<DynamicsClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
+/// 资料客户端（互动通知列表头像补全；未登录返回 null）。
+final profileClientProvider = Provider<ProfileClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
 
 // ── 最佳拍档 / 玩家等级 / 大会员 ─────────────────────────────────────────
 

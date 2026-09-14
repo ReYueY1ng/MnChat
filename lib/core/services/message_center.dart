@@ -19,33 +19,218 @@ import '../protocol/lua_table.dart' show decodeHttpResponse;
 /// 消息中心路径。
 const String kMsgCenterPath = 'miniw/msgcenter';
 
-/// 邮件/消息频道 id（对齐 mailservice.MAIL_TYPE + InitDefStaticData）。
+/// 邮件/消息频道 id（对齐 MainChatSystemMsg.systemTabList，
+/// mainchatsystemmsg.lua:16-63；新消息中心 7 分类）。
+///
+/// 左列分类与频道：礼物消息=10005 / 官方邮件=1 / 创作者助手=20001 /
+/// 系统消息=20002 / 好友邮件=2 / 动态助手=0 / 运营活动=20003。
+/// 其中频道 1/2/10005/20001/20002/20003 走 `/miniw/msgcenter`；
+/// **动态助手 channelID=0 不走 msgcenter**，而是 `/miniw/msg_box` 的
+/// `post_sys` 频道（见 [MsgBoxChannel.sys]）。
 class MsgChannel {
   static const int systemMail = 1; // 官方邮件
   static const int friendMail = 2; // 好友邮件
+  static const int creator = 20001; // 创作者助手
   static const int sysMsg = 20002; // 系统消息
   static const int activity = 20003; // 运营活动
-  static const int interact = 4; // 互动消息
-  static const int likeMe = 10002; // 点赞我的
-  static const int commentMe = 10001; // 评论我的
-  static const int atMe = 10004; // @我的
-  static const int topComment = 10003; // 评论置顶
-  static const int giftMe = 10005; // 收到礼物
+  static const int gift = 10005; // 礼物消息
+
+  /// 动态助手（对齐 systemTabList channelID="0"，数据走 msg_box post_sys）。
+  static const int activityAssistant = 0;
+
+  /// 左列 7 分类显示顺序（按参考截图自上而下）。
+  static const List<int> categoryOrder = [
+    gift,
+    systemMail,
+    creator,
+    sysMsg,
+    friendMail,
+    activityAssistant,
+    activity,
+  ];
+
+  /// 走 `/miniw/msgcenter` 的左列频道（排除动态助手）。
+  static const List<int> mailChannels = [
+    gift,
+    systemMail,
+    creator,
+    sysMsg,
+    friendMail,
+    activity,
+  ];
 
   static const Map<int, String> names = {
     systemMail: '官方邮件',
     friendMail: '好友邮件',
+    creator: '创作者助手',
     sysMsg: '系统消息',
     activity: '运营活动',
-    interact: '互动消息',
-    likeMe: '点赞我的',
-    commentMe: '评论我的',
-    atMe: '@我的',
-    topComment: '评论置顶',
-    giftMe: '收到礼物',
+    gift: '礼物消息',
+    activityAssistant: '动态助手',
   };
 
   static String name(int id) => names[id] ?? '频道$id';
+
+  // ── 旧版 msgsys_tree 频道（互动消息 4 及其子频道 10001-10004）──
+  // 旧消息中心的"互动消息"聚合页；新 UI 已由顶部
+  // 动态互动(post_rep/post_prize/post_at) 与 新增粉丝/作品互动(msg_box) 取代。
+  // 保留常量仅作协议参考，新代码禁止使用。
+  @Deprecated('旧消息中心 msgsys_tree 子频道，已由 msg_box 互动通知取代')
+  static const int interact = 4; // 旧：互动消息
+  @Deprecated('旧消息中心 msgsys_tree 子频道，已由 msg_box 互动通知取代')
+  static const int commentMe = 10001; // 旧：评论我的
+  @Deprecated('旧消息中心 msgsys_tree 子频道，已由 msg_box 互动通知取代')
+  static const int likeMe = 10002; // 旧：点赞我的
+  @Deprecated('旧消息中心 msgsys_tree 子频道，已由 msg_box 互动通知取代')
+  static const int topComment = 10003; // 旧：评论置顶
+  @Deprecated('旧消息中心 msgsys_tree 子频道，已由 msg_box 互动通知取代')
+  static const int atMe = 10004; // 旧：@我的
+}
+
+/// 频道计数摘要（`fetch_channels_info` 单频道条目）。
+class ChannelSummary {
+  final int channel;
+
+  /// 未读数（`fetch_channels_info` 的计数语义按未读处理）。
+  final int unread;
+
+  /// 总数；缺失时回退为 [unread]。
+  final int total;
+
+  const ChannelSummary({
+    required this.channel,
+    this.unread = 0,
+    this.total = 0,
+  });
+
+  @override
+  bool operator ==(Object other) =>
+      other is ChannelSummary &&
+      other.channel == channel &&
+      other.unread == unread &&
+      other.total == total;
+
+  @override
+  int get hashCode => Object.hash(channel, unread, total);
+}
+
+/// 纯解析 `fetch_channels_info` 响应 → {频道 id: 摘要}。
+///
+/// 调研笔记只确认入参 `channellist` 与计数由 `data` 承载，未固化字段名，
+/// 因此按容错解析：`data` 可为 {频道: 计数}、`channles`/`channels` 包裹对象
+/// 或 `[{channel, count}]` 数组；计数可为数字 / 数字字符串 / 含
+/// `unread`/`count`/`total` 等键的对象。解析不了的条目跳过；非零
+/// `code`/`ret`、非 Map 响应 → 空结果。绝不抛异常。
+Map<int, ChannelSummary> parseChannelsInfo(Object? decoded) {
+  if (decoded is! Map) return {};
+  final m = decoded.cast<String, Object?>();
+  if (!_retOk(m)) return {};
+  final data = m['data'];
+  if (data is Map) {
+    final dm = data.cast<String, Object?>();
+    for (final k in const ['channles', 'channels', 'channellist', 'list']) {
+      final nested = dm[k];
+      if (nested is Map) return _summariesFromMap(nested.cast<String, Object?>());
+      if (nested is List) return _summariesFromList(nested);
+    }
+    return _summariesFromMap(dm);
+  }
+  if (data is List) return _summariesFromList(data);
+  return {};
+}
+
+Map<int, ChannelSummary> _summariesFromMap(Map<String, Object?> m) {
+  final out = <int, ChannelSummary>{};
+  for (final e in m.entries) {
+    final ch = int.tryParse(e.key);
+    if (ch == null) continue;
+    final s = _summaryFromValue(ch, e.value);
+    if (s != null) out[ch] = s;
+  }
+  return out;
+}
+
+Map<int, ChannelSummary> _summariesFromList(List<Object?> list) {
+  final out = <int, ChannelSummary>{};
+  for (final e in list) {
+    if (e is! Map) continue;
+    final em = e.cast<String, Object?>();
+    final ch = _asInt(em['channelid'] ??
+        em['channel_id'] ??
+        em['channel'] ??
+        em['id']);
+    if (ch <= 0) continue;
+    final s = _summaryFromValue(ch, em);
+    if (s != null) out[ch] = s;
+  }
+  return out;
+}
+
+ChannelSummary? _summaryFromValue(int ch, Object? v) {
+  if (v is num) {
+    return ChannelSummary(channel: ch, unread: v.toInt(), total: v.toInt());
+  }
+  if (v is String) {
+    final n = int.tryParse(v);
+    if (n == null) return null;
+    return ChannelSummary(channel: ch, unread: n, total: n);
+  }
+  if (v is Map) {
+    final m = v.cast<String, Object?>();
+    final unread = _asInt(_firstOf(m, const [
+      'unread',
+      'unread_count',
+      'unreadcount',
+      'new',
+      'news',
+      'news_count',
+      'newcount',
+      'count',
+      'cnt',
+      'num',
+      'msgcount',
+      'msg_count',
+    ]));
+    final total = _asInt(_firstOf(m, const [
+      'total',
+      'msgtotal',
+      'msg_total',
+      'all',
+      'msgcount',
+      'msg_count',
+    ]));
+    return ChannelSummary(
+      channel: ch,
+      unread: unread,
+      total: total > 0 ? total : unread,
+    );
+  }
+  return null;
+}
+
+Object? _firstOf(Map<String, Object?> m, List<String> keys) {
+  for (final k in keys) {
+    if (m.containsKey(k)) return m[k];
+  }
+  return null;
+}
+
+int _asInt(Object? v) {
+  if (v is num) return v.toInt();
+  if (v is String) return int.tryParse(v) ?? 0;
+  return 0;
+}
+
+/// 校验 `code` / `ret`：存在且为 0 → 成功；非零 / 非数字 → 失败。
+bool _retOk(Map<String, Object?> m) {
+  for (final key in const ['ret', 'code']) {
+    final v = m[key];
+    if (v == null) continue;
+    if (v is num) return v == 0;
+    final n = int.tryParse('$v');
+    return n != null && n == 0;
+  }
+  return true;
 }
 
 /// 邮件附件（extra.attach 条目）。
@@ -189,7 +374,17 @@ class MsgItem {
       ts = int.tryParse('$t') ?? 0;
     }
 
-    final readRaw = m['readState'] ?? m['read_state'] ?? m['readstate'] ?? 0;
+    final readRaw = m['readState'] ?? m['read_state'] ?? m['readstate'];
+    // 详情另有 status 位域（1=已读 2=已领取 3=both），readState 缺失时用它兜底。
+    final statusRaw = m['status'];
+    final status = statusRaw is num
+        ? statusRaw.toInt()
+        : int.tryParse('$statusRaw') ?? 0;
+    final readState = readRaw != null
+        ? (readRaw is num ? readRaw.toInt() : int.tryParse('$readRaw') ?? 0)
+        : (status & 1) != 0
+            ? 1
+            : 0;
 
     return MsgItem(
       id: id,
@@ -201,13 +396,12 @@ class MsgItem {
       title: m['title']?.toString() ?? '',
       content: m['content']?.toString() ?? '',
       createTime: ts,
-      readState: readRaw is num
-          ? readRaw.toInt()
-          : int.tryParse('$readRaw') ?? 0,
+      readState: readState,
       images: images,
       attach: attach,
       jumpTo: jumpTo,
       jumpName: jumpName,
+      attachmentTaken: (status & 2) != 0,
     );
   }
 }
@@ -381,6 +575,15 @@ class MessageCenterClient {
       }
     }
     return 0;
+  }
+
+  /// 批量拉取频道计数（act=fetch_channels_info，入参 `channellist` JSON 数组）。
+  /// 返回 `{频道: 摘要}`；失败 / 解析不了返回空 map（解析见 [parseChannelsInfo]）。
+  Future<Map<int, ChannelSummary>> fetchChannelsInfo(List<int> channels) async {
+    if (channels.isEmpty) return {};
+    final list = channels.map((c) => '$c').join(',');
+    final ret = await _get('fetch_channels_info', {'channellist': '[$list]'});
+    return parseChannelsInfo(ret);
   }
 }
 
