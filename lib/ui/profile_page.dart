@@ -49,6 +49,7 @@ import 'player_home_page.dart';
 import 'social_sign_page.dart';
 import 'theme/app_tokens.dart';
 import 'visitor_list_page.dart';
+import 'widgets/avatar_edit_dialog.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/partner_badges.dart';
@@ -271,6 +272,31 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => VisitorListPage(ownerUin: uin)),
     );
+  }
+
+  /// 打开「头像编辑」弹窗（头像 / 头像框 / 昵称 / 称号 / 家族）。
+  ///
+  /// 弹窗使用当前快照（[AvatarEditInitialData]），关闭后若确实改过任何一项
+  /// 则刷新资料与主页模块，保证个人主页与弹窗内即时生效的设置一致。
+  Future<void> _openAvatarEdit() async {
+    final auth = ref.read(authProvider).auth;
+    final changed = await showAvatarEditDialog(
+      context,
+      initial: AvatarEditInitialData(
+        uin: auth?.uin ?? 0,
+        name: auth?.name ?? '',
+        avatarUrl: _avatarUrl,
+        headType: _headType,
+        headId: _headId,
+        frameId: _frameId,
+        ownedFrames: _ownedFrames,
+        portraits: _portraits,
+        titleName: _titleName,
+      ),
+    );
+    if (!mounted || !changed) return;
+    await _loadProfile();
+    await _loadHomeModules();
   }
 
   /// 修改昵称：输入 → 本地校验 → 二次确认 → 调用服务。
@@ -586,6 +612,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         title: const Text('个人主页'),
         actions: [
           IconButton(
+            tooltip: '头像编辑',
+            icon: const Icon(Icons.badge_outlined),
+            onPressed: _openAvatarEdit,
+          ),
+          IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: () {
@@ -616,6 +647,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 onEditLayout: () => _notSupported('编辑主页布局'),
                 onRename: _editNickname,
                 onHomeland: () => _openHomeland(uin),
+                onEditAvatar: _openAvatarEdit,
               ),
               const SizedBox(height: AppSpacing.md),
               // 2. 横幅：交友宣言 + 编辑
@@ -820,6 +852,9 @@ class _ProfileHeaderCard extends StatelessWidget {
   final VoidCallback onRename;
   final VoidCallback onHomeland;
 
+  /// 打开「头像编辑」弹窗（点按头像或顶栏按钮均可）。
+  final VoidCallback onEditAvatar;
+
   const _ProfileHeaderCard({
     required this.name,
     required this.uin,
@@ -834,6 +869,7 @@ class _ProfileHeaderCard extends StatelessWidget {
     required this.onEditLayout,
     required this.onRename,
     required this.onHomeland,
+    required this.onEditAvatar,
   });
 
   @override
@@ -848,14 +884,21 @@ class _ProfileHeaderCard extends StatelessWidget {
           Row(
             children: [
               // 头像本体 + 头像框统一由 AvatarView 渲染（槽位按 headFrameSlotSize
-              // 放大，框不会被裁切）。
-              AvatarView(
-                avatarUrl: avatarUrl,
-                name: name,
-                radius: 36,
-                headType: headType,
-                headId: headId,
-                frameId: frameId,
+              // 放大，框不会被裁切）。点按头像打开「头像编辑」弹窗。
+              Tooltip(
+                message: '头像编辑',
+                child: InkWell(
+                  onTap: onEditAvatar,
+                  borderRadius: AppRadius.cardR,
+                  child: AvatarView(
+                    avatarUrl: avatarUrl,
+                    name: name,
+                    radius: 36,
+                    headType: headType,
+                    headId: headId,
+                    frameId: frameId,
+                  ),
+                ),
               ),
               const SizedBox(width: AppSpacing.md),
               Expanded(

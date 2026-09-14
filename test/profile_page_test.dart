@@ -8,6 +8,7 @@ import 'package:mnchat/core/services/profile.dart' show PlayerProfile;
 import 'package:mnchat/state/providers.dart';
 import 'package:mnchat/ui/profile_page.dart';
 import 'package:mnchat/ui/theme/app_theme.dart';
+import 'package:mnchat/ui/widgets/avatar_edit_dialog.dart' show avatarEditNavKey;
 import 'package:mnchat/ui/widgets/avatar_view.dart';
 import 'package:mnchat/ui/widgets/partner_badges.dart';
 
@@ -135,5 +136,29 @@ void main() {
     expect(find.byType(LevelBadge), findsNothing);
     expect(find.byType(TacitBadge), findsNothing);
     expect(find.byType(VipBadge), findsNothing);
+  });
+
+  testWidgets('个人主页两处入口均可打开头像编辑弹窗并关闭', (tester) async {
+    await pumpProfilePage(tester);
+    // 顶栏按钮 + 头像点按共两处入口（Tooltip 同名）。
+    expect(find.byTooltip('头像编辑'), findsNWidgets(2));
+
+    await tester.tap(find.widgetWithIcon(IconButton, Icons.badge_outlined));
+    await tester.pumpAndSettle();
+    expect(find.text('头像编辑'), findsOneWidget);
+    for (final label in ['头像', '头像框', '昵称', '称号', '家族']) {
+      expect(
+        find.descendant(
+          of: find.byKey(avatarEditNavKey),
+          matching: find.text(label),
+        ),
+        findsOneWidget,
+        reason: '缺少弹窗页签：$label',
+      );
+    }
+
+    await tester.tap(find.byTooltip('关闭'));
+    await tester.pumpAndSettle();
+    expect(find.text('头像编辑'), findsNothing);
   });
 }

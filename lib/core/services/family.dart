@@ -35,7 +35,7 @@ class FamilyMember {
 
   static FamilyMember fromJson(Map<String, Object?> m) => FamilyMember(
         uin: (m['uin'] ?? m['Uin'] ?? 0) is num
-            ? ((m['uin'] ?? m['Uin']) as num).toInt()
+            ? ((m['uin'] ?? m['Uin'] ?? 0) as num).toInt()
             : int.tryParse('${m['uin'] ?? m['Uin'] ?? 0}') ?? 0,
         nickname: m['NickName']?.toString() ?? m['nickname']?.toString() ?? '',
         avatar: m['header']?.toString() ?? m['avatar']?.toString(),
@@ -82,8 +82,10 @@ class FamilyInfo {
       }
     }
     if (leader == 0) {
+      // 注意：`?? 0` 必须保留在强转表达式内，否则字段全缺时会把 null 当成
+      // num 强转（脏响应直接抛异常，见 family_list_parse_test）。
       leader = (m['leader_uin'] ?? m['owner'] ?? 0) is num
-          ? ((m['leader_uin'] ?? m['owner']) as num).toInt()
+          ? ((m['leader_uin'] ?? m['owner'] ?? 0) as num).toInt()
           : 0;
     }
     return FamilyInfo(
@@ -96,6 +98,39 @@ class FamilyInfo {
       memberCount: (m['member_count'] as num?)?.toInt() ?? members.length,
     );
   }
+}
+
+/// 解析 `get_family_list` 响应，返回我加入的全部家族（按响应顺序去重）。
+///
+/// 兼容官方响应的多种信封：顶层即家族 / `{family:{...}}` /
+/// `{families:[...]}` / `{data:[...]}` / `{data:{...}}`（与
+/// `ui/family_page.dart` 的取值口径一致）。脏数据（非 Map / 缺 family_id）
+/// 直接跳过，解析不出时返回空列表，绝不抛异常。
+List<FamilyInfo> parseFamilyList(Map<String, Object?> resp) {
+  final out = <FamilyInfo>[];
+  final seen = <int>{};
+  void collect(Object? node) {
+    if (node is! Map) return;
+    final m = node.cast<String, Object?>();
+    final self = FamilyInfo.fromJson(m);
+    if (self != null) {
+      if (seen.add(self.familyId)) out.add(self);
+      return;
+    }
+    for (final key in const ['family', 'families', 'data']) {
+      final inner = m[key];
+      if (inner is List) {
+        for (final e in inner) {
+          collect(e);
+        }
+      } else if (inner is Map) {
+        collect(inner);
+      }
+    }
+  }
+
+  collect(resp);
+  return out;
 }
 
 /// 家族客户端。
