@@ -11,6 +11,8 @@ import '../chat/chat_bridge.dart';
 import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
+import '../core/services/partner.dart';
+import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
 
@@ -618,3 +620,127 @@ class DndWindowNotifier extends Notifier<DndWindow> {
     await settings.setInt(SettingsKeys.dndEnd, w.end);
   }
 }
+
+// ── 最佳拍档 / 玩家等级 / 大会员 ─────────────────────────────────────────
+
+/// 拍档/等级/大会员客户端（未登录返回 null）。
+final partnerClientProvider = Provider<PartnerClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return PartnerClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
+/// 安全获取拍档客户端：测试等环境未注入认证时返回 null，让派生 provider
+/// 退化为空数据，而不是把异常抛给 UI。
+PartnerClient? _tryPartnerClient(Ref ref) {
+  try {
+    return ref.watch(partnerClientProvider);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 忽略失败的异步读取：网络/解析异常时退回 [fallback]。
+Future<T> _partnerGuard<T>(Future<T> Function() run, T fallback) async {
+  try {
+    return await run();
+  } catch (_) {
+    return fallback;
+  }
+}
+
+/// 会话可见好友的等级 / 拍档 / 大会员聚合缓存。
+///
+/// 一次批量拉取（等级 + 拍档列表 + 大会员），随会话流变化重算；未登录或
+/// 数据未就绪时返回 [PartnerDirectory.empty]，行 UI 自动降级为无徽标。
+final partnerDirectoryProvider = FutureProvider<PartnerDirectory>((ref) async {
+  final snap = ref.watch(sessionListProvider).asData?.value;
+  if (snap == null) return PartnerDirectory.empty;
+  final uins = <int>{
+    for (final s in snap.sessions)
+      if (s.type == ChatSessionType.friend && s.id > 0) s.id,
+  }.toList();
+  if (uins.isEmpty) return PartnerDirectory.empty;
+  final client = _tryPartnerClient(ref);
+  if (client == null) return PartnerDirectory.empty;
+  final levels = await _partnerGuard(
+    () => client.getPlatformLevels(uins),
+    const <int, int>{},
+  );
+  final partners = await _partnerGuard(
+    () => client.getPartnerList(),
+    const <PartnerInfo>[],
+  );
+  final vip = await _partnerGuard(
+    () => client.getVipExpiry(uins),
+    const <int, int>{},
+  );
+  return PartnerDirectory(
+    levels: levels,
+    partners: {for (final p in partners) p.bestUin: p},
+    vipExpiry: vip,
+  );
+});
+
+/// 本人拍档列表。
+final myPartnerListProvider = FutureProvider<List<PartnerInfo>>((ref) async {
+  final client = _tryPartnerClient(ref);
+  if (client == null) return const <PartnerInfo>[];
+  return _partnerGuard(() => client.getPartnerList(), const <PartnerInfo>[]);
+});
+
+/// 本人拍档槽位（可建立拍档数上限）。
+final partnerSlotProvider = FutureProvider<PartnerSlotInfo?>((ref) async {
+  final uin = ref.watch(myUinProvider);
+  final client = _tryPartnerClient(ref);
+  if (client == null || uin <= 0) return null;
+  return _partnerGuard(() => client.getPartnerSlot(uin), null);
+});
+
+/// 拍档红点数量。
+final partnerRedDotProvider = FutureProvider<int>((ref) async {
+  final client = _tryPartnerClient(ref);
+  if (client == null) return 0;
+  return _partnerGuard(() => client.getRedDotCount(), 0);
+});
+
+/// 本人拍档的平台等级（拍档页 `Lv<N>`）。
+final partnerLevelsProvider = FutureProvider<Map<int, int>>((ref) async {
+  final partners = await ref.watch(myPartnerListProvider.future);
+  if (partners.isEmpty) return const <int, int>{};
+  final client = _tryPartnerClient(ref);
+  if (client == null) return const <int, int>{};
+  final uins = partners.map((p) => p.bestUin).toList();
+  return _partnerGuard(
+    () => client.getPlatformLevels(uins),
+    const <int, int>{},
+  );
+});
+
+/// 本人拍档的资料（昵称 / 头像 / 头像框），供拍档卡片渲染。
+final partnerProfilesProvider =
+    FutureProvider<Map<int, PlayerProfile>>((ref) async {
+      final partners = await ref.watch(myPartnerListProvider.future);
+      if (partners.isEmpty) return const <int, PlayerProfile>{};
+      final auth = ref.watch(authProvider).auth;
+      if (auth == null) return const <int, PlayerProfile>{};
+      final uins = partners.map((p) => p.bestUin).toList();
+      final out = <int, PlayerProfile>{};
+      try {
+        final client = ProfileClient(
+          uin: auth.uin,
+          s2: auth.s2,
+          s2t: auth.s2t,
+        );
+        for (var i = 0; i < uins.length; i += 20) {
+          final end = (i + 20) < uins.length ? i + 20 : uins.length;
+          final batch = uins.sublist(i, end);
+          for (final p in await client.getProfileBatch3(batch)) {
+            out[p.uin] = p;
+          }
+        }
+      } catch (_) {
+        // 资料拉取失败：卡片退回迷你号 + 首字头像。
+      }
+      return out;
+    });

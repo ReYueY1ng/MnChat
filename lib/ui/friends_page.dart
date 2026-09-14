@@ -3,15 +3,18 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
 import '../core/services/chat_service.dart' show SessionSnapshot;
+import '../core/services/partner.dart';
 import '../state/providers.dart';
 import 'friend_request_page.dart' show FriendRequestPage, showAddFriendDialog;
 import 'blacklist_page.dart';
 import 'family_page.dart';
 import 'my_qr_page.dart';
+import 'partner_page.dart';
 import 'player_home_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
+import 'widgets/partner_badges.dart';
 import 'widgets/player_info_sheet.dart';
 import 'widgets/rich_text_view.dart';
 
@@ -388,6 +391,11 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             onTap: () => setState(() => _cat = _FriendCat.friend),
           ),
           item(
+            '最佳拍档',
+            onTap: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const PartnerPage())),
+          ),
+          item(
             '关注',
             active: _cat == _FriendCat.follow,
             onTap: () => setState(() => _cat = _FriendCat.follow),
@@ -414,7 +422,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
 }
 
 /// 好友行：头像 + 昵称 + 迷你号 / 关系 / 在线状态。
-class _FriendTile extends StatelessWidget {
+class _FriendTile extends ConsumerWidget {
   final ChatSession session;
   final VoidCallback onTap;
 
@@ -443,7 +451,7 @@ class _FriendTile extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final semantic = AppSemanticColors.of(context);
     final isGroup = session.type == ChatSessionType.group;
@@ -452,6 +460,14 @@ class _FriendTile extends StatelessWidget {
         ? '群聊'
         : (session.gameStatus ?? (session.isOnline ? '在线' : '离线'));
     final name = session.name.isNotEmpty ? session.name : '${session.id}';
+
+    // 等级 / 拍档 / 大会员：来自会话级批量缓存（随会话流一次拉取，逐行不请求）。
+    final directory =
+        ref.watch(partnerDirectoryProvider).asData?.value ??
+        PartnerDirectory.empty;
+    final level = isGroup ? 0 : directory.levelOf(session.id);
+    final partner = isGroup ? null : directory.partnerOf(session.id);
+    final isVip = !isGroup && directory.isVip(session.id);
 
     // ListTile 给 leading 的高度上限是 (isDense ? 48 : 56) + 密度纵向调整，
     // 桌面紧凑密度下只有 48，会把有框槽位（radius * 2 / 0.76 ≈ 63.2）压成
@@ -493,6 +509,12 @@ class _FriendTile extends StatelessWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (!isGroup)
+            PartnerNameBadges(
+              level: level,
+              partner: partner,
+              isVip: isVip,
+            ),
           if (rel.isNotEmpty) ...[
             const SizedBox(width: 6),
             Container(

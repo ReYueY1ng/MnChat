@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
+import '../core/services/partner.dart';
 import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'friend_request_page.dart' show showAddFriendDialog;
@@ -11,6 +12,7 @@ import 'theme/app_tokens.dart';
 import 'widgets/account_menu.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
+import 'widgets/partner_badges.dart';
 import 'widgets/rich_text_view.dart';
 import 'widgets/session_menu.dart';
 import 'widgets/session_player_info_popup.dart';
@@ -403,7 +405,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
   }
 }
 
-class _SessionTile extends StatelessWidget {
+class _SessionTile extends ConsumerWidget {
   final ChatSession session;
   final bool isActive;
   final VoidCallback onTap;
@@ -425,7 +427,7 @@ class _SessionTile extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final last = session.lastMessage;
     final timeText = last != null ? _fmtTime(last.time) : '';
@@ -437,6 +439,14 @@ class _SessionTile extends StatelessWidget {
               ? session.gameStatus!
               : (session.isOnline ? '在线' : '离线'))
         : null;
+
+    // 等级 / 拍档 / 大会员：来自会话级批量缓存（随会话流一次拉取，逐行不请求）。
+    final directory =
+        ref.watch(partnerDirectoryProvider).asData?.value ??
+        PartnerDirectory.empty;
+    final level = isFriend ? directory.levelOf(session.id) : 0;
+    final partner = isFriend ? directory.partnerOf(session.id) : null;
+    final isVip = isFriend && directory.isVip(session.id);
 
     // ListTile 给 leading 的高度上限是 (isDense ? 48 : 56) + 密度纵向调整，
     // 桌面紧凑密度下只有 48，会把有框槽位（radius * 2 / 0.76 ≈ 63.2）压成
@@ -474,10 +484,22 @@ class _SessionTile extends StatelessWidget {
               onTapUp: (details) => onAvatarTap!(details.globalPosition),
               child: avatar,
             ),
-      title: RichTextView(
-        session.name,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
+      title: Row(
+        children: [
+          Flexible(
+            child: RichTextView(
+              session.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          if (isFriend)
+            PartnerNameBadges(
+              level: level,
+              partner: partner,
+              isVip: isVip,
+            ),
+        ],
       ),
       subtitle: isFriend
           // 好友：在线绿点 + 状态 + 最后消息（两行紧凑显示）
