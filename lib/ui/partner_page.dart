@@ -39,6 +39,10 @@ class PartnerPage extends ConsumerWidget {
     final profiles =
         ref.watch(partnerProfilesProvider).asData?.value ??
         const <int, PlayerProfile>{};
+    // 关系等级阈值（服务端 visual-cfg）；缺失时为空列表 → 不画进度条。
+    final levelCfg =
+        ref.watch(partnerLevelConfigProvider).asData?.value ??
+        const <(int, int)>[];
     final count = partnersAsync.asData?.value.length ?? 0;
 
     return Scaffold(
@@ -56,6 +60,7 @@ class PartnerPage extends ConsumerWidget {
               ref.invalidate(partnerSlotProvider);
               ref.invalidate(partnerLevelsProvider);
               ref.invalidate(partnerProfilesProvider);
+              ref.invalidate(partnerLevelConfigProvider);
             },
           ),
         ],
@@ -74,7 +79,7 @@ class PartnerPage extends ConsumerWidget {
                   error: (e, _) => Center(child: Text('加载失败: $e')),
                   data: (list) => list.isEmpty
                       ? const Center(child: Text('暂无最佳拍档'))
-                      : _buildList(theme, list, levels, profiles),
+                      : _buildList(theme, list, levels, profiles, levelCfg),
                 ),
               ),
             ],
@@ -116,6 +121,7 @@ class PartnerPage extends ConsumerWidget {
     List<PartnerInfo> partners,
     Map<int, int> levels,
     Map<int, PlayerProfile> profiles,
+    List<(int level, int intimacyValue)> levelCfg,
   ) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return ListView.separated(
@@ -130,6 +136,7 @@ class PartnerPage extends ConsumerWidget {
         partners[i],
         levels[partners[i].bestUin] ?? 0,
         profiles[partners[i].bestUin],
+        levelCfg,
         now,
       ),
     );
@@ -141,6 +148,7 @@ class PartnerPage extends ConsumerWidget {
     PartnerInfo partner,
     int level,
     PlayerProfile? profile,
+    List<(int level, int intimacyValue)> levelCfg,
     int now,
   ) {
     final name = (profile != null && profile.nickname.isNotEmpty)
@@ -153,8 +161,12 @@ class PartnerPage extends ConsumerWidget {
             skinId: profile.headSkinId,
             model: profile.headModel,
           );
-    // 关系等级进度：服务端等级配置缺失 → next 恒 null，仅展示默契度数值。
-    final progress = RelationProgress(current: partner.tacitnum);
+    // 关系等级进度：阈值来自 FriendSystem 配置；缺失时 next 为 null，仅展示数值。
+    final (_, nextScore) = partnerLevelFor(partner.tacitnum, levelCfg);
+    final progress = RelationProgress(
+      current: partner.tacitnum,
+      next: nextScore > 0 ? nextScore : null,
+    );
 
     return Container(
       padding: AppSpacing.cardPadding,
@@ -228,7 +240,7 @@ class PartnerPage extends ConsumerWidget {
     );
   }
 
-  /// 默契度行：数值 + 进度条（阈值未知时只展示数值）。
+  /// 默契度行：数值（`<tacitnum>/<nextLevelScore>`）+ 进度条；阈值未知时只展示数值。
   Widget _buildTacitRow(
     ThemeData theme,
     PartnerInfo partner,
@@ -236,14 +248,20 @@ class PartnerPage extends ConsumerWidget {
   ) {
     final color = tacitBadgeColor(partner.lab);
     final ratio = progress.ratio;
+    final next = progress.next;
+    final label = next == null
+        ? '默契度 ${partner.tacitnum}'
+        : '默契度 ${partner.tacitnum}/$next';
     return Tooltip(
-      message: '关系等级进度需服务端等级默契配置，暂未获取',
+      message: next == null
+          ? '默契度 · ${partner.labName}'
+          : '默契度 · ${partner.labName}（${partner.tacitnum}/$next）',
       child: Row(
         children: [
           Icon(Icons.hexagon, size: 12, color: color),
           const SizedBox(width: AppSpacing.xs),
           Text(
-            '默契度 ${partner.tacitnum}',
+            label,
             style: theme.textTheme.bodySmall?.copyWith(
               color: color,
               fontWeight: FontWeight.w600,

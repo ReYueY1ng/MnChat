@@ -12,9 +12,11 @@
 /// 签名与 [PlayerHomeClient] 一致（http_getParamMD5）。所有解析器均为纯函数、
 /// 对脏数据只跳过不抛异常；非 0 的 `code`/`ret` 一律视为失败返回空值。
 ///
-/// 已知限制：关系等级（`tacitnum` 对应的 `FriendSystem.levelIntimacy.partnerLevel_list`）
-/// 是服务端 visual-cfg，本地未获取，因此 [RelationProgress.next] 恒为 null，
-/// UI 只展示默契度数值，不臆造等级阈值（见 [RelationProgress]）。
+/// 关系等级阈值（`tacitnum` 对应的 `FriendSystem.levelIntimacy.partnerLevel_list`）
+/// 由服务端 visual-cfg 下发：与 [TitleConfigClient] 同源，先取
+/// `miniw/ma/configIndex.lua` 中 `FriendSystem` 的 md5，再取 `miniw/ma/<md5>.lua`
+/// 解析（见 [PartnerClient.getPartnerLevels]）。拉取失败 → 阈值缺失，UI 不画
+/// 进度条（见 [RelationProgress]），绝不硬编码阈值。
 library;
 
 import 'package:dio/dio.dart';
@@ -25,6 +27,7 @@ import '../net/config.dart'
     show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import 'title_config.dart' show parseConfigIndex;
 
 /// 兼容解析数字：int / num / 数字字符串 / bool（游戏各接口类型不一致）。
 int _toInt(Object? v) {
@@ -32,6 +35,69 @@ int _toInt(Object? v) {
   if (v is num) return v.toInt();
   if (v is bool) return v ? 1 : 0;
   return int.tryParse('$v') ?? 0;
+}
+
+/// 定位 `FriendSystem` 配置中的 `partnerLevel_list`。
+///
+/// 兼容三种入参：整表 `{FriendSystem:{levelIntimacy:{partnerLevel_list:[...]}}}`、
+/// 直接给出 `partnerLevel_list` 的 List、或无法定位时的 null。
+Object? _partnerLevelListOf(Object? decoded) {
+  if (decoded is List) return decoded;
+  if (decoded is! Map) return null;
+  final root = decoded['FriendSystem'];
+  if (root is! Map) return null;
+  final intimacy = root['levelIntimacy'];
+  if (intimacy is! Map) return null;
+  return intimacy['partnerLevel_list'];
+}
+
+/// 解析 `FriendSystem` 配置 → 关系等级阈值列表。
+///
+/// 入参为 `decodeHttpResponse` 的解析结果；沿
+/// `FriendSystem.levelIntimacy.partnerLevel_list` 取值，每条为
+/// `{ level, intimacyValue }`。返回按 `level` 升序去重的
+/// `(level, intimacyValue)` 列表；脏条目（非 Map / `level` 非正 /
+/// `intimacyValue` 非正）只跳过、绝不抛异常；非 0 `code`/`ret` 或路径缺失 → 空列表。
+List<(int level, int intimacyValue)> parsePartnerLevels(Object? decoded) {
+  if (decoded is Map && !PartnerClient._isOk(decoded.cast<String, Object?>())) {
+    return const <(int, int)>[];
+  }
+  final raw = _partnerLevelListOf(decoded);
+  if (raw is! List) return const <(int, int)>[];
+  final byLevel = <int, int>{};
+  for (final e in raw) {
+    if (e is! Map) continue;
+    final m = e.cast<String, Object?>();
+    final level = _toInt(m['level'] ?? m['Level']);
+    final value = _toInt(m['intimacyValue'] ?? m['intimacy_value']);
+    if (level <= 0 || value <= 0) continue;
+    byLevel.putIfAbsent(level, () => value);
+  }
+  final levels = byLevel.keys.toList()..sort();
+  return <(int, int)>[for (final l in levels) (l, byLevel[l]!)];
+}
+
+/// 由默契度 [score] 与升序阈值 [levels] 计算当前等级与下一级阈值。
+///
+/// 逐字复刻 `bestpartnerdatamgr.lua:1081-1099`：`curlevel` 初值 1，顺序遍历，
+/// `score >= intimacyValue` 时抬升 `curlevel`，首个 `score < intimacyValue`
+/// 即为下一级门槛；全部越界时 `nextLevelScore` 退化为末级阈值。[levels] 为空
+/// → `(1, 0)`。参数 `lab`（拍档类型）在官方算法中未使用，故此处不接收。
+(int curlevel, int nextLevelScore) partnerLevelFor(
+  int score,
+  List<(int level, int intimacyValue)> levels,
+) {
+  if (levels.isEmpty) return (1, 0);
+  var nextLevelScore = levels.last.$2;
+  var curlevel = 1;
+  for (final (level, value) in levels) {
+    if (score < value) {
+      nextLevelScore = value;
+      break;
+    }
+    curlevel = level;
+  }
+  return (curlevel, nextLevelScore);
 }
 
 /// 拍档类型（`lab`）→ 名称。
@@ -182,9 +248,9 @@ class PartnerSlotInfo {
 /// 关系等级进度。
 ///
 /// 官方由 `tacitnum` 与 `FriendSystem.levelIntimacy.partnerLevel_list`
-/// （`{level, intimacyValue}`）比较得出当前等级与下一级阈值。该配置为服务端
-/// visual-cfg，本地未获取，因此 [next] 恒为 null：[ratio] 返回 null，UI 只展示
-/// [current] 数值，不臆造阈值与进度条比例。
+/// （`{level, intimacyValue}`）比较得出当前等级与下一级阈值（见 [partnerLevelFor]）。
+/// 阈值配置拉取失败时 [next] 为 null：[ratio] 返回 null，UI 只展示 [current]
+/// 数值，不臆造阈值与进度条比例。
 class RelationProgress {
   final int current;
   final int? next;
@@ -295,6 +361,42 @@ class PartnerClient {
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
+  }
+
+  /// 配置表 base（去掉尾部 `/`），与 [TitleConfigClient] 同源。
+  String _cfgBase() => baseUrl.endsWith('/')
+      ? baseUrl.substring(0, baseUrl.length - 1)
+      : baseUrl;
+
+  Future<String> _getText(String url) async {
+    final resp = await _dio.get(url);
+    final d = resp.data;
+    return d is String ? d : '$d';
+  }
+
+  /// 进程内缓存：关系等级阈值（`FriendSystem.levelIntimacy.partnerLevel_list`）。
+  static List<(int level, int intimacyValue)>? _levelCache;
+
+  /// 拉取关系等级阈值配置（进程内缓存）。
+  ///
+  /// 与 [TitleConfigClient] 同源：GET `miniw/ma/configIndex.lua` 取 `FriendSystem`
+  /// 的 md5 文件名，再 GET `miniw/ma/<md5>.lua` 解析 `levelIntimacy.partnerLevel_list`
+  /// （实测 `miniw/ma/FriendSystem.lua` 直连 404，须走 configIndex → md5）。
+  /// 失败返回已缓存值或空列表 → UI 不画进度条，绝不硬编码阈值。
+  Future<List<(int level, int intimacyValue)>> getPartnerLevels() async {
+    final cached = _levelCache;
+    if (cached != null) return cached;
+    try {
+      final index = parseConfigIndex(
+        await _getText('${_cfgBase()}/miniw/ma/configIndex.lua'),
+      );
+      final md5 = index['FriendSystem'];
+      if (md5 == null) return const <(int, int)>[];
+      final cfg = await _getText('${_cfgBase()}/miniw/ma/$md5.lua');
+      return _levelCache = parsePartnerLevels(decodeHttpResponse(cfg));
+    } catch (_) {
+      return const <(int, int)>[];
+    }
   }
 
   /// 响应码：优先 `code`，缺省回退 `ret`（等级接口用 `ret`）。

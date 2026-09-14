@@ -750,6 +750,20 @@ final partnerLevelsProvider = FutureProvider<Map<int, int>>((ref) async {
   );
 });
 
+/// 关系等级阈值（`FriendSystem.levelIntimacy.partnerLevel_list`）。
+///
+/// 服务端 visual-cfg，进程内缓存（[PartnerClient.getPartnerLevels]）；未登录 /
+/// 拉取失败 → 空列表，行 UI 与拍档卡片自动降级为「不画进度条」。
+final partnerLevelConfigProvider =
+    FutureProvider<List<(int level, int intimacyValue)>>((ref) async {
+      final client = _tryPartnerClient(ref);
+      if (client == null) return const <(int, int)>[];
+      return _partnerGuard(
+        () => client.getPartnerLevels(),
+        const <(int, int)>[],
+      );
+    });
+
 /// 本人拍档的资料（昵称 / 头像 / 头像框），供拍档卡片渲染。
 final partnerProfilesProvider =
     FutureProvider<Map<int, PlayerProfile>>((ref) async {

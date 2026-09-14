@@ -389,4 +389,113 @@ void main() {
       expect(m, {2: 300});
     });
   });
+
+  group('parsePartnerLevels', () {
+    test('整表：沿 FriendSystem.levelIntimacy.partnerLevel_list 取值并按 level 升序', () {
+      final levels = parsePartnerLevels(const {
+        'FriendSystem': {
+          'levelIntimacy': {
+            'partnerLevel_list': [
+              {'level': 5, 'intimacyValue': 10000},
+              {'level': 1, 'intimacyValue': 100},
+              {'level': 3, 'intimacyValue': 2000},
+              {'level': 2, 'intimacyValue': 600},
+              {'level': 4, 'intimacyValue': 5000},
+            ],
+          },
+        },
+      });
+      expect(levels, [
+        (1, 100),
+        (2, 600),
+        (3, 2000),
+        (4, 5000),
+        (5, 10000),
+      ]);
+    });
+
+    test('可直接传入 partnerLevel_list 列表', () {
+      final levels = parsePartnerLevels(const [
+        {'level': 2, 'intimacyValue': 600},
+        {'level': 1, 'intimacyValue': 100},
+      ]);
+      expect(levels, [(1, 100), (2, 600)]);
+    });
+
+    test('数字字符串强转；脏条目跳过', () {
+      final levels = parsePartnerLevels(const {
+        'FriendSystem': {
+          'levelIntimacy': {
+            'partnerLevel_list': [
+              'bad',
+              {'level': 0, 'intimacyValue': 5},
+              {'level': 1, 'intimacyValue': 0},
+              {'level': '2', 'intimacyValue': '600'},
+            ],
+          },
+        },
+      });
+      expect(levels, [(2, 600)]);
+    });
+
+    test('同 level 去重（保留首个）', () {
+      final levels = parsePartnerLevels(const [
+        {'level': 1, 'intimacyValue': 100},
+        {'level': 1, 'intimacyValue': 999},
+      ]);
+      expect(levels, [(1, 100)]);
+    });
+
+    test('路径缺失 / null / 非 0 code → 空', () {
+      expect(parsePartnerLevels(null), isEmpty);
+      expect(parsePartnerLevels(const {'FriendSystem': {}}), isEmpty);
+      expect(
+        parsePartnerLevels(const {
+          'code': 1,
+          'FriendSystem': {
+            'levelIntimacy': {
+              'partnerLevel_list': [
+                {'level': 1, 'intimacyValue': 100},
+              ],
+            },
+          },
+        }),
+        isEmpty,
+      );
+    });
+  });
+
+  group('partnerLevelFor', () {
+    const cfg = <(int, int)>[
+      (1, 100),
+      (2, 600),
+      (3, 2000),
+      (4, 5000),
+      (5, 10000),
+    ];
+
+    test('低于首级 → 1 级、首级门槛', () {
+      expect(partnerLevelFor(50, cfg), (1, 100));
+    });
+
+    test('区间内 → 当前级 + 下一级门槛', () {
+      expect(partnerLevelFor(300, cfg), (1, 600));
+      expect(partnerLevelFor(600, cfg), (2, 2000));
+      expect(partnerLevelFor(999, cfg), (2, 2000));
+      expect(partnerLevelFor(2500, cfg), (3, 5000));
+    });
+
+    test('恰好等于门槛 → 抬升到该级', () {
+      expect(partnerLevelFor(100, cfg), (1, 600));
+      expect(partnerLevelFor(10000, cfg), (5, 10000));
+    });
+
+    test('超过最高级 → 末级 + 末级门槛', () {
+      expect(partnerLevelFor(999999, cfg), (5, 10000));
+    });
+
+    test('空阈值 → (1, 0)', () {
+      expect(partnerLevelFor(123, const <(int, int)>[]), (1, 0));
+    });
+  });
 }

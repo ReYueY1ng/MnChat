@@ -468,6 +468,10 @@ class _FriendTile extends ConsumerWidget {
     final level = isGroup ? 0 : directory.levelOf(session.id);
     final partner = isGroup ? null : directory.partnerOf(session.id);
     final isVip = !isGroup && directory.isVip(session.id);
+    // 关系等级阈值（服务端 visual-cfg）；缺失时为空列表 → 默契度徽标不画进度条。
+    final levelCfg =
+        ref.watch(partnerLevelConfigProvider).asData?.value ??
+        const <(int, int)>[];
 
     // ListTile 给 leading 的高度上限是 (isDense ? 48 : 56) + 密度纵向调整，
     // 桌面紧凑密度下只有 48，会把有框槽位（radius * 2 / 0.76 ≈ 63.2）压成
@@ -514,6 +518,7 @@ class _FriendTile extends ConsumerWidget {
               level: level,
               partner: partner,
               isVip: isVip,
+              levels: levelCfg,
             ),
           if (rel.isNotEmpty) ...[
             const SizedBox(width: 6),

@@ -82,18 +82,34 @@ class LevelBadge extends StatelessWidget {
 }
 
 /// 默契度徽标：六边形图标 + 数值（拍档类型决定颜色）。
+///
+/// [levels] 为关系等级阈值（升序）；非空时在数值右侧内联一条细进度条，
+/// 高度不超过原胶囊，故不改变宿主行高。为空 / null 时只显示数值。
 class TacitBadge extends StatelessWidget {
   final int tacitnum;
   final int lab;
 
-  const TacitBadge({super.key, required this.tacitnum, this.lab = 0});
+  /// 关系等级阈值（升序）；空 / null → 不画进度条（配置未获取）。
+  final List<(int level, int intimacyValue)>? levels;
+
+  const TacitBadge({
+    super.key,
+    required this.tacitnum,
+    this.lab = 0,
+    this.levels,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final color = tacitBadgeColor(lab);
+    final cfg = levels ?? const <(int, int)>[];
+    final (_, next) = partnerLevelFor(tacitnum, cfg);
+    final ratio = next > 0 ? (tacitnum / next).clamp(0.0, 1.0) : null;
     return Tooltip(
-      message: '默契度 · ${PartnerLab.name(lab)}',
+      message: next <= 0
+          ? '默契度 · ${PartnerLab.name(lab)}'
+          : '默契度 · ${PartnerLab.name(lab)}（$tacitnum/$next）',
       child: _Pill(
         background: color.withValues(alpha: 0.16),
         border: color,
@@ -110,6 +126,22 @@ class TacitBadge extends StatelessWidget {
                 height: 1.0,
               ),
             ),
+            if (ratio != null) ...[
+              const SizedBox(width: AppSpacing.xs),
+              SizedBox(
+                width: 28,
+                height: 4,
+                child: ClipRRect(
+                  borderRadius: AppRadius.pillR,
+                  child: LinearProgressIndicator(
+                    value: ratio,
+                    minHeight: 4,
+                    backgroundColor: color.withValues(alpha: 0.18),
+                    valueColor: AlwaysStoppedAnimation<Color>(color),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -154,11 +186,15 @@ class PartnerNameBadges extends StatelessWidget {
   final PartnerInfo? partner;
   final bool isVip;
 
+  /// 关系等级阈值（升序）；空 / null → 默契度徽标不画进度条。
+  final List<(int level, int intimacyValue)>? levels;
+
   const PartnerNameBadges({
     super.key,
     this.level = 0,
     this.partner,
     this.isVip = false,
+    this.levels,
   });
 
   @override
@@ -171,7 +207,7 @@ class PartnerNameBadges extends StatelessWidget {
         if (level > 0) LevelBadge(level: level),
         if (p != null) ...[
           const SizedBox(width: AppSpacing.xs),
-          TacitBadge(tacitnum: p.tacitnum, lab: p.lab),
+          TacitBadge(tacitnum: p.tacitnum, lab: p.lab, levels: levels),
         ],
         if (isVip) ...[
           const SizedBox(width: AppSpacing.xs),
