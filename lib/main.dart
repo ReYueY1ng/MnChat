@@ -11,11 +11,15 @@ import 'core/services/native_bridge.dart';
 import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
+import 'core/utils/log.dart';
 import 'state/providers.dart';
 import 'ui/home_shell.dart' show MainShell;
 import 'ui/lock_page.dart';
 import 'ui/login_page.dart';
 import 'ui/theme/app_theme.dart';
+
+/// 本模块日志标签。
+const String _logTag = 'Main';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -53,7 +57,7 @@ Future<void> _initDesktopShell(AppDatabase db) async {
     ).getBool(SettingsKeys.closeToTray, fallback: true);
     await TrayService.init(closeToTray: closeToTray);
   } catch (e) {
-    debugPrint('TrayService: 桌面壳层初始化失败（已忽略）: $e');
+    log.warn('桌面壳层初始化失败（已忽略）: $e', tag: _logTag);
   }
 }
 

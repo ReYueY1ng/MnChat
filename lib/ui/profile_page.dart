@@ -43,6 +43,7 @@ import '../core/services/partner.dart' show PartnerDirectory, PartnerInfo;
 import '../core/services/profile.dart'
     show PlayerProfile, PortraitItem, ProfileClient;
 import '../core/services/social_sign.dart' show SocialDeclaration;
+import '../core/utils/log.dart';
 import '../state/providers.dart';
 import 'dynamics_page.dart';
 import 'player_home_page.dart';
@@ -54,6 +55,9 @@ import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/partner_badges.dart';
 import 'widgets/rich_text_view.dart';
+
+/// 本模块日志标签。
+const String _logTag = 'ProfilePage';
 
 /// 无协议数据版块的统一降级提示（见本文件「已知缺口」）。
 const String kHomeUnavailableHint = '外部客户端暂未获取该项数据';
@@ -137,7 +141,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       }
     } catch (e) {
       // 忽略：资料拉取失败时展示首字占位头像
-      debugPrint('ProfilePage: getMyProfile 失败: $e');
+      log.warn('getMyProfile 失败: $e', tag: _logTag);
     }
 
     // 兜底：单个资料接口有时不下发 head_frames（表现：选择器只剩默认框 1）。
@@ -150,10 +154,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
           ownedFrames.addAll(list.first.ownedHeadFrameIds);
         }
       } catch (e) {
-        debugPrint('ProfilePage: getProfileBatch3 补头像框失败: $e');
+        log.warn('getProfileBatch3 补头像框失败: $e', tag: _logTag);
       }
     }
-    debugPrint('ProfilePage: 已拥有头像框 ${ownedFrames.length} 个');
+    log.debug('已拥有头像框 ${ownedFrames.length} 个', tag: _logTag);
 
     int? headType;
     int? headId;
@@ -202,7 +206,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       final titleId = homepageTitleId(home);
       titleName = titleId > 0 ? await svc.titleName(titleId) : null;
     } catch (e) {
-      debugPrint('ProfilePage: 主页模块拉取失败: $e');
+      log.warn('主页模块拉取失败: $e', tag: _logTag);
     }
 
     var isVip = false;
@@ -211,7 +215,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
       isVip = expiry != null && expiry > now;
     } catch (e) {
-      debugPrint('ProfilePage: 大会员状态拉取失败: $e');
+      log.warn('大会员状态拉取失败: $e', tag: _logTag);
     }
 
     if (!mounted) return;

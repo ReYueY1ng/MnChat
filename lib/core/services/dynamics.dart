@@ -8,12 +8,16 @@ library;
 import 'dart:convert' show jsonDecode, jsonEncode;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../net/config.dart' show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../utils/log.dart';
+
+/// 本模块日志标签。
+const String _logTag = 'Dynamics';
 
 const String kCountry = 'CN';
 const String kLang = '0';
@@ -601,10 +605,10 @@ class DynamicsClient {
     }
     final url = _url(act, params);
 
-    debugPrint('[Dynamics $act] url: $url');
+    log.debug('$act url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
     final resp = await _dio.get(url);
     final raw = resp.data;
-    debugPrint('[Dynamics $act] RAW: $raw');
+    log.debug('$act RAW: $raw', tag: _logTag);
 
     // 原始响应是字符串 → 解码；否则已是结构。
     Object? decoded;
@@ -615,14 +619,14 @@ class DynamicsClient {
     }
 
     if (decoded is! Map) {
-      debugPrint('[Dynamics $act] decoded not Map: ${decoded.runtimeType}');
+      log.warn('$act decoded not Map: ${decoded.runtimeType}', tag: _logTag);
       return const FeedResult([], 0);
     }
     final m = decoded.cast<String, Object?>();
 
     final code = m['ret'] ?? m['code'];
     if (code is num && code != 0) {
-      debugPrint('[Dynamics $act] error: ${m['msg']}');
+      log.warn('$act error: ${m['msg']}', tag: _logTag);
       return const FeedResult([], 0);
     }
 
@@ -720,10 +724,10 @@ class DynamicsClient {
       },
     };
     final url = _url(latest ? 'get_comment' : 'get_recommend_comment', params);
-    debugPrint('[Dynamics comment] url: $url');
+    log.debug('comment url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
     final resp = await _dio.get(url);
     final raw = resp.data;
-    debugPrint('[Dynamics comment] RAW: $raw');
+    log.debug('comment RAW: $raw', tag: _logTag);
 
     Object? decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is! Map) return [];
@@ -781,7 +785,7 @@ class DynamicsClient {
   /// 对齐反编译 dynamicsdatamanager.lua ReqPostingInfo (act="get_posting")。
   Future<DynamicsPost?> fetchPost(String pid) async {
     final url = _url('get_posting', {'pid': pid});
-    debugPrint('[Dynamics get_posting] url: $url');
+    log.debug('get_posting url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
     final resp = await _dio.get(url);
     final raw = resp.data;
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
@@ -976,10 +980,10 @@ class DynamicsClient {
       'com_last_time': '${comment.lastTime}',
     };
     final url = _url('get_comment_rep', params);
-    debugPrint('[Dynamics get_comment_rep] url: $url');
+    log.debug('get_comment_rep url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
     final resp = await _dio.get(url);
     final raw = resp.data;
-    debugPrint('[Dynamics get_comment_rep] RAW: $raw');
+    log.debug('get_comment_rep RAW: $raw', tag: _logTag);
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is! Map) return [];
     final m = decoded.cast<String, Object?>();

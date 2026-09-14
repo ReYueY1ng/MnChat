@@ -20,14 +20,18 @@
 library;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show debugPrint, kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../net/config.dart'
     show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../utils/log.dart';
 import 'title_config.dart' show parseConfigIndex;
+
+/// 本模块日志标签。
+const String _logTag = 'Partner';
 
 /// 兼容解析数字：int / num / 数字字符串 / bool（游戏各接口类型不一致）。
 int _toInt(Object? v) {
@@ -354,10 +358,10 @@ class PartnerClient {
   }
 
   Future<Map<String, Object?>> _get(String url) async {
-    debugPrint('[Partner] url: $url');
+    log.debug('url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
     final resp = await _dio.get(url);
     final raw = resp.data;
-    debugPrint('[Partner] RAW: $raw');
+    log.debug('RAW: $raw', tag: _logTag);
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};

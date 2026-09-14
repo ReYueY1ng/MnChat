@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart'
     show
         TargetPlatform,
-        debugPrint,
         defaultTargetPlatform,
         kIsWeb,
         visibleForTesting;
@@ -12,8 +11,12 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:tray_manager/tray_manager.dart' as tm;
 import 'package:window_manager/window_manager.dart';
 
+import '../utils/log.dart';
 import 'sni_menu_item.dart';
 import 'sni_tray_stub.dart' if (dart.library.io) 'sni_tray.dart' as sni;
+
+/// 本模块日志标签。
+const String _logTag = 'TrayService';
 
 /// 桌面端（linux / windows）系统托盘 + 「关闭到托盘」。
 ///
@@ -60,7 +63,7 @@ class TrayService {
       _windowListener = _WindowCloseListener();
       windowManager.addListener(_windowListener!);
     } catch (e) {
-      debugPrint('TrayService: window_manager 初始化失败: $e');
+      log.warn('window_manager 初始化失败: $e', tag: _logTag);
     }
 
     if (_isLinux) {
@@ -77,7 +80,7 @@ class TrayService {
     try {
       final icon = await loadIconArgb();
       if (icon == null) {
-        debugPrint('TrayService: 托盘图标解码失败，跳过 Linux 托盘');
+        log.warn('托盘图标解码失败，跳过 Linux 托盘', tag: _logTag);
         return;
       }
       final tray = sni.SniTray(
@@ -91,20 +94,20 @@ class TrayService {
           SniMenuItem.label(_menuExit, '退出 MnChat'),
         ],
         onActivate: (_, _) {
-          debugPrint('TrayService: 双击托盘 → 显示主窗口');
+          log.debug('双击托盘 → 显示主窗口', tag: _logTag);
           _showWindow();
         },
         onSecondaryActivate: (_, _) {
-          debugPrint('TrayService: 中键托盘 → 显示主窗口');
+          log.debug('中键托盘 → 显示主窗口', tag: _logTag);
           _showWindow();
         },
         onMenuActivated: _onMenuActivated,
-        onError: (message) => debugPrint('TrayService: $message'),
+        onError: (message) => log.warn(message, tag: _logTag),
       );
       await tray.start();
       _sni = tray;
     } catch (e) {
-      debugPrint('TrayService: Linux 托盘初始化失败: $e');
+      log.warn('Linux 托盘初始化失败: $e', tag: _logTag);
     }
   }
 
@@ -150,7 +153,7 @@ class TrayService {
       }
       return (argb, width, height);
     } catch (e) {
-      debugPrint('TrayService: 图标解码失败: $e');
+      log.warn('图标解码失败: $e', tag: _logTag);
       return null;
     }
   }
@@ -171,7 +174,7 @@ class TrayService {
       // setIcon 会把相对路径解析到 `data/flutter_assets/` 下。
       await tm.trayManager.setIcon('assets/tray_icon.png');
     } catch (e) {
-      debugPrint('TrayService: setIcon 失败: $e');
+      log.warn('setIcon 失败: $e', tag: _logTag);
       return; // 连图标都没有，后续无意义
     }
 
@@ -186,7 +189,7 @@ class TrayService {
         ),
       );
     } catch (e) {
-      debugPrint('TrayService: setContextMenu 失败: $e');
+      log.warn('setContextMenu 失败: $e', tag: _logTag);
     }
 
     _trayListener = _TrayClickListener();
@@ -195,7 +198,7 @@ class TrayService {
     try {
       await tm.trayManager.setToolTip('MnChat');
     } catch (e) {
-      debugPrint('TrayService: setToolTip 失败: $e');
+      log.warn('setToolTip 失败: $e', tag: _logTag);
     }
   }
 
@@ -220,7 +223,7 @@ class TrayService {
       }
       if (_isWindows) await tm.trayManager.destroy();
     } catch (e) {
-      debugPrint('TrayService: dispose 失败: $e');
+      log.warn('dispose 失败: $e', tag: _logTag);
     }
     _initialized = false;
   }
@@ -230,7 +233,7 @@ class TrayService {
       await windowManager.show();
       await windowManager.focus();
     } catch (e) {
-      debugPrint('TrayService: _showWindow failed: $e');
+      log.warn('_showWindow failed: $e', tag: _logTag);
     }
   }
 
@@ -238,7 +241,7 @@ class TrayService {
     try {
       await windowManager.destroy();
     } catch (e) {
-      debugPrint('TrayService: _quit failed: $e');
+      log.warn('_quit failed: $e', tag: _logTag);
     }
   }
 }

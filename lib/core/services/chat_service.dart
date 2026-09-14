@@ -6,8 +6,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show debugPrint;
-
 import '../models/messages.dart';
 import '../storage/app_database.dart';
 import '../storage/chat_mapper.dart';
@@ -22,6 +20,10 @@ import 'profile.dart';
 import 'social_sign.dart';
 import 'title_config.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../utils/log.dart';
+
+/// 本模块日志标签。
+const String _logTag = 'ChatService';
 
 /// 服务状态。
 enum ChatServiceState {
@@ -197,7 +199,7 @@ class ChatService {
         );
       } catch (e) {
         // WS 心跳失败不阻断（login_v3 的 sign 仍可用）
-        debugPrint('WS heartbeat failed (using login_v3 sign): $e');
+        log.warn('WS heartbeat failed (using login_v3 sign): $e', tag: _logTag);
       }
       _auth = auth;
       _friend = FriendClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
@@ -292,7 +294,7 @@ class ChatService {
         }
       }
     } catch (e) {
-      debugPrint('refresh after reconnect failed: $e');
+      log.warn('refresh after reconnect failed: $e', tag: _logTag);
     }
   }
 
@@ -315,7 +317,7 @@ class ChatService {
       ], timeout: const Duration(seconds: 8));
       _applyBatchFriendStatus(r.result);
     } catch (e) {
-      debugPrint('[main batch_friend_info] ERR: $e');
+      log.warn('main batch_friend_info ERR: $e', tag: _logTag);
     }
   }
 
@@ -420,7 +422,7 @@ class ChatService {
     // 所以事件名不是 "friend.msg"，data 在 args[1]。
     final eventName = push.eventName;
     // 调试：只打印事件名与参数条数，不打印消息正文（隐私/日志泄漏）。
-    debugPrint('[push] $eventName args=${push.args.length}');
+    log.debug('push $eventName args=${push.args.length}', tag: _logTag);
     if (eventName == 'client.on' && push.args.length >= 2) {
       final kind = push.args[0]?.toString();
       final data = push.args[1];
@@ -797,7 +799,7 @@ class ChatService {
         _applyChatQueryResult(uin2, resp[0] as List);
       }
     } catch (e) {
-      debugPrint('chat_query failed for $uin2: $e');
+      log.warn('chat_query failed for $uin2: $e', tag: _logTag);
     }
   }
 
@@ -820,7 +822,7 @@ class ChatService {
           .toList();
       _replaceHistory(ChatSessionType.group, groupId, msgs);
     } catch (e) {
-      debugPrint('send_cache_msg failed for $groupId: $e');
+      log.warn('send_cache_msg failed for $groupId: $e', tag: _logTag);
     }
   }
 
@@ -932,7 +934,7 @@ class ChatService {
       }
       _emitSessionSnapshot();
     } catch (e) {
-      debugPrint('load offline cache failed: $e');
+      log.warn('load offline cache failed: $e', tag: _logTag);
     }
   }
 
@@ -1060,7 +1062,7 @@ class ChatService {
       // 保存好友信息缓存（下次启动免等待网络拉取）
       await _saveFriendCache();
     } catch (e) {
-      debugPrint('query_friend_list failed: $e');
+      log.warn('query_friend_list failed: $e', tag: _logTag);
     }
   }
 
@@ -1097,7 +1099,7 @@ class ChatService {
       }).toList();
       await db.replaceFriends(owner, records);
     } catch (e) {
-      debugPrint('save friend cache failed: $e');
+      log.warn('save friend cache failed: $e', tag: _logTag);
     }
   }
 
@@ -1303,7 +1305,10 @@ class ChatService {
         }
       }
     } catch (e) {
-      debugPrint('getProfileBatch3/getPersonCenterHeadInfo failed: $e');
+      log.warn(
+        'getProfileBatch3/getPersonCenterHeadInfo failed: $e',
+        tag: _logTag,
+      );
     }
   }
 
@@ -1364,7 +1369,7 @@ class ChatService {
         }
       }
     } catch (e) {
-      debugPrint('query_user_groups failed: $e');
+      log.warn('query_user_groups failed: $e', tag: _logTag);
     }
   }
 
@@ -1522,7 +1527,7 @@ class ChatService {
           chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner),
         );
       } catch (e) {
-        debugPrint('persist message failed: $e');
+        log.error('persist message failed: $e', tag: _logTag);
       }
     }());
     _persistSession(type, id);
