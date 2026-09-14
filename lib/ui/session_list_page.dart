@@ -20,8 +20,8 @@ import 'widgets/session_player_info_popup.dart';
 /// 会话列表页（左侧栏 / 手机单页）。
 ///
 /// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
-/// 群全部保留。顶部工具条对齐游戏好友列表：在线计数 / 刷新 / 只看在线 /
-/// 排序 / 可展开搜索（占位「支持迷你号和昵称查找」+ 取消）。
+/// 群全部保留。顶部只保留常驻搜索框（占位「支持迷你号和昵称查找」），
+/// 在线计数 / 刷新 / 筛选 / 排序等管理操作统一由好友页提供。
 class SessionListPage extends ConsumerStatefulWidget {
   final List<ChatSession> sessions;
 
@@ -34,21 +34,6 @@ class SessionListPage extends ConsumerStatefulWidget {
 
   @override
   ConsumerState<SessionListPage> createState() => _SessionListPageState();
-}
-
-/// 工具条排序方式（文案对齐游戏好友列表）。
-///
-/// 会话数据层只有时间 / 名称 / 未读三种排序（[SessionSortMode]，设置页可配），
-/// 参考列表的其余三项没有对应字段（默契度 / 登录时间），选中后仅切换标签、
-/// 顺序仍沿用设置里的排序（no-op）。
-enum _SessionSortMode {
-  byDefault('好友默认排序'),
-  tacitDesc('默契度从高到低'),
-  loginRecent('登录从近到远'),
-  loginOld('登录从远到近');
-
-  const _SessionSortMode(this.label);
-  final String label;
 }
 
 /// 「移除会话」本地持久化 key：JSON 对象 `{type_id: '1'}`。
@@ -65,15 +50,6 @@ final Set<String> _removedSessionKeys = <String>{};
 class _SessionListPageState extends ConsumerState<SessionListPage> {
   String _search = '';
   final TextEditingController _searchCtrl = TextEditingController();
-
-  /// 搜索框是否展开（折叠时工具条只显示放大镜图标）。
-  bool _searchOpen = false;
-
-  /// 只看在线。
-  bool _onlyOnline = false;
-
-  /// 当前选中的排序（仅「好友默认排序」有真实数据支持）。
-  _SessionSortMode _sort = _SessionSortMode.byDefault;
 
   @override
   void initState() {
@@ -99,14 +75,13 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         MediaQuery.orientationOf(context) == Orientation.landscape &&
         MediaQuery.sizeOf(context).width >= 800;
 
-    // 过滤：已移除 → 只看在线 → 搜索（昵称 / 迷你号 / 群名）
+    // 过滤：已移除 → 搜索（昵称 / 迷你号 / 群名）
     final filtered = sessions.where((s) {
       if (_removedSessionKeys.contains(
         SettingsKeys.sessionKey(s.type.name, s.id),
       )) {
         return false;
       }
-      if (_onlyOnline && !s.isOnline) return false;
       if (_search.isEmpty) return true;
       final q = _search.toLowerCase();
       return s.name.toLowerCase().contains(q) || '${s.id}'.contains(q);
@@ -132,8 +107,6 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         },
       );
 
-    final online = sessions.where((s) => s.isOnline).length;
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('会话', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -142,7 +115,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
       ),
       body: Column(
         children: [
-          _buildToolbar(theme, online, sessions.length),
+          _buildToolbar(theme),
           Expanded(
             child: sorted.isEmpty
                 ? _EmptySessions(
@@ -195,83 +168,43 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     );
   }
 
-  /// 顶部工具条（对齐游戏好友列表形态）：在线计数 / 刷新 / 只看在线 / 排序 /
-  /// 可展开搜索（占位「支持迷你号和昵称查找」+ 取消）。
+  /// 顶部工具条：只保留常驻搜索框（占位「支持迷你号和昵称查找」）。
   ///
-  /// 与好友页同样用页面底色铺底，避免卡片从工具条下透出；按需求不再在工具条
-  /// 与列表之间加 Divider。
-  Widget _buildToolbar(ThemeData theme, int online, int total) {
+  /// 在线计数 / 刷新 / 筛选 / 排序等管理操作统一由好友页提供；与好友页
+  /// 同样用页面底色铺底，避免卡片从工具条下透出；按需求不在工具条与列表
+  /// 之间加 Divider。
+  Widget _buildToolbar(ThemeData theme) {
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
-        child: _searchOpen
-            // 展开态：搜索框 + 取消（替代工具条其余内容，避免窄侧栏溢出）
-            ? Row(
-                children: [
-                  Expanded(child: _buildSearchField()),
-                  TextButton(onPressed: _closeSearch, child: const Text('取消')),
-                ],
-              )
-            // 折叠态：计数 + 刷新 + 只看在线 + 排序（可换行）+ 搜索图标
-            : Row(
-                children: [
-                  Expanded(
-                    child: Wrap(
-                      spacing: AppSpacing.sm,
-                      runSpacing: AppSpacing.xs,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        Text(
-                          '在线好友 $online / $total',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
-                        ),
-                        IconButton(
-                          tooltip: '刷新',
-                          visualDensity: VisualDensity.compact,
-                          icon: const Icon(Icons.refresh, size: 18),
-                          onPressed: () =>
-                              ref.read(chatServiceProvider).loadSessions(),
-                        ),
-                        FilterChip(
-                          visualDensity: VisualDensity.compact,
-                          label: const Text(
-                            '只看在线',
-                            style: TextStyle(fontSize: 12),
-                          ),
-                          selected: _onlyOnline,
-                          onSelected: (v) => setState(() => _onlyOnline = v),
-                        ),
-                        _buildSortMenu(theme),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: '搜索',
-                    visualDensity: VisualDensity.compact,
-                    icon: const Icon(Icons.search),
-                    onPressed: () => setState(() => _searchOpen = true),
-                  ),
-                ],
-              ),
+        child: Row(
+          children: [Expanded(child: _buildSearchField())],
+        ),
       ),
     );
   }
 
-  /// 展开后的搜索框：占位「支持迷你号和昵称查找」。
+  /// 顶部常驻搜索框：占位「支持迷你号和昵称查找」。
+  ///
+  /// 此前随工具条折叠 / 展开两态显示；搜索成为唯一控件后常驻显示，有输入时
+  /// 行尾出现清空按钮（见 [_clearSearch]）。
   Widget _buildSearchField() {
     return SizedBox(
       height: 36,
       child: TextField(
         controller: _searchCtrl,
-        autofocus: true,
         onChanged: (v) => setState(() => _search = v),
         decoration: InputDecoration(
           hintText: '支持迷你号和昵称查找',
           isDense: true,
           prefixIcon: const Icon(Icons.search, size: 18),
+          suffixIcon: _search.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear, size: 16),
+                  onPressed: _clearSearch,
+                ),
           contentPadding: const EdgeInsets.symmetric(
             vertical: 6,
             horizontal: 8,
@@ -281,52 +214,10 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     );
   }
 
-  /// 排序下拉：四项参考文案；仅「好友默认排序」有真实数据支持。
-  Widget _buildSortMenu(ThemeData theme) {
-    return PopupMenuButton<_SessionSortMode>(
-      tooltip: '排序方式',
-      onSelected: _selectSort,
-      itemBuilder: (ctx) => [
-        for (final m in _SessionSortMode.values)
-          PopupMenuItem(
-            value: m,
-            child: Row(
-              children: [
-                if (m == _sort)
-                  Icon(Icons.check, size: 16, color: theme.colorScheme.primary)
-                else
-                  const SizedBox(width: 16),
-                const SizedBox(width: AppSpacing.sm),
-                Text(m.label),
-              ],
-            ),
-          ),
-      ],
-      child: Chip(
-        visualDensity: VisualDensity.compact,
-        avatar: const Icon(Icons.sort, size: 16),
-        label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
-      ),
-    );
-  }
-
-  /// 选择排序：数据层没有默契度 / 登录时间字段，其余三项只切标签不改顺序。
-  void _selectSort(_SessionSortMode mode) {
-    setState(() => _sort = mode);
-    if (mode != _SessionSortMode.byDefault) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('该排序暂不支持，仍按默认顺序排列')),
-      );
-    }
-  }
-
-  /// 取消搜索：清空关键字并收起搜索框。
-  void _closeSearch() {
+  /// 清空搜索：同时重置关键字与输入框可见文本（清空按钮的唯一入口）。
+  void _clearSearch() {
     _searchCtrl.clear();
-    setState(() {
-      _search = '';
-      _searchOpen = false;
-    });
+    setState(() => _search = '');
   }
 
   /// 恢复本地「移除会话」标记（设置读取失败时保持进程内缓存）。
