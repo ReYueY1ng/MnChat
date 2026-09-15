@@ -406,3 +406,21 @@ String userAddrFromResponse(Object? ret) {
   final addr = '${msg.cast<String, Object?>()['addr'] ?? ''}'.trim();
   return addr.isEmpty ? kIpAddrUnknown : addr;
 }
+
+/// 已置顶动态的 pid（`posting.data.top_pid`）；缺失 / 脏数据 → `0`。
+///
+/// 官方动态卡按 `hot_pid` / `top_pid` / `last_pid` 三个键对列表排序
+/// （`playercenterv2dynamicctrl.lua:13-27`：`sortByTop.key = "top_pid"`、
+/// `sortByLast.key = "last_pid"`），故 `top_pid` 即已置顶的那条动态。
+int homepagePostingTopPid(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'posting');
+  if (data == null) return 0;
+  return _toOptInt(data['top_pid']) ?? 0;
+}
+
+/// 最新动态的 pid（`posting.data.last_pid`）；缺失 / 脏数据 → `0`。
+int homepagePostingLastPid(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'posting');
+  if (data == null) return 0;
+  return _toOptInt(data['last_pid']) ?? 0;
+}

@@ -41,7 +41,8 @@ import '../core/models/skin_head_catalog.dart';
 import '../core/services/name_rules.dart'
     show renameErrorText, validateNickname;
 import '../core/services/partner.dart' show PartnerDirectory, PartnerInfo;
-import '../core/services/player_home.dart' show PlayerHomeClient;
+import '../core/services/player_home.dart'
+    show PlayerHomeClient, PlayerHomeModule, SetTopFlagResult;
 import '../core/services/profile.dart'
     show PlayerProfile, PortraitItem, ProfileClient;
 import '../core/services/social_sign.dart' show SocialDeclaration;
@@ -107,6 +108,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
   /// IP 属地（`miniw/user_ext?act=get_user_addr`）；null = 尚未取到。
   String? _ipAddr;
+
+  /// 动态卡：已置顶 / 最新动态的 pid（`posting.data.top_pid` / `last_pid`）；
+  /// 0 = 无（依据 `playercenterv2dynamicctrl.lua:13-27` 的排序键）。
+  int _pinnedPid = 0;
+  int _latestPid = 0;
+
+  /// 置顶动态请求进行中（防连点）。
+  bool _postingTopBusy = false;
 
   /// 当前佩戴称号名（`titleName`）；null = 未佩戴或查询失败。
   String? _titleName;
@@ -240,6 +249,8 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       _declaration = homepageDeclaration(home);
       _level = level;
       _isVip = isVip;
+      _pinnedPid = homepagePostingTopPid(home);
+      _latestPid = homepagePostingLastPid(home);
     });
   }
 
@@ -294,6 +305,45 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       if (head != null) list[id] = head;
     }
     return list;
+  }
+
+  /// 置顶 / 取消置顶动态（`set_top_flag`，module_id = [PlayerHomeModule.posting]）。
+  ///
+  /// 已有置顶 → 取消（op_id = `top_pid`，op_type 0）；否则置顶最新动态
+  /// （op_id = `last_pid`，op_type 1）。置顶上限由**服务端**裁决
+  /// （`CheckMaxTop` → `MaxTopNum`），失败时原样透出服务端文案，客户端不硬编码。
+  Future<void> _togglePostingTop() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    final pin = _pinnedPid == 0;
+    final opId = pin ? _latestPid : _pinnedPid;
+    if (opId == 0) return;
+
+    setState(() => _postingTopBusy = true);
+    SetTopFlagResult result;
+    try {
+      final client = PlayerHomeClient(
+        uin: auth.uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+      );
+      result = await client.setTopFlag(
+        opId,
+        pin: pin,
+        moduleId: PlayerHomeModule.posting,
+      );
+    } catch (e) {
+      result = SetTopFlagResult(ok: false, message: '$e');
+    }
+    if (!mounted) return;
+    setState(() => _postingTopBusy = false);
+    if (!result.ok) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(result.message ?? '置顶失败')),
+      );
+      return;
+    }
+    await _loadHomeModules();
   }
 
   /// 无协议支持的操作（参考图存在但外部客户端无对应接口）：提示暂不支持。
@@ -856,11 +906,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   count: postingCount == null
                       ? kHomeUnknownValue
                       : '$postingCount',
-                  action: TextButton.icon(
-                    onPressed: () => _notSupported('置顶动态'),
-                    icon: const Icon(Icons.push_pin_outlined, size: 16),
-                    label: const Text('置顶'),
-                  ),
+                  // 置顶动态：官方对**单条**动态调用 `set_top_flag`
+                  // （module_id = posting 3；`playercenterv2homepageservice.lua:309-325`，
+                  // `op_type` 1=置顶 / 0=取消）。本卡不展示动态列表，故对服务端
+                  // 下发的「已置顶（top_pid）/ 最新（last_pid）」那条操作；
+                  // 两者皆无（无动态）时不显示按钮。
+                  action: (_pinnedPid == 0 && _latestPid == 0)
+                      ? null
+                      : TextButton.icon(
+                          onPressed: _postingTopBusy ? null : _togglePostingTop,
+                          icon: const Icon(Icons.push_pin_outlined, size: 16),
+                          label: Text(_pinnedPid > 0 ? '取消置顶' : '置顶'),
+                        ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
