@@ -105,6 +105,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   /// 迷你印迹数量（`miniw/camera?act=get_photo_homepage`）；null = 未取到。
   int? _multimediaCount;
 
+  /// IP 属地（`miniw/user_ext?act=get_user_addr`）；null = 尚未取到。
+  String? _ipAddr;
+
   /// 当前佩戴称号名（`titleName`）；null = 未佩戴或查询失败。
   String? _titleName;
 
@@ -240,13 +243,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     });
   }
 
-  /// 拉取「我的收藏夹」与「迷你印迹」两个独立接口的计数。
+  /// 拉取「我的收藏夹」「迷你印迹」与 IP 属地三个独立接口。
   ///
-  /// 二者不在 `get_user_homepage` 模块数据内：收藏夹走
+  /// 它们都不在 `get_user_homepage` 模块数据内：收藏夹走
   /// `miniw/favorite?act=get_collect_ids`（`contentfavsservice.lua:205-209`），
   /// 印迹走 `miniw/camera?act=get_photo_homepage`
-  /// （`multimediaalbumservice.lua:255-261`）。两组请求各自独立降级：
-  /// 失败只回退为「—」占位，互不影响。
+  /// （`multimediaalbumservice.lua:255-261`），IP 属地走
+  /// `miniw/user_ext?act=get_user_addr`（`playercenteripadressctrl.lua:77-105`）。
+  /// 三组请求各自独立降级：失败只回退为占位/「未知」，互不影响。
   Future<void> _loadExtraCounts() async {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return;
@@ -266,10 +270,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       log.warn('迷你印迹数量拉取失败: $e', tag: _logTag);
     }
 
+    String? ipAddr;
+    try {
+      ipAddr = await client.getUserAddr(auth.uin);
+    } catch (e) {
+      log.warn('IP 属地拉取失败: $e', tag: _logTag);
+    }
+
     if (!mounted) return;
     setState(() {
       _favoriteCount = favoriteCount;
       _multimediaCount = multimediaCount;
+      _ipAddr = ipAddr;
     });
   }
 
@@ -952,7 +964,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
               const SizedBox(height: AppSpacing.md),
               // 10. 页脚：IP属地 + 迷你号
-              _HomeFooter(uin: uin),
+              _HomeFooter(uin: uin, ipAddr: _ipAddr),
             ],
           ),
         ),
@@ -1629,10 +1641,17 @@ class _SelectableTile extends StatelessWidget {
 }
 
 /// 页脚：`IP属地` + 迷你号（对齐参考图底边）。
+///
+/// IP 属地取自 `miniw/user_ext?act=get_user_addr`
+/// （见 [PlayerHomeClient.getUserAddr]）；失败时解析器已回退为「未知」，
+/// [ipAddr] 为 null 仅表示尚未取到，此处显示占位。
 class _HomeFooter extends StatelessWidget {
   final int uin;
 
-  const _HomeFooter({required this.uin});
+  /// IP 属地；null = 尚未取到（显示占位）。
+  final String? ipAddr;
+
+  const _HomeFooter({required this.uin, this.ipAddr});
 
   @override
   Widget build(BuildContext context) {
@@ -1644,11 +1663,7 @@ class _HomeFooter extends StatelessWidget {
       children: [
         Icon(Icons.public, size: 14, color: theme.colorScheme.outline),
         const SizedBox(width: AppSpacing.xs),
-        // IP 属地无协议来源（仅动态正文带该字段），此处只保留版块与占位。
-        Tooltip(
-          message: kHomeUnavailableHint,
-          child: Text('IP属地：$kHomeUnknownValue', style: style),
-        ),
+        Text('IP属地：${ipAddr ?? kHomeUnknownValue}', style: style),
         const Spacer(),
         Text('$uin', style: style),
       ],

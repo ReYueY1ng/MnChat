@@ -13,7 +13,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../models/homepage_modules.dart'
-    show favoriteFolderCount, multimediaImprintCount;
+    show favoriteFolderCount, multimediaImprintCount, userAddrFromResponse;
 import '../net/config.dart'
     show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
@@ -225,6 +225,21 @@ class PlayerHomeClient {
     });
     final ret = await _get(url);
     return multimediaImprintCount(ret);
+  }
+
+  /// IP 属地（`miniw/user_ext?act=get_user_addr`）。
+  ///
+  /// 对齐反编译 `playerCenterIpAdressCtrl:RequestIpAdress`
+  /// （`playercenteripadressctrl.lua:77-105`）：参数仅 `op_uin`，
+  /// URL 根 `miniw/user_ext`（同文件 `:84`），签名同其它接口。
+  /// 解析见 [userAddrFromResponse]（请求失败与空值统一回退「未知」）。
+  /// 官方另有 `ns_version.ip_home` 版本门控（`:68-72`），外部客户端不做门控。
+  Future<String> getUserAddr(int targetUin) async {
+    final url = _url('miniw/user_ext', 'get_user_addr', {
+      'op_uin': '$targetUin',
+    });
+    final ret = await _get(url);
+    return userAddrFromResponse(ret);
   }
 
   /// 访问记录去重窗口（秒），对齐官方客户端

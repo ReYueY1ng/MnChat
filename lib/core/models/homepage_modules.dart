@@ -376,3 +376,33 @@ class HomeStats {
     this.credit,
   });
 }
+
+/// IP 属地空值/失败的统一回退文案：官方 `GetS(4896)` = 「未知」
+/// （`csvdef/utf8/stringdef.csv` 第 4896 行）。
+const String kIpAddrUnknown = '未知';
+
+/// IP 属地（`miniw/user_ext?act=get_user_addr` 的响应）。
+///
+/// 对齐反编译 `playerCenterIpAdressCtrl:RequestIpAdress`
+/// （`playercenteripadressctrl.lua:86-95`）：
+/// ```lua
+/// if ret and ret.result and ret.result == 0 and ret.msg and ret.msg.addr then
+///   ipAdress = ret.msg.addr
+/// else
+///   ipAdress = GetS(4896)   -- 「未知」
+/// end
+/// ```
+/// 即**请求失败与地址为空走同一条回退**，故本函数恒返回非空文案
+/// （官方仅在 `ns_version.ip_home` 版本门控不通过时隐藏整块，见同文件 `:68-72`）。
+///
+/// [ret] 为完整响应；结构不符 / `result != 0` / `addr` 为空 → [kIpAddrUnknown]。
+String userAddrFromResponse(Object? ret) {
+  if (ret is! Map) return kIpAddrUnknown;
+  final m = ret.cast<String, Object?>();
+  final result = m['result'] ?? m['ret'];
+  if (result is num && result != 0) return kIpAddrUnknown;
+  final msg = m['msg'];
+  if (msg is! Map) return kIpAddrUnknown;
+  final addr = '${msg.cast<String, Object?>()['addr'] ?? ''}'.trim();
+  return addr.isEmpty ? kIpAddrUnknown : addr;
+}

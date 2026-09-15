@@ -70,6 +70,14 @@ dev_dependencies:
   drift_dev: ^2.34.5
   build_runner: ^2.16.0
 
+# 压住 objective_c：它由 path_provider_foundation（path_provider 的 Apple
+# 平台实现）传递引入。9.6.1 的 native-assets hook 使用了当前 Dart SDK
+# （3.13.2）中不存在的 `Architecture.arm64e`，导致 `flutter test` 在宿主上
+# 编译该 hook 时必然失败（Member not found: 'arm64e'）。
+# 该包在 Android/Linux 上不参与运行，固定到 9.4.0 以绕开该 hook 编译错误。
+dependency_overrides:
+  objective_c: 9.4.0
+
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
