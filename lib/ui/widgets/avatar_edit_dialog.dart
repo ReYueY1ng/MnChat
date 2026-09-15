@@ -4,28 +4,30 @@
 ///
 /// 各页签数据来源（全部复用既有服务，不重复实现）：
 ///   - `头像`：已拥有皮肤（`auth.ownedSkinIds` + [kSkinHeadIcon]）与已拥有
-///     立绘（`ProfileClient.getOwnedPortraits`）；点选即调用
-///     `setPersonCenterHeadInfo`（type 1/4）更换头像本体，与个人主页一致；
-///     `坐骑` 分类没有「已拥有坐骑」协议 → 空态降级；
+///     立绘（`ProfileClient.getOwnedPortraits`）；`自定义` 为真实上传入口
+///     （`upload_pre_photo` → 上传 → `set_usr_header3`，见 [ProfileClient]），
+///     并展示当前 DIY 头像的审核态（`diy_header`：`pass_url` 可用 /
+///     `pre_url` 审核中 / `aduit_fail` 审核失败），可点选启用（`use_diy=1`）；
 ///   - `头像框`：`profile.ownedHeadFrameIds`（含默认框 1），点选即调用
-///     `setProfile&head_frame_id=`；`置顶` 无协议 → 仅提示；框名称 /
-///     获取途径需服务端配置，暂未获取（右栏只展示原始 id）；
+///     `setProfile&head_frame_id=`；`置顶` 无协议 → 仅提示；
 ///   - `昵称`：`ChatService.renameSelf` + `name_rules` 校验。`消耗 x1`
 ///     逐字对齐参考图，实际扣除由服务端裁决（见 `name_rules.dart`）；
-///   - `称号`：只能取到当前佩戴称号（`get_user_homepage` 的 title 模块）；
-///     完整称号列表 / 有效期无对应协议 → 空态降级；
-///   - `家族`：`FamilyClient.getFamilyList` + [parseFamilyList] 列出已加入
-///     家族；切换展示家族名无协议 → 仅提示。
+///   - `称号`：`TitleClient.getOwnedTitles`（`/miniw/title?act=get_title_showdata`）
+///     取已拥有 / 已过期称号与有效期（`StartTime`/`ExpireTime`），名称与分类来自
+///     远程配置 `title_manager`；分类页签按 `title.sort` 过滤；点选佩戴
+///     （`wear_title`）；
+///   - `家族`：`FamilyClient.getFamilyList` 列出已加入家族；当前展示家族来自
+///     `get_show_family`，切换调用 `set_show_family&family_id=`。
 ///
-/// 已知缺口（均为外部客户端无协议可实现，代码内以 TODO 标注）：
-///   1. 自定义头像（DIY）上传链路；
+/// 已知缺口（均为外部客户端无法从 Lua 反编译确定，代码内以 TODO 标注）：
+///   1. DIY 上传第 2 步（`MiniHttp.CustomUpload`）的请求体线格式；
 ///   2. 头像框 `置顶` 排序；
-///   3. 展示家族名切换；
-///   4. 称号完整列表与有效期。
+///   3. 头像框名称 / 获取途径配置。
 library;
 
 import 'dart:math' as math;
 
+import 'package:file_picker/file_picker.dart' show FilePicker, FileType;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -33,10 +35,23 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/skin_head_catalog.dart'
     show kSkinHeadIcon, roleIconAsset;
 import '../../core/services/family.dart'
-    show FamilyClient, FamilyInfo, parseFamilyList;
+    show
+        FamilyClient,
+        FamilyInfo,
+        FamilyShowInfo,
+        parseFamilyList,
+        parseShowFamily;
 import '../../core/services/name_rules.dart'
     show kNicknameMaxLen, renameErrorText, validateNickname;
-import '../../core/services/profile.dart' show PortraitItem, ProfileClient;
+import '../../core/services/profile.dart'
+    show DiyAuditState, DiyHeadInfo, PortraitItem, ProfileClient;
+import '../../core/services/title_config.dart'
+    show
+        OwnedTitle,
+        TitleCatalog,
+        TitleClient,
+        TitleConfigClient,
+        TitleShowData;
 import '../../state/providers.dart' show authProvider, chatServiceProvider;
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
@@ -66,7 +81,20 @@ Key avatarEditFrameCellKey(int id) => ValueKey<String>('avatarEditFrame-$id');
 Key avatarEditFamilyCellKey(int familyId) =>
     ValueKey<String>('avatarEditFamily-$familyId');
 
-/// 「称号」页签的顶部分类（逐字对齐参考图；数据源见文件头「已知缺口」）。
+/// 「自定义」上传入口 Key。
+const Key avatarEditDiyUploadKey = Key('avatarEditDiyUpload');
+
+/// 当前 DIY 自定义头像格子 Key。
+const Key avatarEditDiyCellKey = Key('avatarEditDiyCell');
+
+/// 称号卡片 Key（按称号 id）。
+Key avatarEditTitleCellKey(int titleId) =>
+    ValueKey<String>('avatarEditTitle-$titleId');
+
+/// 「称号」页签的顶部分类（逐字对齐参考图）。
+///
+/// 有远程配置时用 `title_manager.title_typeList`（名称/排序均来自配置，
+/// 顺序恰为 开发者/迷你季/其他/自定义）；配置不可用时回退此常量。
 const List<String> kTitleCategoryTabs = ['全部', '开发者', '迷你季', '其他', '自定义'];
 
 /// 头像编辑弹窗的左侧页签。
@@ -99,6 +127,27 @@ enum AvatarSourceTab {
 /// 家族列表加载器（测试注入用；为空时走 [FamilyClient.getFamilyList]）。
 typedef FamilyListLoader = Future<List<FamilyInfo>> Function();
 
+/// 当前展示家族加载器（测试注入用；为空时走 [FamilyClient.getShowFamily]）。
+typedef FamilyShowLoader = Future<FamilyShowInfo?> Function();
+
+/// 切换展示家族（测试注入用；为空时走 [FamilyClient.setShowFamily]）。
+typedef FamilySwitcher = Future<bool> Function(int familyId);
+
+/// DIY 自定义头像状态加载器（测试注入用；为空时走 [ProfileClient]）。
+typedef DiyHeadLoader = Future<DiyHeadInfo?> Function();
+
+/// DIY 头像「选图 + 上传」动作（测试注入用；为空时走真实 FilePicker + 上传）。
+typedef DiyAvatarUploader = Future<bool> Function();
+
+/// 已拥有称号加载器（测试注入用；为空时走 [TitleClient.getOwnedTitles]）。
+typedef TitleLoader = Future<TitleShowData> Function();
+
+/// 称号配置目录加载器（测试注入用；为空时走 [TitleConfigClient.catalog]）。
+typedef TitleCatalogLoader = Future<TitleCatalog> Function();
+
+/// 佩戴称号动作（测试注入用；为空时走 [TitleClient.wearTitle]）。
+typedef TitleWearer = Future<bool> Function(int titleId);
+
 /// 打开弹窗时的资料快照 —— 由个人主页传入，弹窗不重复拉取。
 class AvatarEditInitialData {
   /// 当前账号迷你号（头像 / 昵称降级展示用）。
@@ -126,6 +175,12 @@ class AvatarEditInitialData {
   /// 当前佩戴称号名（null = 未佩戴或未取到）。
   final String? titleName;
 
+  /// 当前 DIY 自定义头像状态（可选；为空时弹窗自行拉取）。
+  final DiyHeadInfo? diyHead;
+
+  /// 当前展示家族 id（可选；为空时弹窗自行拉取）。
+  final int? showFamilyId;
+
   const AvatarEditInitialData({
     required this.uin,
     required this.name,
@@ -136,6 +191,8 @@ class AvatarEditInitialData {
     this.ownedFrames = const {},
     this.portraits = const [],
     this.titleName,
+    this.diyHead,
+    this.showFamilyId,
   });
 }
 
@@ -144,11 +201,27 @@ Future<bool> showAvatarEditDialog(
   BuildContext context, {
   required AvatarEditInitialData initial,
   FamilyListLoader? familyLoader,
+  FamilyShowLoader? showFamilyLoader,
+  FamilySwitcher? familySwitcher,
+  DiyHeadLoader? diyLoader,
+  DiyAvatarUploader? diyUploader,
+  TitleLoader? titleLoader,
+  TitleCatalogLoader? titleCatalogLoader,
+  TitleWearer? titleWearer,
 }) async {
   final changed = await showDialog<bool>(
     context: context,
-    builder: (_) =>
-        AvatarEditDialog(initial: initial, familyLoader: familyLoader),
+    builder: (_) => AvatarEditDialog(
+      initial: initial,
+      familyLoader: familyLoader,
+      showFamilyLoader: showFamilyLoader,
+      familySwitcher: familySwitcher,
+      diyLoader: diyLoader,
+      diyUploader: diyUploader,
+      titleLoader: titleLoader,
+      titleCatalogLoader: titleCatalogLoader,
+      titleWearer: titleWearer,
+    ),
   );
   return changed == true;
 }
@@ -161,10 +234,38 @@ class AvatarEditDialog extends ConsumerStatefulWidget {
   /// 家族列表加载器（测试注入；为空时走 [FamilyClient]）。
   final FamilyListLoader? familyLoader;
 
+  /// 当前展示家族加载器（测试注入；为空时走 [FamilyClient]）。
+  final FamilyShowLoader? showFamilyLoader;
+
+  /// 切换展示家族（测试注入；为空时走 [FamilyClient]）。
+  final FamilySwitcher? familySwitcher;
+
+  /// DIY 头像状态加载器（测试注入；为空时走 [ProfileClient]）。
+  final DiyHeadLoader? diyLoader;
+
+  /// DIY 头像「选图 + 上传」动作（测试注入；为空时走真实 FilePicker + 上传）。
+  final DiyAvatarUploader? diyUploader;
+
+  /// 已拥有称号加载器（测试注入；为空时走 [TitleClient]）。
+  final TitleLoader? titleLoader;
+
+  /// 称号配置目录加载器（测试注入；为空时走 [TitleConfigClient]）。
+  final TitleCatalogLoader? titleCatalogLoader;
+
+  /// 佩戴称号动作（测试注入；为空时走 [TitleClient]）。
+  final TitleWearer? titleWearer;
+
   const AvatarEditDialog({
     super.key,
     required this.initial,
     this.familyLoader,
+    this.showFamilyLoader,
+    this.familySwitcher,
+    this.diyLoader,
+    this.diyUploader,
+    this.titleLoader,
+    this.titleCatalogLoader,
+    this.titleWearer,
   });
 
   @override
@@ -201,6 +302,37 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
   /// 是否发生过实际修改（关闭时回传，供个人主页刷新）。
   bool _changed = false;
 
+  // ── DIY 自定义头像 ────────────────────────────────────────────────────
+  /// 当前 DIY 头像状态（`diy_header` + `use_diy`）；null = 未取到 / 无 DIY。
+  DiyHeadInfo? _diyHead;
+
+  /// DIY 状态是否加载中。
+  bool _diyLoading = false;
+
+  /// DIY 上传进行中（防连点）。
+  bool _diyUploading = false;
+
+  /// 当前是否正在使用 DIY 头像（点选 DIY / 皮肤 / 立绘后更新）。
+  late bool _useDiy = widget.initial.diyHead?.useDiy ?? false;
+
+  // ── 称号 ──────────────────────────────────────────────────────────────
+  /// 称号是否已请求过（懒加载，仅在切到 `称号` 页签时触发）。
+  bool _titlesLoaded = false;
+  bool _titlesLoading = false;
+
+  /// 已拥有 / 已过期称号（`get_title_showdata`）。
+  List<OwnedTitle> _titles = const [];
+
+  /// 称号配置目录（名称 + 分类）。
+  TitleCatalog _titleCatalog = TitleCatalog.empty;
+
+  /// 当前佩戴称号 ID（来自 `use_title`）。
+  int? _wornTitleId;
+
+  /// 称号加载失败文案；null = 无错误。
+  String? _titlesError;
+
+  // ── 家族 ──────────────────────────────────────────────────────────────
   /// 家族列表是否已请求过（懒加载，仅在切到 `家族` 页签时触发）。
   bool _familyLoaded = false;
   bool _familyLoading = false;
@@ -209,7 +341,10 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
   /// 家族列表加载失败文案；null = 无错误。
   String? _familyError;
 
-  /// 当前展示的家族（首个；切换展示无协议 → 见 `_onFamilyTap`）。
+  /// 当前展示家族 id（`get_show_family`）。
+  int? _showFamilyId;
+
+  /// 当前选中的家族卡片 id。
   int? _selectedFamilyId;
 
   @override
@@ -218,6 +353,8 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     // 已拥有的头像框（并入默认框 1，对齐 func_has_opened_head_frames）。
     _ownedFrames = {1, ...widget.initial.ownedFrames}.toList()..sort();
     _nicknameController.addListener(_onNicknameChanged);
+    _showFamilyId = widget.initial.showFamilyId;
+    _loadDiy();
   }
 
   @override
@@ -256,9 +393,13 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
       _familyLoaded = true;
       _loadFamilies();
     }
+    if (tab == AvatarEditTab.title && !_titlesLoaded) {
+      _titlesLoaded = true;
+      _loadTitles();
+    }
   }
 
-  /// 懒加载家族列表：测试可注入 [FamilyListLoader]，否则走 [FamilyClient]。
+  /// 懒加载家族列表 + 当前展示家族：测试可注入 loader，否则走 [FamilyClient]。
   Future<void> _loadFamilies() async {
     setState(() {
       _familyLoading = true;
@@ -269,11 +410,18 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
       final list = loader != null
           ? await loader()
           : await _loadFamiliesFromServer();
+      // 当前展示家族：注入优先，其次快照，最后走服务端。
+      if (widget.showFamilyLoader != null) {
+        _showFamilyId = (await widget.showFamilyLoader!())?.familyId;
+      } else if (_showFamilyId == null) {
+        _showFamilyId = (await _loadShowFamilyFromServer())?.familyId;
+      }
       if (!mounted) return;
       setState(() {
         _families = list;
         _familyLoading = false;
-        _selectedFamilyId = list.isEmpty ? null : list.first.familyId;
+        _selectedFamilyId =
+            _showFamilyId ?? (list.isEmpty ? null : list.first.familyId);
       });
     } catch (_) {
       if (!mounted) return;
@@ -291,6 +439,225 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     return parseFamilyList(await client.getFamilyList());
   }
 
+  Future<FamilyShowInfo?> _loadShowFamilyFromServer() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return null;
+    final client = FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return parseShowFamily(await client.getShowFamily());
+  }
+
+  /// 切换展示家族（`set_show_family&family_id=`，对齐 `Btn_family_setClick`）。
+  Future<bool> _switchFamilyFromServer(int familyId) async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return false;
+    final client = FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return FamilyClient.isSuccess(await client.setShowFamily(familyId));
+  }
+
+  // ── DIY 自定义头像 ────────────────────────────────────────────────────
+
+  /// 加载当前账号的 DIY 头像状态（`diy_header`）。
+  Future<void> _loadDiy() async {
+    final loader = widget.diyLoader;
+    // 已有快照且无注入 loader 时无需再拉取。
+    if (loader == null && widget.initial.diyHead != null) return;
+    _diyLoading = true;
+    try {
+      final info = loader != null ? await loader() : await _loadDiyFromServer();
+      if (!mounted) return;
+      setState(() {
+        _diyHead = info;
+        _useDiy = info?.useDiy ?? false;
+        _diyLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _diyLoading = false);
+    }
+  }
+
+  Future<DiyHeadInfo?> _loadDiyFromServer() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return null;
+    final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return client.getMyDiyHeadInfo();
+  }
+
+  /// 「自定义」上传入口：注入上传器优先，否则走 FilePicker + [ProfileClient]。
+  ///
+  /// 真实流程对齐 `playercenterv2headeditorctrl.lua:815-935` `doUploadNewHead`：
+  /// 选图 → `upload_pre_photo` → 上传字节 → `set_usr_header3` 确认。
+  Future<void> _pickAndUploadDiy() async {
+    if (_diyUploading) return;
+    final injected = widget.diyUploader;
+    setState(() => _diyUploading = true);
+    try {
+      bool ok;
+      if (injected != null) {
+        ok = await injected();
+      } else {
+        final picked = await FilePicker.pickFile(
+          dialogTitle: '选择自定义头像',
+          type: FileType.custom,
+          allowedExtensions: const ['png', 'jpg', 'jpeg'],
+        );
+        if (picked == null) {
+          if (mounted) setState(() => _diyUploading = false);
+          return;
+        }
+        final bytes = await picked.readAsBytes();
+        if (!mounted) return;
+        final auth = ref.read(authProvider).auth;
+        if (auth == null) {
+          setState(() => _diyUploading = false);
+          return;
+        }
+        final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+        ok = await client.uploadDiyAvatar(bytes, fileName: picked.name);
+      }
+      if (!mounted) return;
+      if (ok) {
+        _toast('上传成功，等待审核');
+        await _loadDiy();
+      } else {
+        _toast('上传失败，请稍后重试');
+      }
+    } catch (e) {
+      if (mounted) _toast('上传失败：$e');
+    } finally {
+      if (mounted) setState(() => _diyUploading = false);
+    }
+  }
+
+  /// 选中当前 DIY 头像（`setPersonCenterHeadInfo&use_diy=1`）。
+  Future<void> _applyDiy() async {
+    final head = _diyHead;
+    if (head == null) return;
+    if (head.auditState == DiyAuditState.failed) {
+      _toast('当前图片违规无法使用');
+      return;
+    }
+    if (_useDiy) return;
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    final type = head.type ?? _headType ?? 1;
+    final id = head.id ?? _headId ?? 0;
+    if (id <= 0) {
+      _toast('头像信息缺失，请稍后重试');
+      return;
+    }
+    try {
+      final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+      final ok = await client.setHeadInfo(type: type, id: id, useDiy: true);
+      if (!mounted) return;
+      if (ok) {
+        setState(() {
+          _useDiy = true;
+          _changed = true;
+        });
+        _toast(
+          head.auditState == DiyAuditState.pending
+              ? '已使用，审核通过后自动替换'
+              : '头像已更新',
+        );
+      } else {
+        _toast('设置失败，请稍后重试');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _toast('设置失败：$e');
+    }
+  }
+
+  // ── 称号 ──────────────────────────────────────────────────────────────
+
+  /// 懒加载已拥有称号 + 配置目录（名称/分类）。
+  Future<void> _loadTitles() async {
+    setState(() {
+      _titlesLoading = true;
+      _titlesError = null;
+    });
+    try {
+      final catalog = widget.titleCatalogLoader != null
+          ? await widget.titleCatalogLoader!()
+          : await TitleConfigClient().catalog();
+      final data = widget.titleLoader != null
+          ? await widget.titleLoader!()
+          : await _loadTitlesFromServer();
+      if (!mounted) return;
+      setState(() {
+        _titleCatalog = catalog;
+        _titles = data.all;
+        _wornTitleId = data.useTitleId;
+        _titlesLoading = false;
+        if (_titleTab >= _titleLabels(catalog).length) _titleTab = 0;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _titlesLoading = false;
+        _titlesError = '称号列表加载失败';
+      });
+    }
+  }
+
+  Future<TitleShowData> _loadTitlesFromServer() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return const TitleShowData();
+    final client = TitleClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return client.getOwnedTitles();
+  }
+
+  /// 佩戴称号（`wear_title&title_id=`）。
+  Future<void> _wearTitle(int titleId) async {
+    if (titleId == _wornTitleId) return;
+    try {
+      final ok = widget.titleWearer != null
+          ? await widget.titleWearer!(titleId)
+          : await _wearTitleFromServer(titleId);
+      if (!mounted) return;
+      if (ok) {
+        setState(() {
+          _wornTitleId = titleId;
+          _changed = true;
+        });
+        _toast('称号已佩戴');
+      } else {
+        _toast('佩戴失败，请稍后重试');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _toast('佩戴失败：$e');
+    }
+  }
+
+  Future<bool> _wearTitleFromServer(int titleId) async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return false;
+    final client = TitleClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return client.wearTitle(titleId);
+  }
+
+  /// 称号分类页签文案：有配置时用配置分类，否则回退 [kTitleCategoryTabs]。
+  List<String> _titleLabels(TitleCatalog catalog) {
+    final types = catalog.sortedTypes;
+    return types.isEmpty
+        ? kTitleCategoryTabs
+        : ['全部', ...types.map((t) => t.name)];
+  }
+
+  /// 按当前分类过滤称号（`title.sort == title_typeList[].id`）。
+  List<OwnedTitle> _filteredTitles(TitleCatalog catalog) {
+    if (_titleTab <= 0) return _titles;
+    final types = catalog.sortedTypes;
+    final idx = _titleTab - 1;
+    if (idx < 0 || idx >= types.length) return _titles;
+    final groupType = types[idx].id;
+    return _titles
+        .where((t) => catalog.entries[t.id]?.sort == groupType)
+        .toList();
+  }
+
   // ── 修改动作 ──────────────────────────────────────────────────────────
 
   /// 更换头像本体（type=1 皮肤）：设置后即时更新选中态。
@@ -306,6 +673,7 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
         setState(() {
           _headType = 1;
           _headId = skinId;
+          _useDiy = false;
           _changed = true;
         });
         _toast('头像已更新');
@@ -335,6 +703,7 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
         setState(() {
           _headType = 4;
           _headId = portrait.id;
+          _useDiy = false;
           _changed = true;
         });
         _toast('头像已更新');
@@ -401,10 +770,28 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     }
   }
 
-  /// 家族卡片点选：切换展示家族名无协议，只提示（见文件头「已知缺口」）。
-  void _onFamilyTap(FamilyInfo family) {
+  /// 家族卡片点选：调用 `set_show_family&family_id=` 切换展示家族。
+  Future<void> _onFamilyTap(FamilyInfo family) async {
     if (family.familyId == _selectedFamilyId) return;
-    _toast('外部客户端暂不支持设置展示家族');
+    try {
+      final ok = widget.familySwitcher != null
+          ? await widget.familySwitcher!(family.familyId)
+          : await _switchFamilyFromServer(family.familyId);
+      if (!mounted) return;
+      if (ok) {
+        setState(() {
+          _selectedFamilyId = family.familyId;
+          _showFamilyId = family.familyId;
+          _changed = true;
+        });
+        _toast('展示家族已更新');
+      } else {
+        _toast('切换失败，请稍后重试');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _toast('切换失败：$e');
+    }
   }
 
   // ── 布局 ──────────────────────────────────────────────────────────────
@@ -543,14 +930,21 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     if (_source == AvatarSourceTab.all) {
       cells.add(
         _SelectableCell(
+          key: avatarEditDiyUploadKey,
           selected: false,
-          // TODO(头像编辑): 自定义头像（DIY）上传无协议链路，暂以提示降级；
-          // 若后续接入 DIY 上传接口，则替换为真实上传入口。
-          onTap: () => _toast('外部客户端暂不支持自定义头像上传'),
+          // 真实上传入口：`upload_pre_photo` → 上传字节 → `set_usr_header3`。
+          onTap: _pickAndUploadDiy,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
+              if (_diyUploading || _diyLoading)
+                const SizedBox(
+                  width: 20,
+                  height: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else
+                Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
               const SizedBox(height: AppSpacing.xs),
               Text(
                 '自定义',
@@ -562,6 +956,11 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
           ),
         ),
       );
+      // 当前 DIY 头像（`diy_header` 单个对象）：展示审核态，可点选启用。
+      final diyUrl = _diyHead?.displayUrl;
+      if (diyUrl != null) {
+        cells.add(_diyCell(theme, diyUrl));
+      }
     }
 
     if (_source == AvatarSourceTab.all ||
@@ -663,15 +1062,60 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     );
   }
 
+  /// DIY 自定义头像格子：网络图 + 审核态角标 + 选中态。
+  Widget _diyCell(ThemeData theme, String url) {
+    final state = _diyHead!.auditState;
+    return _SelectableCell(
+      key: avatarEditDiyCellKey,
+      selected: _useDiy,
+      onTap: _applyDiy,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppSpacing.xs),
+            child: ClipRRect(
+              borderRadius: AppRadius.inputR,
+              child: Image.network(
+                url,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => Icon(
+                  Icons.image_not_supported_outlined,
+                  size: 20,
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ),
+          ),
+          if (state == DiyAuditState.pending)
+            const Positioned(
+              left: 2,
+              bottom: 2,
+              child: _AuditTag(text: '审核中', warning: true),
+            ),
+          if (state == DiyAuditState.failed)
+            const Positioned(
+              left: 2,
+              bottom: 2,
+              child: _AuditTag(text: '审核失败'),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// 头像右栏：预览 + 上传提示 + `会员免费` + `使用中`。
   Widget _avatarPanel(ThemeData theme, {required bool narrow}) {
     final scheme = theme.colorScheme;
+    // 使用 DIY 时展示 DIY 图（此时不传本体 type/id，避免本地图标覆盖网络图）。
+    final diyUrl = _diyHead?.displayUrl ?? widget.initial.avatarUrl;
+    final showDiy = _useDiy && diyUrl != null;
     final preview = AvatarView(
-      avatarUrl: widget.initial.avatarUrl,
+      avatarUrl: showDiy ? diyUrl : null,
       name: _name.isEmpty ? '${widget.initial.uin}' : _name,
       radius: narrow ? 24 : 36,
-      headType: _headType,
-      headId: _headId,
+      headType: showDiy ? null : _headType,
+      headId: showDiy ? null : _headId,
       frameId: _frameId,
     );
     final texts = Column(
@@ -918,47 +1362,64 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
   // ── 页签 4：称号 ──────────────────────────────────────────────────────
 
   Widget _buildTitleTab(ThemeData theme) {
-    final titleName = widget.initial.titleName;
+    if (_titlesLoading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    final error = _titlesError;
+    if (error != null) {
+      return Center(child: _EmptyHint(error, center: true));
+    }
+    final catalog = _titleCatalog;
+    final types = catalog.sortedTypes;
+    final labels = _titleLabels(catalog);
+    final tabs = _TopTabs(
+      tabsKey: avatarEditTitleTabsKey,
+      labels: labels,
+      index: _titleTab,
+      onChanged: (i) => setState(() => _titleTab = i),
+    );
+    // 分类配置缺失时无法按分类筛选（仅「全部」可用）。
+    if (_titleTab > 0 && types.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          tabs,
+          const SizedBox(height: AppSpacing.md),
+          const Expanded(
+            child: Center(
+              child: _EmptyHint('称号分类配置未获取，暂无法按分类筛选', center: true),
+            ),
+          ),
+        ],
+      );
+    }
+    final titles = _filteredTitles(catalog);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _TopTabs(
-          tabsKey: avatarEditTitleTabsKey,
-          labels: kTitleCategoryTabs,
-          index: _titleTab,
-          onChanged: (i) => setState(() => _titleTab = i),
-        ),
+        tabs,
         const SizedBox(height: AppSpacing.md),
         Expanded(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              if (titleName != null) ...[
-                GridView.count(
+          child: titles.isEmpty
+              ? const Center(child: _EmptyHint('该分类下暂无称号', center: true))
+              : GridView.count(
                   padding: EdgeInsets.zero,
                   crossAxisCount: 3,
                   mainAxisSpacing: AppSpacing.sm,
                   crossAxisSpacing: AppSpacing.sm,
                   childAspectRatio: 1.7,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
                   children: [
-                    Tooltip(
-                      message: '称号列表与有效期需服务端接口，暂未获取',
-                      child: _TitleCard(name: titleName, dateRange: '—'),
-                    ),
+                    for (final t in titles)
+                      _TitleCard(
+                        key: avatarEditTitleCellKey(t.id),
+                        name: catalog.names[t.id] ?? '称号 #${t.id}',
+                        dateRange: t.validRange,
+                        selected: t.id == _wornTitleId,
+                        expired: t.expired,
+                        onTap: () => _wearTitle(t.id),
+                      ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.md),
-              ],
-              // TODO(头像编辑): 称号列表 / 有效期无对应协议；当前仅能展示
-              // `get_user_homepage` 的佩戴称号，其余分类为诚实空态。
-              const _EmptyHint(
-                '当前佩戴称号来自个人主页；完整列表与有效期外部客户端暂未获取',
-                center: true,
-              ),
-            ],
-          ),
         ),
       ],
     );
@@ -1190,6 +1651,39 @@ class _CheckBadge extends StatelessWidget {
   }
 }
 
+/// DIY 审核态角标（`审核中` / `审核失败`）。
+class _AuditTag extends StatelessWidget {
+  final String text;
+
+  /// `true` = 审核中（警示色）；`false` = 审核失败（错误色）。
+  final bool warning;
+
+  const _AuditTag({required this.text, this.warning = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final color = warning ? AppSemanticColors.of(context).warning : scheme.error;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.surface.withValues(alpha: 0.85),
+        borderRadius: AppRadius.chipR,
+        border: Border.all(color: color, width: 0.8),
+      ),
+      child: Text(
+        text,
+        style: theme.textTheme.labelSmall?.copyWith(
+          color: color,
+          fontWeight: FontWeight.w700,
+          height: 1.0,
+        ),
+      ),
+    );
+  }
+}
+
 /// 头像框格子的占位预览：灰色圆角底 + 框图片（尺寸按 [headFrameSlotSize]）。
 class _FramePreview extends StatelessWidget {
   final int id;
@@ -1224,56 +1718,90 @@ class _FramePreview extends StatelessWidget {
   }
 }
 
-/// 称号卡片：称号名 + `有效期` + 日期区间。
+/// 称号卡片：称号名 + `有效期` + 日期区间；可点选佩戴。
 class _TitleCard extends StatelessWidget {
   final String name;
 
   /// 日期区间（`2026.07.31--永久`）；数据缺失时为 `—`。
   final String dateRange;
 
-  const _TitleCard({required this.name, required this.dateRange});
+  /// 是否为当前佩戴称号（选中态描边 + 勾选角标）。
+  final bool selected;
+
+  /// 是否已过期（文字淡化）。
+  final bool expired;
+
+  /// 点选佩戴回调。
+  final VoidCallback onTap;
+
+  const _TitleCard({
+    super.key,
+    required this.name,
+    required this.dateRange,
+    this.selected = false,
+    this.expired = false,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(AppSpacing.sm),
-      decoration: BoxDecoration(
-        color: scheme.secondaryContainer,
-        borderRadius: AppRadius.cardR,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          RichTextView(
-            name,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: theme.textTheme.titleSmall?.copyWith(
-              color: scheme.onSecondaryContainer,
-              fontWeight: FontWeight.w700,
+    final warning = AppSemanticColors.of(context).warning;
+    final baseColor = expired
+        ? scheme.onSecondaryContainer.withValues(alpha: 0.55)
+        : scheme.onSecondaryContainer;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: AppRadius.cardR,
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: scheme.secondaryContainer,
+          borderRadius: AppRadius.cardR,
+          border: Border.all(
+            color: selected ? warning : Colors.transparent,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Stack(
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                RichTextView(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: baseColor,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '有效期',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: baseColor.withValues(alpha: 0.7),
+                      ),
+                    ),
+                    Text(
+                      dateRange,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: baseColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '有效期',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSecondaryContainer.withValues(alpha: 0.7),
-                ),
-              ),
-              Text(
-                dateRange,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSecondaryContainer,
-                ),
-              ),
-            ],
-          ),
-        ],
+            if (selected)
+              const Positioned(top: 0, right: 0, child: _CheckBadge()),
+          ],
+        ),
       ),
     );
   }

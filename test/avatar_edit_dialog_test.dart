@@ -4,8 +4,16 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/services/auth.dart' show MiniAuth;
 import 'package:mnchat/core/services/chat_service.dart'
     show ChatService, SessionSnapshot;
-import 'package:mnchat/core/services/family.dart' show FamilyInfo;
-import 'package:mnchat/core/services/profile.dart' show PortraitItem;
+import 'package:mnchat/core/services/family.dart'
+    show FamilyInfo, FamilyShowInfo;
+import 'package:mnchat/core/services/profile.dart' show DiyHeadInfo, PortraitItem;
+import 'package:mnchat/core/services/title_config.dart'
+    show
+        OwnedTitle,
+        TitleCatalog,
+        TitleConfigEntry,
+        TitleShowData,
+        TitleType;
 import 'package:mnchat/state/providers.dart';
 import 'package:mnchat/ui/theme/app_theme.dart';
 import 'package:mnchat/ui/widgets/avatar_edit_dialog.dart';
@@ -28,12 +36,43 @@ class _FakeAuthNotifier extends AuthNotifier {
   );
 }
 
+/// 称号配置目录（名称 + 分类，分类顺序对齐远程 `title_typeList`）。
+///
+/// 过滤语义：`title.sort == title_typeList[].id`（`commontitleconfig.lua:70-83`
+/// 的 `v.sort == type`，`type` 即 `playercenterv2headeditorctrl.lua:1755`
+/// 的 `value.id`），故各条目 `sort` 取所属分类的 `id`。
+const _catalog = TitleCatalog(
+  entries: {
+    101: TitleConfigEntry(id: 101, name: '星尘守护者', sort: 2),
+    102: TitleConfigEntry(id: 102, name: '迷你季限定', sort: 4),
+    103: TitleConfigEntry(id: 103, name: '自定义称号', sort: 5),
+  },
+  types: [
+    TitleType(id: 2, name: '开发者', sort: 2),
+    TitleType(id: 4, name: '迷你季', sort: 3),
+    TitleType(id: 3, name: '其他', sort: 4),
+    TitleType(id: 5, name: '自定义', sort: 5),
+  ],
+);
+
+/// 已拥有称号（`get_title_showdata`）。
+const _titles = TitleShowData(
+  owned: [
+    OwnedTitle(id: 101, startTime: 1753977600, expireTime: -1),
+    OwnedTitle(id: 102, startTime: 1753977600, expireTime: 1790000000),
+  ],
+  expired: [
+    OwnedTitle(id: 103, startTime: 0, expireTime: 1700000000, expired: true),
+  ],
+  useTitleId: 101,
+);
+
 /// 头像编辑弹窗回归测试。
 ///
-/// 覆盖：外壳（标题 / 左 nav / 关闭）、头像页签（顶部来源分类、`自定义`、
-/// 4 列网格、右栏提示）、头像框页签（`置顶` 降级提示）、昵称页签（校验驱动
-/// `确认修改` 可用态 + 未连接返回码文案）、称号页签（分类 + 空态）、
-/// 家族页签（懒加载列表 + 选中态 + 切换无协议提示）。
+/// 覆盖：外壳（标题 / 左 nav / 关闭）、头像页签（来源分类、`自定义` 真实上传
+/// 入口、DIY 审核态、4 列网格、右栏提示）、头像框页签（`置顶` 降级提示）、
+/// 昵称页签（校验驱动 `确认修改` 可用态 + 未连接返回码文案）、称号页签
+/// （分类 + 真实称号 + 有效期 + 佩戴）、家族页签（懒加载列表 + 展示家族切换）。
 void main() {
   const initial = AvatarEditInitialData(
     uin: 10001,
@@ -45,12 +84,20 @@ void main() {
     ownedFrames: {1, 20201},
     portraits: [PortraitItem(id: 7)],
     titleName: '星尘守护者',
+    showFamilyId: 1,
   );
 
   Future<void> pumpDialog(
     WidgetTester tester, {
     AvatarEditInitialData data = initial,
     FamilyListLoader? familyLoader,
+    FamilyShowLoader? showFamilyLoader,
+    FamilySwitcher? familySwitcher,
+    DiyHeadLoader? diyLoader,
+    DiyAvatarUploader? diyUploader,
+    TitleLoader? titleLoader,
+    TitleCatalogLoader? titleCatalogLoader,
+    TitleWearer? titleWearer,
   }) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
@@ -68,7 +115,17 @@ void main() {
         child: MaterialApp(
           theme: buildAppTheme(Brightness.light),
           home: Scaffold(
-            body: AvatarEditDialog(initial: data, familyLoader: familyLoader),
+            body: AvatarEditDialog(
+              initial: data,
+              familyLoader: familyLoader,
+              showFamilyLoader: showFamilyLoader,
+              familySwitcher: familySwitcher,
+              diyLoader: diyLoader ?? () async => null,
+              diyUploader: diyUploader,
+              titleLoader: titleLoader,
+              titleCatalogLoader: titleCatalogLoader,
+              titleWearer: titleWearer,
+            ),
           ),
         ),
       ),
@@ -116,6 +173,7 @@ void main() {
 
     // 首格 `自定义` + 皮肤 / 立绘缩略图格子。
     expect(find.text('自定义'), findsOneWidget);
+    expect(find.byKey(avatarEditDiyUploadKey), findsOneWidget);
     expect(find.byKey(avatarEditHeadCellKey(4, 7)), findsOneWidget);
     // 当前头像（皮肤 1 → 图标 31）选中 → 绿色勾选角标。
     final selectedCell = find.byKey(avatarEditHeadCellKey(1, 1));
@@ -133,11 +191,66 @@ void main() {
     expect(find.text('请勿上传包含恐怖、反动等不良元素的图片哦'), findsOneWidget);
     expect(find.text('会员免费'), findsOneWidget);
     expect(find.text('使用中'), findsOneWidget);
+  });
 
-    // `自定义` 无上传链路：点按只提示。
-    await tester.tap(find.text('自定义'));
-    await tester.pump();
-    expect(find.text('外部客户端暂不支持自定义头像上传'), findsOneWidget);
+  testWidgets('头像页签：DIY 审核态（审核中 / 审核失败）与上传入口', (tester) async {
+    await pumpDialog(
+      tester,
+      diyLoader: () async => const DiyHeadInfo(
+        preUrl: 'https://example.com/pre.png',
+        useDiy: false,
+        type: 1,
+        id: 1,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    // 审核中：DIY 格子 + `审核中` 角标。
+    expect(find.byKey(avatarEditDiyCellKey), findsOneWidget);
+    expect(find.text('审核中'), findsOneWidget);
+
+    // 上传入口：注入上传器成功 → 成功提示。
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          chatServiceProvider.overrideWithValue(ChatService(db: null)),
+          sessionListProvider.overrideWith(
+            (_) => Stream.value(const SessionSnapshot([], [])),
+          ),
+          authProvider.overrideWith(_FakeAuthNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(Brightness.light),
+          home: Scaffold(
+            body: AvatarEditDialog(
+              initial: initial,
+              diyLoader: () async => null,
+              diyUploader: () async => true,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(avatarEditDiyUploadKey));
+    await tester.pumpAndSettle();
+    expect(find.text('上传成功，等待审核'), findsOneWidget);
+  });
+
+  testWidgets('头像页签：DIY 审核失败不可选（提示违规）', (tester) async {
+    await pumpDialog(
+      tester,
+      diyLoader: () async => const DiyHeadInfo(
+        preUrl: 'https://example.com/pre.png',
+        auditFail: true,
+        useDiy: false,
+        type: 1,
+        id: 1,
+      ),
+    );
+    expect(find.text('审核失败'), findsOneWidget);
+    await tester.tap(find.byKey(avatarEditDiyCellKey));
+    await tester.pumpAndSettle();
+    expect(find.text('当前图片违规无法使用'), findsOneWidget);
   });
 
   testWidgets('头像框页签：4 列帧网格 + 说明 + 置顶降级', (tester) async {
@@ -193,11 +306,21 @@ void main() {
     expect(find.text('尚未连接服务器，请稍后重试'), findsOneWidget);
   });
 
-  testWidgets('称号页签：分类 + 当前佩戴称号卡片 + 空态说明', (tester) async {
-    await pumpDialog(tester);
+  testWidgets('称号页签：真实称号 + 有效期 + 分类筛选 + 佩戴', (tester) async {
+    var worn = 0;
+    await pumpDialog(
+      tester,
+      titleCatalogLoader: () async => _catalog,
+      titleLoader: () async => _titles,
+      titleWearer: (id) async {
+        worn = id;
+        return true;
+      },
+    );
     await tapNav(tester, '称号');
     expect(tester.takeException(), isNull);
 
+    // 分类行逐字对齐参考图（来自远程配置顺序）。
     for (final label in ['全部', '开发者', '迷你季', '其他', '自定义']) {
       expect(
         find.descendant(
@@ -208,15 +331,62 @@ void main() {
         reason: '缺少称号分类：$label',
       );
     }
+    // 全部：三个称号都展示，且各带 `有效期`。
     expect(find.text('星尘守护者'), findsOneWidget);
-    expect(find.text('有效期'), findsOneWidget);
-    // 有效期无协议来源 → 「—」占位。
-    expect(find.text('—'), findsOneWidget);
-    expect(find.textContaining('完整列表与有效期'), findsOneWidget);
+    expect(find.text('迷你季限定'), findsOneWidget);
+    expect(find.text('自定义称号'), findsOneWidget);
+    expect(find.text('有效期'), findsNWidgets(3));
+    // 永久称号的有效期区间以 `--永久` 结尾。
+    expect(find.textContaining('--永久'), findsOneWidget);
+
+    // 分类筛选：`开发者` 只保留 sort==2 的称号。
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(avatarEditTitleTabsKey),
+        matching: find.text('开发者'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('星尘守护者'), findsOneWidget);
+    expect(find.text('迷你季限定'), findsNothing);
+    expect(find.text('自定义称号'), findsNothing);
+
+    // 佩戴：当前佩戴者（101）不重复提交，选另一个。
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(avatarEditTitleTabsKey),
+        matching: find.text('迷你季'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(avatarEditTitleCellKey(102)));
+    await tester.pumpAndSettle();
+    expect(worn, 102);
+    expect(find.text('称号已佩戴'), findsOneWidget);
   });
 
-  testWidgets('家族页签：懒加载列表 + 首个选中 + 切换展示无协议', (tester) async {
+  testWidgets('称号页签：无分类配置时仅全部可用，其余分类诚实空态', (tester) async {
+    await pumpDialog(
+      tester,
+      // 名称可用但分类缺失：非「全部」无法筛选。
+      titleCatalogLoader: () async => TitleCatalog(entries: _catalog.entries),
+      titleLoader: () async => _titles,
+    );
+    await tapNav(tester, '称号');
+    expect(find.text('星尘守护者'), findsOneWidget);
+    await tester.tap(
+      find.descendant(
+        of: find.byKey(avatarEditTitleTabsKey),
+        matching: find.text('开发者'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('称号分类配置未获取'), findsOneWidget);
+  });
+
+  testWidgets('家族页签：懒加载列表 + 展示家族切换', (tester) async {
     var loadCount = 0;
+    var switched = 0;
     await pumpDialog(
       tester,
       familyLoader: () async {
@@ -226,6 +396,12 @@ void main() {
           FamilyInfo(familyId: 2, name: '繁花拥雪'),
         ];
       },
+      showFamilyLoader: () async =>
+          const FamilyShowInfo(familyId: 1, name: 'MoonX'),
+      familySwitcher: (id) async {
+        switched = id;
+        return true;
+      },
     );
     expect(loadCount, 0, reason: '未切到家族页签时不应请求');
 
@@ -234,9 +410,9 @@ void main() {
     expect(find.text('MoonX'), findsOneWidget);
     expect(find.text('繁花拥雪'), findsOneWidget);
 
-    final selected = find.byKey(avatarEditFamilyCellKey(1));
+    final first = find.byKey(avatarEditFamilyCellKey(1));
     expect(
-      find.descendant(of: selected, matching: find.byIcon(Icons.check_circle)),
+      find.descendant(of: first, matching: find.byIcon(Icons.check_circle)),
       findsOneWidget,
     );
     expect(
@@ -247,13 +423,21 @@ void main() {
       findsNothing,
     );
 
+    // 点选第二个家族 → 调用 set_show_family 并切换选中态。
     await tester.tap(find.text('繁花拥雪'));
-    await tester.pump();
-    expect(find.text('外部客户端暂不支持设置展示家族'), findsOneWidget);
-    // 选中态不变（设置无协议，不做假切换）。
+    await tester.pumpAndSettle();
+    expect(switched, 2);
+    expect(find.text('展示家族已更新'), findsOneWidget);
     expect(
-      find.descendant(of: selected, matching: find.byIcon(Icons.check_circle)),
+      find.descendant(
+        of: find.byKey(avatarEditFamilyCellKey(2)),
+        matching: find.byIcon(Icons.check_circle),
+      ),
       findsOneWidget,
+    );
+    expect(
+      find.descendant(of: first, matching: find.byIcon(Icons.check_circle)),
+      findsNothing,
     );
   });
 
@@ -281,6 +465,7 @@ void main() {
                   result = await showAvatarEditDialog(
                     context,
                     initial: initial,
+                    diyLoader: () async => null,
                   );
                 },
                 child: const Text('open'),

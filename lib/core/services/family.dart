@@ -137,6 +137,41 @@ List<FamilyInfo> parseFamilyList(Map<String, Object?> resp) {
   return out;
 }
 
+/// 当前展示家族（`get_show_family` 响应 / 主页 `family` 模块 `data`）。
+class FamilyShowInfo {
+  final int familyId;
+  final String name;
+  const FamilyShowInfo({required this.familyId, required this.name});
+}
+
+/// 解析「当前展示家族」。
+///
+/// 兼容信封：`{data:{family_id,name}}` / `{family:{...}}` / 顶层对象；
+/// 无 `family_id`（未展示任何家族）→ null。展示家族字段 `{family_id, name,
+/// leader_uin, level, hide_flag}`（`familymgr.lua:387-398`、
+/// `familydata.lua:548-554`）。
+FamilyShowInfo? parseShowFamily(Map<String, Object?> resp) {
+  FamilyShowInfo? found;
+  void collect(Object? node) {
+    if (found != null || node is! Map) return;
+    final m = node.cast<String, Object?>();
+    final fid = m['family_id'] ?? m['familyId'] ?? m['id'];
+    if (fid is num && fid.toInt() > 0) {
+      found = FamilyShowInfo(
+        familyId: fid.toInt(),
+        name: m['family_name']?.toString() ?? m['name']?.toString() ?? '家族',
+      );
+      return;
+    }
+    for (final key in const ['data', 'family']) {
+      collect(m[key]);
+    }
+  }
+
+  collect(resp);
+  return found;
+}
+
 /// 家族客户端。
 class FamilyClient {
   final int uin;
@@ -196,6 +231,29 @@ class FamilyClient {
   /// 家族详情。
   Future<Map<String, Object?>> getFamilyDetail(Object familyId) =>
       _get(_url('get_family_detail', {'family_id': '$familyId'}), 'get_family_detail');
+
+  /// 当前展示家族（act=get_show_family，参数 uin）。
+  ///
+  /// 对齐 `familyservice.lua:628-637` + `familydata.lua:477-494`；响应
+  /// `{ret/code:0, data:{family_id,name,...}}`。
+  Future<Map<String, Object?>> getShowFamily() =>
+      _get(_url('get_show_family'), 'get_show_family');
+
+  /// 切换展示家族（act=set_show_family，参数 family_id）。
+  ///
+  /// 对齐 `familyservice.lua:617-626` + `familydata.lua:531-546`
+  /// （`playercenterv2headeditorctrl.lua:1720-1734` 的 `Btn_family_setClick`）。
+  Future<Map<String, Object?>> setShowFamily(Object familyId) => _get(
+    _url('set_show_family', {'family_id': '$familyId'}),
+    'set_show_family',
+  );
+
+  /// 家庭接口是否成功（响应 `{ret/code:0}`，对齐 `__AsyncRequest` 的
+  /// `code = ret.ret or ret.code`，`familyservice.lua:688`）。
+  static bool isSuccess(Map<String, Object?> resp) {
+    final code = resp['ret'] ?? resp['code'];
+    return code is num && code == 0;
+  }
 
   /// 申请加入家族。
   Future<Map<String, Object?>> applyJoin(Object familyId) =>
