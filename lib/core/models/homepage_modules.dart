@@ -14,6 +14,11 @@
 ///   - `achieve2`（模块 13）：勋章列表（`data` 为数组，`[(id, level)]`）；
 ///   - `social_sign`（模块 16）：交友宣言（`{social_lab, game_lab}`）。
 ///
+/// 另有两个主页卡片不来自 `get_user_homepage`，而是独立接口，故解析器直接
+/// 接收完整响应（含 `code`）：
+///   - `我的收藏夹`：`miniw/favorite?act=get_collect_ids`（[favoriteFolderCount]）；
+///   - `迷你印迹`：`miniw/camera?act=get_photo_homepage`（[multimediaImprintCount]）。
+///
 /// 解析口径与 `ui/widgets/session_player_info_popup.dart`、
 /// `ui/player_home_page.dart` 中既有的私有实现保持一致（那两处的辅助函数为
 /// 私有且不在本次改动范围，故此处收敛为可单测的公开函数）。
@@ -293,6 +298,51 @@ HomeStats? homepageStats(Map<String, Object?>? home) {
     credit: _toOptInt(d['credit']),
   );
 }
+
+/// 独立接口响应的列表计数（`ret.data.list`）。
+///
+/// 约定：`ret` 非 Map / `code`(或 `ret`) 非 0 / `data` 非 Map → `null`（请求
+/// 失败，UI 降级为「—」）；`list` 为 Map（映射）或 List（数组）→ 其条目数；
+/// `list` 缺失 → `0`（请求成功但为空）；`list` 类型不符 → `null`（脏数据）。
+int? _responseListCount(Object? ret) {
+  if (ret is! Map) return null;
+  final code = _toOptInt(ret['code'] ?? ret['ret']);
+  if (code != null && code != 0) return null;
+  final data = ret['data'];
+  if (data is! Map) return null;
+  final list = data['list'];
+  if (list is Map) return list.length;
+  if (list is List) return list.length;
+  if (list == null) return 0;
+  return null;
+}
+
+/// 我的收藏夹数量（`miniw/favorite?act=get_collect_ids`）。
+///
+/// 依据 `ContentFavsService:ReqPlayerCreatedData`
+/// （`contentfavsservice.lua:205-209`：`rpc("get_collect_ids", {op_uin=desUin})`，
+/// URL 根 `miniw/favorite` 见同文件 `:23`；本人与查看他人均走此接口，
+/// 见 `contentfavsdata.lua:98-140` 的 `InitMineCreateData`）——
+/// `ContentFavsData:LoadPlayerCreateData` 取 `(retTable.data or {}).list or {}`
+/// （`contentfavsdata.lua:525-543`），该 `list` 为「收藏夹 id → 收藏夹数据」的
+/// 映射；官方在 `playercenterv2contentfavscompctrl.lua:137-182` 对 `pairs(data)`
+/// 逐条收集后以 `#self.dataList` 展示（计数见 `:167`）。
+///
+/// [ret] 为完整响应；失败 / 脏数据 → `null`，成功但无收藏夹 → `0`。
+int? favoriteFolderCount(Object? ret) => _responseListCount(ret);
+
+/// 迷你印迹数量（`miniw/camera?act=get_photo_homepage`）。
+///
+/// 依据 `MultimediaAlbumService:ReqPlayerCenterPhotoData`
+/// （`multimediaalbumservice.lua:255-261`：`rpc("get_photo_homepage",
+/// {page=1, page_size=1000, op_uin=desUin})`；URL 根 `miniw/camera` 见同文件
+/// `:26-31` 的 `GetBaseUrl`）——主页组件固定请求照片类型
+/// （`playercenterv2multimediacompctrl.lua:158-173` 取 `defMediaType.photo`），
+/// `MultimediaAlbumData:LoadPlayerCenterData` 取 `(retTable.data or {}).list or {}`
+/// （`multimediaalbumdata.lua:5200-5233`），该 `list` 为照片数组，数量即条目数。
+///
+/// [ret] 为完整响应；失败 / 脏数据 → `null`，成功但无印迹 → `0`。
+int? multimediaImprintCount(Object? ret) => _responseListCount(ret);
 
 /// 一条已发布作品（`map.data.map_list` 条目）。
 class HomeWork {

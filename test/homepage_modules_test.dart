@@ -586,4 +586,154 @@ void main() {
       );
     });
   });
+
+  // 独立接口解析器：接收完整响应（含 code）。失败 / 脏数据 → null；
+  // 请求成功但为空 → 0（与「—」占位区分）。
+  group('favoriteFolderCount', () {
+    test('get_collect_ids：data.list 为映射 → 条目数', () {
+      expect(
+        favoriteFolderCount(const {
+          'code': 0,
+          'data': {
+            'list': {
+              '101': {'etime': 1},
+              '102': {'etime': 2},
+            },
+          },
+        }),
+        2,
+      );
+    });
+
+    test('data.list 为数组也能计数', () {
+      expect(
+        favoriteFolderCount(const {
+          'code': 0,
+          'data': {
+            'list': [
+              {'id': 1},
+              {'id': 2},
+              {'id': 3},
+            ],
+          },
+        }),
+        3,
+      );
+    });
+
+    test('请求成功但无收藏夹 → 0（区别于失败）', () {
+      expect(
+        favoriteFolderCount(const {
+          'code': 0,
+          'data': {'list': <String, Object?>{}},
+        }),
+        0,
+      );
+      expect(favoriteFolderCount(const {'code': 0, 'data': {}}), 0);
+    });
+
+    test('缺失字段 / 非 Map → null', () {
+      expect(favoriteFolderCount(null), isNull);
+      expect(favoriteFolderCount(const {}), isNull);
+      expect(favoriteFolderCount(const {'code': 0}), isNull);
+      expect(favoriteFolderCount(const {'code': 0, 'data': 'x'}), isNull);
+    });
+
+    test('list 类型不符 → null', () {
+      expect(
+        favoriteFolderCount(const {
+          'code': 0,
+          'data': {'list': 'x'},
+        }),
+        isNull,
+      );
+    });
+
+    test('非 0 code / ret → null', () {
+      expect(
+        favoriteFolderCount(const {
+          'code': 1,
+          'data': {
+            'list': {'1': <String, Object?>{}},
+          },
+        }),
+        isNull,
+      );
+      expect(
+        favoriteFolderCount(const {
+          'ret': -1,
+          'data': {
+            'list': {'1': <String, Object?>{}},
+          },
+        }),
+        isNull,
+      );
+    });
+  });
+
+  group('multimediaImprintCount', () {
+    test('get_photo_homepage：data.list 数组 → 条数', () {
+      expect(
+        multimediaImprintCount(const {
+          'code': 0,
+          'data': {
+            'list': [
+              {'cloudId': 'a'},
+              {'cloudId': 'b'},
+            ],
+          },
+        }),
+        2,
+      );
+    });
+
+    test('请求成功但无印迹 → 0（区别于失败）', () {
+      expect(
+        multimediaImprintCount(const {
+          'code': 0,
+          'data': {'list': <Object?>[]},
+        }),
+        0,
+      );
+      expect(multimediaImprintCount(const {'code': 0, 'data': {}}), 0);
+    });
+
+    test('缺失字段 / 非 Map → null', () {
+      expect(multimediaImprintCount(null), isNull);
+      expect(multimediaImprintCount(const {}), isNull);
+      expect(multimediaImprintCount(const {'code': 0}), isNull);
+      expect(multimediaImprintCount(const {'code': 0, 'data': 'x'}), isNull);
+    });
+
+    test('list 类型不符 → null', () {
+      expect(
+        multimediaImprintCount(const {
+          'code': 0,
+          'data': {'list': 5},
+        }),
+        isNull,
+      );
+    });
+
+    test('非 0 code / ret → null', () {
+      expect(
+        multimediaImprintCount(const {
+          'code': 1,
+          'data': {
+            'list': [<Object?>{}],
+          },
+        }),
+        isNull,
+      );
+      expect(
+        multimediaImprintCount(const {
+          'ret': 3,
+          'data': {
+            'list': [<Object?>{}],
+          },
+        }),
+        isNull,
+      );
+    });
+  });
 }

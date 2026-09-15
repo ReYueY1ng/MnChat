@@ -11,6 +11,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
+import '../models/homepage_modules.dart'
+    show favoriteFolderCount, multimediaImprintCount;
 import '../net/config.dart'
     show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
@@ -189,6 +191,39 @@ class PlayerHomeClient {
     if (code is num && code != 0) return null;
     final data = ret['data'];
     return data is Map ? data.cast<String, Object?>() : null;
+  }
+
+  /// 我的收藏夹数量（`miniw/favorite?act=get_collect_ids`）。
+  ///
+  /// 对齐反编译 `ContentFavsService:ReqPlayerCreatedData`
+  /// （`contentfavsservice.lua:205-209`）：参数仅 `op_uin`（本人传自身 uin），
+  /// URL 根 `miniw/favorite`（同文件 `:23`），签名用 http_getParamMD5。
+  /// 响应 `data.list` 为「收藏夹 id → 数据」映射，数量即条目数
+  /// （`contentfavsdata.lua:525-543`）。失败或 `code!=0` 返回 `null`。
+  Future<int?> getFavoriteFolderCount(int targetUin) async {
+    final url = _url('miniw/favorite', 'get_collect_ids', {
+      'op_uin': '$targetUin',
+    });
+    final ret = await _get(url);
+    return favoriteFolderCount(ret);
+  }
+
+  /// 迷你印迹数量（`miniw/camera?act=get_photo_homepage`）。
+  ///
+  /// 对齐反编译 `MultimediaAlbumService:ReqPlayerCenterPhotoData`
+  /// （`multimediaalbumservice.lua:255-261`）：参数 `page=1`、`page_size=1000`、
+  /// `op_uin`，URL 根 `miniw/camera`（同文件 `:26-31`）。主页组件固定请求照片
+  /// 类型（`playercenterv2multimediacompctrl.lua:158-173`）。响应 `data.list`
+  /// 为照片数组，数量即条目数（`multimediaalbumdata.lua:5200-5233`）。
+  /// 失败或 `code!=0` 返回 `null`。
+  Future<int?> getMultimediaImprintCount(int targetUin) async {
+    final url = _url('miniw/camera', 'get_photo_homepage', {
+      'page': '1',
+      'page_size': '1000',
+      'op_uin': '$targetUin',
+    });
+    final ret = await _get(url);
+    return multimediaImprintCount(ret);
   }
 
   /// 访问记录去重窗口（秒），对齐官方客户端

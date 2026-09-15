@@ -23,14 +23,12 @@
 ///   - 等级 / 大会员：`ChatService.platformLevel`、
 ///     `PartnerClient.getMyVipExpiry`；
 ///   - `最佳拍档`：`myPartnerListProvider` / `partnerLevelsProvider` /
-///     `partnerProfilesProvider`（与最佳拍档页同源同款徽标）。
+///     `partnerProfilesProvider`（与最佳拍档页同源同款徽标）；
+///   - `我的收藏夹` / `迷你印迹` 计数：独立接口 `miniw/favorite?act=get_collect_ids`
+///     （`contentfavsservice.lua:205-209`）与 `miniw/camera?act=get_photo_homepage`
+///     （`multimediaalbumservice.lua:255-261`），经 `PlayerHomeClient` 取数。
 ///
 /// 已知缺口（外部客户端无对应协议，**只保留版块外壳与「—」占位，不臆造数据**）：
-///   - `我的收藏夹` / `迷你印迹` 计数：`get_user_homepage` 对应模块
-///     （`favoriteFolder` 18 / `Multimedia` 19）不携带计数——官方客户端分别调用
-///     独立接口 `miniw/favorite?act=get_collect_ids`
-///     （`contentfavsservice.lua:205-209`）与 MultimediaAlbum
-///     （`multimediaalbumdata.lua:5200`）取数，故保留「—」占位；
 ///   - `动态` 正文与 `置顶`；`编辑布局`；页脚 `IP属地`。
 library;
 
@@ -43,6 +41,7 @@ import '../core/models/skin_head_catalog.dart';
 import '../core/services/name_rules.dart'
     show renameErrorText, validateNickname;
 import '../core/services/partner.dart' show PartnerDirectory, PartnerInfo;
+import '../core/services/player_home.dart' show PlayerHomeClient;
 import '../core/services/profile.dart'
     show PlayerProfile, PortraitItem, ProfileClient;
 import '../core/services/social_sign.dart' show SocialDeclaration;
@@ -100,6 +99,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   /// 主页模块数据（`get_user_homepage`）：称号 / 勋章 / 交友宣言的来源。
   Map<String, Object?>? _home;
 
+  /// 我的收藏夹数量（`miniw/favorite?act=get_collect_ids`）；null = 未取到。
+  int? _favoriteCount;
+
+  /// 迷你印迹数量（`miniw/camera?act=get_photo_homepage`）；null = 未取到。
+  int? _multimediaCount;
+
   /// 当前佩戴称号名（`titleName`）；null = 未佩戴或查询失败。
   String? _titleName;
 
@@ -117,6 +122,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     super.initState();
     _loadProfile();
     _loadHomeModules();
+    _loadExtraCounts();
   }
 
   /// 拉取当前账号的头像、头像框与头像本体（皮肤 / 立绘）。
@@ -231,6 +237,39 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       _declaration = homepageDeclaration(home);
       _level = level;
       _isVip = isVip;
+    });
+  }
+
+  /// 拉取「我的收藏夹」与「迷你印迹」两个独立接口的计数。
+  ///
+  /// 二者不在 `get_user_homepage` 模块数据内：收藏夹走
+  /// `miniw/favorite?act=get_collect_ids`（`contentfavsservice.lua:205-209`），
+  /// 印迹走 `miniw/camera?act=get_photo_homepage`
+  /// （`multimediaalbumservice.lua:255-261`）。两组请求各自独立降级：
+  /// 失败只回退为「—」占位，互不影响。
+  Future<void> _loadExtraCounts() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+
+    int? favoriteCount;
+    try {
+      favoriteCount = await client.getFavoriteFolderCount(auth.uin);
+    } catch (e) {
+      log.warn('我的收藏夹数量拉取失败: $e', tag: _logTag);
+    }
+
+    int? multimediaCount;
+    try {
+      multimediaCount = await client.getMultimediaImprintCount(auth.uin);
+    } catch (e) {
+      log.warn('迷你印迹数量拉取失败: $e', tag: _logTag);
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _favoriteCount = favoriteCount;
+      _multimediaCount = multimediaCount;
     });
   }
 
@@ -643,6 +682,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             onPressed: () {
               _loadProfile();
               _loadHomeModules();
+              _loadExtraCounts();
             },
           ),
         ],
@@ -872,19 +912,28 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   // 我的收藏夹数量来自独立接口
                   // `miniw/favorite?act=get_collect_ids`
                   // （`contentfavsservice.lua:205-209`），不在
-                  // get_user_homepage 模块数据内，故保留「—」占位（见报告）。
-                  const _CompactModuleCard(
+                  // get_user_homepage 模块数据内。
+                  _CompactModuleCard(
                     title: '我的收藏夹',
-                    count: kHomeUnknownValue,
-                    caption: kHomeUnavailableHint,
+                    count: _favoriteCount == null
+                        ? kHomeUnknownValue
+                        : '$_favoriteCount',
+                    caption: _favoriteCount == null
+                        ? kHomeUnavailableHint
+                        : '已创建收藏夹',
                   ),
                   // 迷你印迹数量来自独立接口 MultimediaAlbum
-                  // （`multimediaalbumdata.lua:5200`），不在
-                  // get_user_homepage 模块数据内，故保留「—」占位（见报告）。
-                  const _CompactModuleCard(
+                  // `miniw/camera?act=get_photo_homepage`
+                  // （`multimediaalbumservice.lua:255-261`），不在
+                  // get_user_homepage 模块数据内。
+                  _CompactModuleCard(
                     title: '迷你印迹',
-                    count: kHomeUnknownValue,
-                    caption: kHomeUnavailableHint,
+                    count: _multimediaCount == null
+                        ? kHomeUnknownValue
+                        : '$_multimediaCount',
+                    caption: _multimediaCount == null
+                        ? kHomeUnavailableHint
+                        : '主页展示的照片',
                   ),
                 ],
               ),
