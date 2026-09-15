@@ -4,6 +4,7 @@
 ///   - get_user_homepage(uin, target, module_list)：主页各模块数据
 ///   - add_visit_record(uin, target, prize)：访问（+送礼物）
 ///   - query_target_relation(op_uin, target_list)：查询关注/粉丝关系
+///   - get_top_flag_list / set_top_flag：模块置顶状态与置顶开关
 /// 签名用 http_getParamMD5（与 dynamics 相同）。
 library;
 
@@ -331,4 +332,97 @@ class PlayerHomeClient {
     }
     return out;
   }
+
+  // ── 置顶（set_top_flag / get_top_flag_list） ──────────────────────────
+
+  /// 拉取某模块已置顶条目 id（act=get_top_flag_list，路径 personal_center）。
+  ///
+  /// 对齐反编译 `playerCenterV2HomePageService:GetTopList`
+  /// （`playercenterv2homepageservice.lua:421-446`）：参数 `uin`（本人）+
+  /// `module_id`，非本人主页时追加 `target`。响应 `data.top_list` 为
+  /// `[{top_id, time}]`，经 [parseTopFlagList] 解析为已置顶 id 集合。
+  /// 失败 / code!=0 返回空集合。
+  Future<Set<int>> getTopFlagList({
+    int moduleId = PlayerHomeModule.headFrame,
+    int? targetUin,
+  }) async {
+    final params = <String, String>{'module_id': '$moduleId'};
+    if (targetUin != null && targetUin != uin) {
+      params['target'] = '$targetUin';
+    }
+    final url = _url('miniw/personal_center', 'get_top_flag_list', params);
+    final ret = await _get(url);
+    return parseTopFlagList(ret);
+  }
+
+  /// 解析 `get_top_flag_list` 响应，返回已置顶 id 集合（纯函数，可单测）。
+  ///
+  /// 结构：`{code:0, data:{module_id:<int>, top_list:[{top_id, time}, ...]}}`
+  /// （`playercenterv2homepageservice.lua:448-495`）。防御性约定（脏数据只跳过，
+  /// 绝不抛异常）：
+  ///   - 非 Map / `code`（或 `ret`）非 0 → 空集合；
+  ///   - 缺 `data` / `data` 非 Map / 缺 `top_list` / `top_list` 非 List → 空集合；
+  ///   - 条目非 Map → 跳过；`top_id` 缺失 / 0 / 非数字 → 跳过；
+  ///   - `time`（即 `top_time`）缺失 / 非正 → 跳过（只统计有效置顶）。
+  static Set<int> parseTopFlagList(Object? resp) {
+    final out = <int>{};
+    if (resp is! Map) return out;
+    final m = resp.cast<String, Object?>();
+    final code = m['code'] ?? m['ret'];
+    if (code is num && code != 0) return out;
+    final data = m['data'];
+    if (data is! Map) return out;
+    final list = (data.cast<String, Object?>())['top_list'];
+    if (list is! List) return out;
+    for (final e in list) {
+      if (e is! Map) continue;
+      final em = e.cast<String, Object?>();
+      final id = _toNum(em['top_id']);
+      if (id <= 0) continue;
+      if (_toNum(em['time']) <= 0) continue;
+      out.add(id);
+    }
+    return out;
+  }
+
+  /// 置顶 / 取消置顶（act=set_top_flag，路径 personal_center）。
+  ///
+  /// 对齐反编译 `playerCenterV2HomePageService:ChangeTopState`
+  /// （`playercenterv2homepageservice.lua:309-325`）：参数 `uin`（本人）+
+  /// `module_id` + `op_id` + `op_type`（**1=置顶 / 0=取消**，见
+  /// `playercenterv2headeditorctrl.lua:1515`）。
+  ///
+  /// 上限校验由服务端裁决（客户端 `CheckMaxTop` 依赖 `MaxTopNum`，见
+  /// `playercenterv2homepageservice.lua:339-356`）；服务端拒绝时原样返回其
+  /// `msg`，不在此硬编码上限数字。
+  Future<SetTopFlagResult> setTopFlag(
+    int opId, {
+    required bool pin,
+    int moduleId = PlayerHomeModule.headFrame,
+  }) async {
+    final url = _url('miniw/personal_center', 'set_top_flag', {
+      'module_id': '$moduleId',
+      'op_id': '$opId',
+      'op_type': pin ? '1' : '0',
+    });
+    final ret = await _get(url);
+    final code = ret['code'] ?? ret['ret'];
+    if (code is num && code == 0) return const SetTopFlagResult(ok: true);
+    final msg = ret['msg'] ?? ret['message'] ?? ret['tips'];
+    return SetTopFlagResult(
+      ok: false,
+      message: msg is String && msg.isNotEmpty ? msg : null,
+    );
+  }
+}
+
+/// 置顶 / 取消置顶结果：成功，或携带服务端拒绝原因（如超出置顶上限）。
+class SetTopFlagResult {
+  /// 服务端是否接受本次操作。
+  final bool ok;
+
+  /// 服务端返回的错误文案（`msg`）；无则为 null。
+  final String? message;
+
+  const SetTopFlagResult({required this.ok, this.message});
 }

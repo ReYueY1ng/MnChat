@@ -9,7 +9,10 @@
 ///     并展示当前 DIY 头像的审核态（`diy_header`：`pass_url` 可用 /
 ///     `pre_url` 审核中 / `aduit_fail` 审核失败），可点选启用（`use_diy=1`）；
 ///   - `头像框`：`profile.ownedHeadFrameIds`（含默认框 1），点选即调用
-///     `setProfile&head_frame_id=`；`置顶` 无协议 → 仅提示；
+///     `setProfile&head_frame_id=`；说明文案为 `<框名>: <获取途径>`
+///     （本地目录 [kHeadFrameCatalog]，由 `itemdef.csv` 生成；默认框走
+///     `GetS(5300)`）；`置顶` 读 `get_top_flag_list` 真实状态并调用
+///     `set_top_flag` 切换（上限由服务端裁决，原样展示其 `msg`）；
 ///   - `昵称`：`ChatService.renameSelf` + `name_rules` 校验。`消耗 x1`
 ///     逐字对齐参考图，实际扣除由服务端裁决（见 `name_rules.dart`）；
 ///   - `称号`：`TitleClient.getOwnedTitles`（`/miniw/title?act=get_title_showdata`）
@@ -20,9 +23,7 @@
 ///     `get_show_family`，切换调用 `set_show_family&family_id=`。
 ///
 /// 已知缺口（均为外部客户端无法从 Lua 反编译确定，代码内以 TODO 标注）：
-///   1. DIY 上传第 2 步（`MiniHttp.CustomUpload`）的请求体线格式；
-///   2. 头像框 `置顶` 排序；
-///   3. 头像框名称 / 获取途径配置。
+///   1. DIY 上传第 2 步（`MiniHttp.CustomUpload`）的请求体线格式。
 library;
 
 import 'dart:math' as math;
@@ -32,6 +33,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show LengthLimitingTextInputFormatter;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/head_frame_catalog.dart' show headFrameCaption;
 import '../../core/models/skin_head_catalog.dart'
     show kSkinHeadIcon, roleIconAsset;
 import '../../core/services/family.dart'
@@ -43,6 +45,8 @@ import '../../core/services/family.dart'
         parseShowFamily;
 import '../../core/services/name_rules.dart'
     show kNicknameMaxLen, renameErrorText, validateNickname;
+import '../../core/services/player_home.dart'
+    show PlayerHomeClient, PlayerHomeModule, SetTopFlagResult;
 import '../../core/services/profile.dart'
     show DiyAuditState, DiyHeadInfo, PortraitItem, ProfileClient;
 import '../../core/services/title_config.dart'
@@ -148,6 +152,16 @@ typedef TitleCatalogLoader = Future<TitleCatalog> Function();
 /// 佩戴称号动作（测试注入用；为空时走 [TitleClient.wearTitle]）。
 typedef TitleWearer = Future<bool> Function(int titleId);
 
+/// 已置顶头像框加载器（测试注入用；为空时走
+/// [PlayerHomeClient.getTopFlagList]）。
+typedef FrameTopLoader = Future<Set<int>> Function();
+
+/// 置顶 / 取消置顶动作（测试注入用；为空时走 [PlayerHomeClient.setTopFlag]）。
+typedef FrameTopToggler = Future<SetTopFlagResult> Function(
+  int frameId,
+  bool pin,
+);
+
 /// 打开弹窗时的资料快照 —— 由个人主页传入，弹窗不重复拉取。
 class AvatarEditInitialData {
   /// 当前账号迷你号（头像 / 昵称降级展示用）。
@@ -181,6 +195,9 @@ class AvatarEditInitialData {
   /// 当前展示家族 id（可选；为空时弹窗自行拉取）。
   final int? showFamilyId;
 
+  /// 已置顶的头像框 id（可选；为空且无注入 loader 时弹窗自行拉取）。
+  final Set<int>? pinnedFrames;
+
   const AvatarEditInitialData({
     required this.uin,
     required this.name,
@@ -193,6 +210,7 @@ class AvatarEditInitialData {
     this.titleName,
     this.diyHead,
     this.showFamilyId,
+    this.pinnedFrames,
   });
 }
 
@@ -208,6 +226,8 @@ Future<bool> showAvatarEditDialog(
   TitleLoader? titleLoader,
   TitleCatalogLoader? titleCatalogLoader,
   TitleWearer? titleWearer,
+  FrameTopLoader? frameTopLoader,
+  FrameTopToggler? frameTopToggler,
 }) async {
   final changed = await showDialog<bool>(
     context: context,
@@ -221,6 +241,8 @@ Future<bool> showAvatarEditDialog(
       titleLoader: titleLoader,
       titleCatalogLoader: titleCatalogLoader,
       titleWearer: titleWearer,
+      frameTopLoader: frameTopLoader,
+      frameTopToggler: frameTopToggler,
     ),
   );
   return changed == true;
@@ -255,6 +277,12 @@ class AvatarEditDialog extends ConsumerStatefulWidget {
   /// 佩戴称号动作（测试注入；为空时走 [TitleClient]）。
   final TitleWearer? titleWearer;
 
+  /// 已置顶头像框加载器（测试注入；为空时走 [PlayerHomeClient]）。
+  final FrameTopLoader? frameTopLoader;
+
+  /// 置顶 / 取消置顶动作（测试注入；为空时走 [PlayerHomeClient]）。
+  final FrameTopToggler? frameTopToggler;
+
   const AvatarEditDialog({
     super.key,
     required this.initial,
@@ -266,6 +294,8 @@ class AvatarEditDialog extends ConsumerStatefulWidget {
     this.titleLoader,
     this.titleCatalogLoader,
     this.titleWearer,
+    this.frameTopLoader,
+    this.frameTopToggler,
   });
 
   @override
@@ -347,6 +377,17 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
   /// 当前选中的家族卡片 id。
   int? _selectedFamilyId;
 
+  // ── 头像框置顶 ────────────────────────────────────────────────────────
+  /// 已置顶的头像框 id（`get_top_flag_list`）。
+  Set<int> _topFrameIds = const {};
+
+  /// 置顶列表是否已请求过（懒加载，仅在切到 `头像框` 页签时触发）。
+  bool _topLoaded = false;
+  bool _topLoading = false;
+
+  /// 置顶请求进行中（防连点）。
+  bool _topBusy = false;
+
   @override
   void initState() {
     super.initState();
@@ -354,6 +395,7 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     _ownedFrames = {1, ...widget.initial.ownedFrames}.toList()..sort();
     _nicknameController.addListener(_onNicknameChanged);
     _showFamilyId = widget.initial.showFamilyId;
+    _topFrameIds = widget.initial.pinnedFrames ?? const {};
     _loadDiy();
   }
 
@@ -396,6 +438,10 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     if (tab == AvatarEditTab.title && !_titlesLoaded) {
       _titlesLoaded = true;
       _loadTitles();
+    }
+    if (tab == AvatarEditTab.frame && !_topLoaded) {
+      _topLoaded = true;
+      _loadFrameTop();
     }
   }
 
@@ -452,6 +498,80 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
     if (auth == null) return false;
     final client = FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
     return FamilyClient.isSuccess(await client.setShowFamily(familyId));
+  }
+
+  // ── 头像框置顶 ────────────────────────────────────────────────────────
+
+  /// 懒加载已置顶头像框：注入 loader / 快照优先，否则走 [PlayerHomeClient]。
+  Future<void> _loadFrameTop() async {
+    if (widget.frameTopLoader == null && widget.initial.pinnedFrames != null) {
+      // 已有快照且无注入 loader 时无需再拉取。
+      if (mounted) setState(() => _topFrameIds = widget.initial.pinnedFrames!);
+      return;
+    }
+    if (mounted) setState(() => _topLoading = true);
+    try {
+      final ids = widget.frameTopLoader != null
+          ? await widget.frameTopLoader!()
+          : await _loadFrameTopFromServer();
+      if (!mounted) return;
+      setState(() {
+        _topFrameIds = ids;
+        _topLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _topLoading = false);
+    }
+  }
+
+  Future<Set<int>> _loadFrameTopFromServer() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return <int>{};
+    final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return client.getTopFlagList(moduleId: PlayerHomeModule.headFrame);
+  }
+
+  /// 切换头像框置顶状态（`set_top_flag`，1=置顶 / 0=取消）。
+  ///
+  /// 上限由服务端裁决：失败时原样展示服务端 `msg`（不硬编码上限数字）。
+  Future<void> _toggleTop(int frameId) async {
+    if (_topBusy) return;
+    final pin = !_topFrameIds.contains(frameId);
+    setState(() => _topBusy = true);
+    try {
+      final result = widget.frameTopToggler != null
+          ? await widget.frameTopToggler!(frameId, pin)
+          : await _toggleTopFromServer(frameId, pin);
+      if (!mounted) return;
+      if (result.ok) {
+        setState(() {
+          _topFrameIds = pin
+              ? {..._topFrameIds, frameId}
+              : ({..._topFrameIds}..remove(frameId));
+          _changed = true;
+        });
+        _toast(pin ? '已置顶' : '已取消置顶');
+      } else {
+        _toast(result.message ?? (pin ? '置顶失败，请稍后重试' : '取消置顶失败，请稍后重试'));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      _toast('操作失败：$e');
+    } finally {
+      if (mounted) setState(() => _topBusy = false);
+    }
+  }
+
+  Future<SetTopFlagResult> _toggleTopFromServer(int frameId, bool pin) async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return const SetTopFlagResult(ok: false);
+    final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    return client.setTopFlag(
+      frameId,
+      pin: pin,
+      moduleId: PlayerHomeModule.headFrame,
+    );
   }
 
   // ── DIY 自定义头像 ────────────────────────────────────────────────────
@@ -1217,12 +1337,13 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
       headId: _headId,
       frameId: id,
     );
-    // 参考图格式为 `<框名>：<获取途径>`；两者均需服务端配置，暂只展示原始 id。
-    // TODO(头像编辑): 接入头像框名称 / 获取途径配置后替换为 `框名：获取途径`。
+    // 参考图格式为 `<框名>: <获取途径>`（对齐 playercenterv2headeditorview.lua
+    // :281-291）；名称 / 获取途径取自本地目录 [kHeadFrameCatalog]，未收录时回退占位。
+    final captionText = id == null ? '—' : headFrameCaption(id);
     final caption = Tooltip(
-      message: '头像框名称与获取途径需服务端配置，暂未获取',
+      message: captionText,
       child: Text(
-        id == null ? '—' : '头像框 #$id',
+        captionText,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelMedium?.copyWith(
@@ -1230,6 +1351,7 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
         ),
       ),
     );
+    final pinned = id != null && _topFrameIds.contains(id);
     final buttons = Column(
       crossAxisAlignment: narrow
           ? CrossAxisAlignment.start
@@ -1243,10 +1365,16 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
             backgroundColor: semantic.success,
             foregroundColor: semantic.onSuccess,
           ),
-          // TODO(头像编辑): 头像框置顶排序无客户端协议，暂以提示降级。
-          onPressed: () => _toast('外部客户端暂不支持置顶头像框'),
-          icon: const Icon(Icons.arrow_upward, size: 16),
-          label: const Text('置顶'),
+          // 置顶状态读自 `get_top_flag_list`；点按经 `set_top_flag` 切换
+          // （1=置顶 / 0=取消，见 playercenterv2headeditorctrl.lua:1515）。
+          onPressed: (id == null || _topBusy || _topLoading)
+              ? null
+              : () => _toggleTop(id),
+          icon: Icon(
+            pinned ? Icons.arrow_downward : Icons.arrow_upward,
+            size: 16,
+          ),
+          label: Text(pinned ? '取消置顶' : '置顶'),
         ),
       ],
     );

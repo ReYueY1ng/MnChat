@@ -6,6 +6,7 @@ import 'package:mnchat/core/services/chat_service.dart'
     show ChatService, SessionSnapshot;
 import 'package:mnchat/core/services/family.dart'
     show FamilyInfo, FamilyShowInfo;
+import 'package:mnchat/core/services/player_home.dart' show SetTopFlagResult;
 import 'package:mnchat/core/services/profile.dart' show DiyHeadInfo, PortraitItem;
 import 'package:mnchat/core/services/title_config.dart'
     show
@@ -98,6 +99,8 @@ void main() {
     TitleLoader? titleLoader,
     TitleCatalogLoader? titleCatalogLoader,
     TitleWearer? titleWearer,
+    FrameTopLoader? frameTopLoader,
+    FrameTopToggler? frameTopToggler,
   }) async {
     tester.view.physicalSize = const Size(1200, 900);
     tester.view.devicePixelRatio = 1.0;
@@ -125,6 +128,8 @@ void main() {
               titleLoader: titleLoader,
               titleCatalogLoader: titleCatalogLoader,
               titleWearer: titleWearer,
+              frameTopLoader: frameTopLoader,
+              frameTopToggler: frameTopToggler,
             ),
           ),
         ),
@@ -253,20 +258,84 @@ void main() {
     expect(find.text('当前图片违规无法使用'), findsOneWidget);
   });
 
-  testWidgets('头像框页签：4 列帧网格 + 说明 + 置顶降级', (tester) async {
-    await pumpDialog(tester);
+  testWidgets('头像框页签：4 列帧网格 + 默认框官方文案', (tester) async {
+    await pumpDialog(tester, frameTopLoader: () async => const <int>{});
     await tapNav(tester, '头像框');
     expect(tester.takeException(), isNull);
 
     expect(find.byKey(avatarEditFrameCellKey(1)), findsOneWidget);
     expect(find.byKey(avatarEditFrameCellKey(20201)), findsOneWidget);
-    expect(find.text('头像框 #1'), findsOneWidget);
+    // 默认框（id=1）展示 GetS(5300) 官方文案。
+    expect(find.text('默认头像框'), findsOneWidget);
     expect(find.text('使用中'), findsOneWidget);
     expect(find.text('置顶'), findsOneWidget);
+  });
 
+  testWidgets('头像框页签：<框名>: <获取途径> + 置顶真实切换', (tester) async {
+    final toggled = <int, bool>{};
+    await pumpDialog(
+      tester,
+      data: const AvatarEditInitialData(
+        uin: 10001,
+        name: 'MoonReloaded',
+        headType: 1,
+        headId: 1,
+        frameId: 20201,
+        ownedFrames: {1, 20201},
+      ),
+      // 20201 已置顶 → 按钮应为「取消置顶」。
+      frameTopLoader: () async => const {20201},
+      frameTopToggler: (id, pin) async {
+        toggled[id] = pin;
+        return const SetTopFlagResult(ok: true);
+      },
+    );
+    await tapNav(tester, '头像框');
+    expect(tester.takeException(), isNull);
+
+    // 说明文案取自 itemdef.csv（Name: GetWay）。
+    expect(find.text('单身汪: 双十一活动获取'), findsOneWidget);
+    expect(find.text('取消置顶'), findsOneWidget);
+
+    // 取消置顶 → op_type=0。
+    await tester.tap(find.text('取消置顶'));
+    await tester.pumpAndSettle();
+    expect(toggled[20201], isFalse);
+    expect(find.text('已取消置顶'), findsOneWidget);
+    expect(find.text('置顶'), findsOneWidget);
+
+    // 让上一个 SnackBar 消失，避免新提示排队不可见。
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+
+    // 再次置顶 → op_type=1。
     await tester.tap(find.text('置顶'));
-    await tester.pump();
-    expect(find.text('外部客户端暂不支持置顶头像框'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(toggled[20201], isTrue);
+    expect(find.text('已置顶'), findsOneWidget);
+    expect(find.text('取消置顶'), findsOneWidget);
+  });
+
+  testWidgets('头像框页签：置顶被服务端拒绝时原样展示其 msg', (tester) async {
+    await pumpDialog(
+      tester,
+      data: const AvatarEditInitialData(
+        uin: 10001,
+        name: 'MoonReloaded',
+        headType: 1,
+        headId: 1,
+        frameId: 20201,
+        ownedFrames: {1, 20201},
+      ),
+      frameTopLoader: () async => const <int>{},
+      frameTopToggler: (id, pin) async =>
+          const SetTopFlagResult(ok: false, message: '置顶数量已达上限'),
+    );
+    await tapNav(tester, '头像框');
+    await tester.tap(find.text('置顶'));
+    await tester.pumpAndSettle();
+    // 不硬编码上限数字：透传服务端文案。
+    expect(find.text('置顶数量已达上限'), findsOneWidget);
   });
 
   testWidgets('昵称页签：当前昵称 / 输入校验驱动确认按钮 / 未连接返回码', (tester) async {
