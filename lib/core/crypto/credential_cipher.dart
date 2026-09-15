@@ -39,14 +39,21 @@ String? decryptPassword(String stored, int uin) {
   if (!stored.startsWith(kCredentialPrefix)) return stored; // 旧版明文兼容
   final parts = stored.split(':');
   if (parts.length != 4) return null;
-  final ivBytes = base64Decode(parts[1]);
-  final mac = parts[2];
-  final cipherBytes = base64Decode(parts[3]);
-  final key = _deriveKey(uin);
-  final expected = _hmac(key.bytes, [...ivBytes, ...cipherBytes]);
-  if (!_constEq(expected, mac)) return null; // 篡改检测
-  final encrypter = enc.Encrypter(enc.AES(key));
-  return encrypter.decrypt(enc.Encrypted(cipherBytes), iv: enc.IV(ivBytes));
+  // 落盘的凭据可能因坏写入 / 截断而损坏（设置存储启动时就会读到它）。按本
+  // 方法文档的承诺，「格式非法」一律返回 null —— 绝不能让解码异常逃逸到启动
+  // 路径上（否则损坏的存储值会变成一次未捕获崩溃，而不是优雅地重新登录）。
+  try {
+    final ivBytes = base64Decode(parts[1]);
+    final mac = parts[2];
+    final cipherBytes = base64Decode(parts[3]);
+    final key = _deriveKey(uin);
+    final expected = _hmac(key.bytes, [...ivBytes, ...cipherBytes]);
+    if (!_constEq(expected, mac)) return null; // 篡改检测
+    final encrypter = enc.Encrypter(enc.AES(key));
+    return encrypter.decrypt(enc.Encrypted(cipherBytes), iv: enc.IV(ivBytes));
+  } catch (_) {
+    return null;
+  }
 }
 
 /// 由 (盐, uin) 派生 32 字节 AES 密钥。
