@@ -17,18 +17,21 @@
 /// 数据来源：
 ///   - 头像 / 头像框 / 皮肤 / 立绘：`ProfileClient`（`getProfile`、
 ///     `getPersonCenterHeadInfo`、`getProfileBatch3`、`query_portrait`）；
-///   - 主页模块（`称号` / `勋章` / `交友宣言`）：`ChatService.userHomepage`
-///     + [homepageTitleId] / [homepageMedals] / [homepageDeclaration]；
+///   - 主页模块（`role_info` 统计 / `魅力值` / `发布作品` / `动态` / `追光计划` /
+///     `个性装扮` / `称号` / `勋章` / `交友宣言`）：`ChatService.userHomepage`
+///     （完整 `module_list`）+ `core/models/homepage_modules.dart` 纯解析器；
 ///   - 等级 / 大会员：`ChatService.platformLevel`、
 ///     `PartnerClient.getMyVipExpiry`；
 ///   - `最佳拍档`：`myPartnerListProvider` / `partnerLevelsProvider` /
 ///     `partnerProfilesProvider`（与最佳拍档页同源同款徽标）。
 ///
 /// 已知缺口（外部客户端无对应协议，**只保留版块外壳与「—」占位，不臆造数据**）：
-///   - `关注` / `粉丝` / `人气值` / `信用分` 计数（`get_user_fans_list` 已实现
-///     但响应结构未解析，故不展示具体数值）；
-///   - `魅力值` / `追光计划` / `我的收藏夹` / `迷你印迹` 计数；
-///   - `发布作品` 列表；`动态` 正文与 `置顶`；`编辑布局`；页脚 `IP属地`。
+///   - `我的收藏夹` / `迷你印迹` 计数：`get_user_homepage` 对应模块
+///     （`favoriteFolder` 18 / `Multimedia` 19）不携带计数——官方客户端分别调用
+///     独立接口 `miniw/favorite?act=get_collect_ids`
+///     （`contentfavsservice.lua:205-209`）与 MultimediaAlbum
+///     （`multimediaalbumdata.lua:5200`）取数，故保留「—」占位；
+///   - `动态` 正文与 `置顶`；`编辑布局`；页脚 `IP属地`。
 library;
 
 import 'package:flutter/material.dart';
@@ -64,6 +67,9 @@ const String kHomeUnavailableHint = '外部客户端暂未获取该项数据';
 
 /// 统计项的降级占位（数值未知时展示，避免与真实的 0 混淆）。
 const String kHomeUnknownValue = '—';
+
+/// 统计值展示：有值 → 数字字符串；缺失（null）→ 「—」占位。
+String _statText(int? v) => v == null ? kHomeUnknownValue : '$v';
 
 /// 个人主页：展示头像 / 昵称 / 迷你号，以及头像框、皮肤、称号、勋章、
 /// 最佳拍档等版块，并提供修改昵称与交友标签入口。
@@ -608,7 +614,18 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
         ref.watch(partnerDirectoryProvider).asData?.value ??
         PartnerDirectory.empty;
     final declaration = _declaration?.text ?? '';
-    final medalCount = homepageMedals(_home).length;
+    // 主页模块（`get_user_homepage`）解析结果；缺失时为 null，UI 降级为「—」。
+    final stats = homepageStats(_home);
+    final charm = homepageCharmValue(_home);
+    final workCount = homepageWorkCount(_home);
+    final works = homepageWorks(_home);
+    final postingCount = homepagePostingCount(_home);
+    final chaseLightCount = homepageChaseLightCount(_home);
+    final skinModuleCount = homepageSkinCount(_home);
+    final medals = homepageMedals(_home);
+    final medalCount = medals.isNotEmpty
+        ? medals.length
+        : homepageMedals2(_home).length;
     final decorCount = skins.length + _portraits.length;
 
     return Scaffold(
@@ -646,6 +663,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 frameId: _frameId,
                 level: _level,
                 isVip: _isVip,
+                stats: stats,
                 onCopyUin: () => _copyUin(uin),
                 onVisitors: () => _openVisitors(uin),
                 onEditLayout: () => _notSupported('编辑主页布局'),
@@ -664,9 +682,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               // 3. 个性装扮（皮肤 / 立绘，点选即换头像本体）
               _HomeSectionCard(
                 title: '个性装扮',
-                count: '$decorCount',
+                count: '${decorCount > 0 ? decorCount : (skinModuleCount ?? 0)}',
                 child: decorCount == 0
-                    ? const _UnavailableNote('暂未获取到已拥有的皮肤或立绘')
+                    ? _UnavailableNote(
+                        (skinModuleCount ?? 0) > 0
+                            ? '已拥有 $skinModuleCount 件装扮（本地暂无对应图标）'
+                            : '暂未获取到已拥有的皮肤或立绘',
+                      )
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -713,10 +735,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               const SizedBox(height: AppSpacing.md),
               // 5. 魅力值 / 称号
               _ResponsivePair(
-                first: const _CompactModuleCard(
+                first: _CompactModuleCard(
                   title: '魅力值',
-                  count: kHomeUnknownValue,
-                  caption: kHomeUnavailableHint,
+                  count: charm == null ? kHomeUnknownValue : '$charm',
+                  caption: charm == null ? kHomeUnavailableHint : '累计收到礼物魅力值',
                 ),
                 second: _HomeSectionCard(
                   title: '称号',
@@ -733,13 +755,55 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               const SizedBox(height: AppSpacing.md),
               // 6. 发布作品 / 动态
               _ResponsivePair(
-                first: const _HomeSectionCard(
+                first: _HomeSectionCard(
                   title: '发布作品',
-                  count: kHomeUnknownValue,
-                  child: _UnavailableNote(kHomeUnavailableHint),
+                  count: workCount == null ? kHomeUnknownValue : '$workCount',
+                  child: workCount == null
+                      ? const _UnavailableNote(kHomeUnavailableHint)
+                      : works.isEmpty
+                      ? const _UnavailableNote('暂无已发布地图作品')
+                      : Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            for (final w in works.take(4))
+                              Padding(
+                                padding: const EdgeInsets.only(
+                                  bottom: AppSpacing.xs,
+                                ),
+                                child: Row(
+                                  children: [
+                                    Icon(
+                                      Icons.map_outlined,
+                                      size: 14,
+                                      color: theme.colorScheme.outline,
+                                    ),
+                                    const SizedBox(width: AppSpacing.xs),
+                                    Expanded(
+                                      child: Text(
+                                        w.name,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (works.length > 4)
+                              Text(
+                                '等 ${works.length} 张地图',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: theme.colorScheme.outline,
+                                ),
+                              ),
+                          ],
+                        ),
                 ),
                 second: _HomeSectionCard(
                   title: '动态',
+                  count: postingCount == null
+                      ? kHomeUnknownValue
+                      : '$postingCount',
                   action: TextButton.icon(
                     onPressed: () => _notSupported('置顶动态'),
                     icon: const Icon(Icons.push_pin_outlined, size: 16),
@@ -748,7 +812,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const _UnavailableNote('外部客户端暂不展示动态正文'),
+                      _UnavailableNote(
+                        postingCount == null
+                            ? '外部客户端暂不展示动态正文'
+                            : '已发布 $postingCount 条动态（正文请在动态页查看）',
+                      ),
                       const SizedBox(height: AppSpacing.sm),
                       OutlinedButton.icon(
                         onPressed: () => Navigator.of(context).push(
@@ -787,21 +855,32 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               // 8. 追光计划 / 勋章 / 我的收藏夹 / 迷你印迹（参考图 2×2 小卡）
               _CompactModuleGrid(
                 children: [
-                  const _CompactModuleCard(
+                  _CompactModuleCard(
                     title: '追光计划',
-                    count: kHomeUnknownValue,
-                    caption: kHomeUnavailableHint,
+                    count: chaseLightCount == null
+                        ? kHomeUnknownValue
+                        : '$chaseLightCount',
+                    caption: chaseLightCount == null
+                        ? kHomeUnavailableHint
+                        : '已收集装扮',
                   ),
                   _CompactModuleCard(
                     title: '勋章',
                     count: medalCount > 0 ? '$medalCount' : kHomeUnknownValue,
                     caption: medalCount > 0 ? '已获得勋章' : kHomeUnavailableHint,
                   ),
+                  // 我的收藏夹数量来自独立接口
+                  // `miniw/favorite?act=get_collect_ids`
+                  // （`contentfavsservice.lua:205-209`），不在
+                  // get_user_homepage 模块数据内，故保留「—」占位（见报告）。
                   const _CompactModuleCard(
                     title: '我的收藏夹',
                     count: kHomeUnknownValue,
                     caption: kHomeUnavailableHint,
                   ),
+                  // 迷你印迹数量来自独立接口 MultimediaAlbum
+                  // （`multimediaalbumdata.lua:5200`），不在
+                  // get_user_homepage 模块数据内，故保留「—」占位（见报告）。
                   const _CompactModuleCard(
                     title: '迷你印迹',
                     count: kHomeUnknownValue,
@@ -850,6 +929,9 @@ class _ProfileHeaderCard extends StatelessWidget {
   /// 是否大会员。
   final bool isVip;
 
+  /// 主页四项统计（`role_info` 模块）；null = 未取到，展示「—」占位。
+  final HomeStats? stats;
+
   final VoidCallback onCopyUin;
   final VoidCallback onVisitors;
   final VoidCallback onEditLayout;
@@ -868,6 +950,7 @@ class _ProfileHeaderCard extends StatelessWidget {
     required this.frameId,
     required this.level,
     required this.isVip,
+    required this.stats,
     required this.onCopyUin,
     required this.onVisitors,
     required this.onEditLayout,
@@ -961,40 +1044,46 @@ class _ProfileHeaderCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.md),
-          // 统计行：4 项计数 + 分隔线（计数均无协议来源 → 「—」占位）。
+          // 统计行：4 项计数 + 分隔线（取自 role_info 模块；缺失项 → 「—」）。
           SizedBox(
             height: 44,
             child: Row(
               children: [
-                const Expanded(
+                Expanded(
                   child: _HomeStatTile(
                     label: '关注',
-                    value: kHomeUnknownValue,
-                    hint: kHomeUnavailableHint,
+                    value: _statText(stats?.following),
+                    hint: stats?.following == null
+                        ? kHomeUnavailableHint
+                        : null,
                   ),
                 ),
                 const _StatDivider(),
-                const Expanded(
+                Expanded(
                   child: _HomeStatTile(
                     label: '粉丝',
-                    value: kHomeUnknownValue,
-                    hint: kHomeUnavailableHint,
+                    value: _statText(stats?.followers),
+                    hint: stats?.followers == null
+                        ? kHomeUnavailableHint
+                        : null,
                   ),
                 ),
                 const _StatDivider(),
-                const Expanded(
+                Expanded(
                   child: _HomeStatTile(
                     label: '人气值',
-                    value: kHomeUnknownValue,
-                    hint: kHomeUnavailableHint,
+                    value: _statText(stats?.popularity),
+                    hint: stats?.popularity == null
+                        ? kHomeUnavailableHint
+                        : null,
                   ),
                 ),
                 const _StatDivider(),
-                const Expanded(
+                Expanded(
                   child: _HomeStatTile(
                     label: '信用分',
-                    value: kHomeUnknownValue,
-                    hint: kHomeUnavailableHint,
+                    value: _statText(stats?.credit),
+                    hint: stats?.credit == null ? kHomeUnavailableHint : null,
                   ),
                 ),
               ],

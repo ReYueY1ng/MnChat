@@ -40,8 +40,20 @@ class PlayerHomeModule {
   static const int favoriteFolder = 18;
   static const int multimedia = 19;
 
-  /// 默认请求的核心模块（逗号分隔字符串）。含成就(6)以取勋章列表。
-  static const String defaultList = '1,2,3,6,8,9,16,17,12';
+  /// 主页完整模块列表（逗号分隔字符串）。
+  ///
+  /// 对齐 `playerCenterV2Config.homePageCompItem`（`playercenterv2config.lua:129-143`）
+  /// 全部组件模块，另加 `role_info`(1)（统计 / 头像）与 `family`(17)——
+  /// 官方 `QueryComponentInfo` 即把二者补进请求
+  /// （`playercenterv2homepagectrl.lua:128-142`）。`enjoy_match`(10) 无主页组件，
+  /// 不请求。含 `achieve`(6) 以取 `data.medal_list` 勋章列表
+  /// （`playercenterv2datamanager.lua:162`）。
+  static const String fullList = '1,2,3,4,5,6,7,8,9,11,12,13,16,17,18,19';
+
+  /// 默认请求的模块列表（已扩展为完整列表）。
+  ///
+  /// 保留旧名以兼容既有调用方；新代码可直接用 [fullList]。
+  static const String defaultList = fullList;
 }
 
 /// 一条访客记录（`get_visitor_list` 响应项）。

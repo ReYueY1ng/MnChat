@@ -1659,12 +1659,19 @@ class ChatService {
     return client.getOtherPlayerScore(uin);
   }
 
-  /// 拉取玩家主页数据（get_user_homepage，默认模块）。
-  Future<Map<String, Object?>?> userHomepage(int uin) async {
+  /// 拉取玩家主页数据（get_user_homepage）。
+  ///
+  /// [moduleList] 默认 [PlayerHomeModule.fullList]（主页全部组件模块），
+  /// 返回的 `data` map 以模块名为键（`{模块名: {data: {...}}}`），
+  /// 交由 `core/models/homepage_modules.dart` 的纯解析器取值。
+  Future<Map<String, Object?>?> userHomepage(
+    int uin, {
+    String moduleList = PlayerHomeModule.fullList,
+  }) async {
     final a = _auth;
     if (a == null) return null;
     final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
-    return client.getUserHomepage(uin);
+    return client.getUserHomepage(uin, moduleList: moduleList);
   }
 
   /// 拉取角色等级（miniw/upgrade get_level_info_batch）。无则返回 0。

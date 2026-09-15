@@ -1,9 +1,17 @@
 /// 玩家主页（`get_user_homepage`）模块的纯解析函数。
 ///
 /// 主页响应是 `{模块名: {data: {...}}}` 的松散结构，且同一字段在不同接口间
-/// 类型不一致（数字 / 数字字符串混用）。这里只收敛 UI 需要的三个模块：
-///   - `title`（模块 9）：当前佩戴称号 id（`title.data.match_title.use_title.id`）；
-///   - `achieve`（模块 6/13）：勋章列表（`achieve.data.medal_list` → `[(id, level)]`）；
+/// 类型不一致（数字 / 数字字符串混用）。这里收敛 UI 需要的模块：
+///   - `role_info`（模块 1）：关注 / 粉丝 / 人气值 / 信用分统计；
+///   - `posting`（模块 3）：动态数量；
+///   - `skin`（模块 4）：已拥有皮肤 / 坐骑 / 武器 / 座位（个性装扮）；
+///   - `avatar_collect`（模块 5）：追光计划收集数（`data.count`）；
+///   - `achieve`（模块 6）：勋章列表（`data.medal_list` → `[(id, level)]`）；
+///   - `head_frame`（模块 7）：已拥有头像框数量；
+///   - `charm`（模块 8）：魅力值（`data.charm_value`）；
+///   - `title`（模块 9）：当前佩戴称号 id（`data.match_title.use_title.id`）；
+///   - `map`（模块 11）：发布作品数量与列表；
+///   - `achieve2`（模块 13）：勋章列表（`data` 为数组，`[(id, level)]`）；
 ///   - `social_sign`（模块 16）：交友宣言（`{social_lab, game_lab}`）。
 ///
 /// 解析口径与 `ui/widgets/session_player_info_popup.dart`、
@@ -12,7 +20,8 @@
 ///
 /// 约定（与仓库内其它解析器一致）：任何脏数据（非 Map / 缺字段 / 类型不符 /
 /// 非正 id）只跳过，**绝不抛异常**；取不到时返回 `0` / 空列表 / `null`，
-/// 由调用方自行降级为「—」占位。
+/// 由调用方自行降级为「—」占位。计数类解析器返回 `int?`：`null` 表示该模块
+/// 缺失（或结构不符），`0` 表示模块存在但计数确为 0，二者在 UI 上区分展示。
 library;
 
 import '../services/social_sign.dart' show SocialDeclaration;
@@ -73,4 +82,247 @@ SocialDeclaration? homepageDeclaration(Map<String, Object?>? home) {
   if (data is! Map) return null;
   final nested = SocialDeclaration.fromMap(data.cast<String, Object?>());
   return nested.isEmpty ? null : nested;
+}
+
+/// 数字容错（可空版）：`int` / `num` / 数字字符串 → `int`，其余 → `null`。
+int? _toOptInt(Object? v) {
+  if (v is int) return v;
+  if (v is num) return v.toInt();
+  return int.tryParse('$v');
+}
+
+/// 取模块的 `data` 子 map；模块缺失 / 非 Map / `data` 非 Map → `null`。
+Map<String, Object?>? _moduleDataMap(Map<String, Object?>? home, String module) {
+  final m = home?[module];
+  if (m is! Map) return null;
+  final data = m['data'];
+  return data is Map ? data.cast<String, Object?>() : null;
+}
+
+/// 魅力值（`charm` 模块 8）：`charm.data.charm_value`。
+///
+/// 依据 `playerCenterV2CharmCompModel:GetCharmVal`：
+/// `return self.data.charmInfo.charm_value or 0`
+/// （`playercenterv2charmcompmodel.lua:67-69`；ctrl 取 `serverData.data`
+/// 于 `playercenterv2charmcompctrl.lua:110`）。模块缺失 → `null`。
+int? homepageCharmValue(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'charm');
+  if (data == null) return null;
+  return _toOptInt(data['charm_value']);
+}
+
+/// 发布作品数量（`map` 模块 11）：地图数 + 资源商品总数。
+///
+/// 依据 `playerCenterV2MapCompModel:TransferMapInfo`
+/// （`playercenterv2mapcompmodel.lua:29-94`）：
+/// `map_list` 逐条计入（`:30-45`）；`serverData.goods_count.total` 为资源总数
+/// （`:72-74`）；`goods` 内层 `data.list` 为兜底（`:76-89`）。
+/// 模块缺失 → `null`。
+int? homepageWorkCount(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'map');
+  if (data == null) return null;
+  var total = 0;
+  final mapList = data['map_list'];
+  if (mapList is List) total += mapList.whereType<Map>().length;
+  final goodsCount = data['goods_count'];
+  if (goodsCount is Map) {
+    total += _toOptInt(goodsCount['total']) ?? 0;
+  } else {
+    final goods = data['goods'];
+    if (goods is Map) {
+      for (final v in goods.values) {
+        if (v is! Map) continue;
+        final inner = v['data'];
+        if (inner is Map && inner['list'] is List) {
+          total += (inner['list'] as List).whereType<Map>().length;
+        }
+      }
+    }
+  }
+  return total;
+}
+
+/// 发布作品名称列表（`map.data.map_list`）。
+///
+/// 依据 `playerCenterV2MapCompModel:TransferMapInfo`
+/// （`playercenterv2mapcompmodel.lua:30-45`）：每条 `{id, name, ctype,
+/// create_time, top}`，`id <= 0` 的脏条目跳过。
+List<HomeWork> homepageWorks(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'map');
+  if (data == null) return const <HomeWork>[];
+  final list = data['map_list'];
+  if (list is! List) return const <HomeWork>[];
+  final out = <HomeWork>[];
+  for (final e in list) {
+    if (e is! Map) continue;
+    final m = e.cast<String, Object?>();
+    final id = _toInt(m['id'] ?? m['ID']);
+    if (id <= 0) continue;
+    final name = '${m['name'] ?? ''}'.trim();
+    out.add(HomeWork(id: id, name: name.isEmpty ? '#$id' : name));
+  }
+  return out;
+}
+
+/// 动态数量（`posting` 模块 3）。
+///
+/// 优先取 `posting.data.posting_count`（`playercenterv2dynamicview.lua:120`
+/// / `:156` 直接展示该字段）；缺失时按 `playerCenterV2DynamicCtrl:GetCount`
+/// （`playercenterv2dynamicctrl.lua:101-117`）统计 `posting_data.list` 中
+/// `homepage_hide ~= 1` 的条目。模块缺失 → `null`。
+int? homepagePostingCount(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'posting');
+  if (data == null) return null;
+  final count = _toOptInt(data['posting_count']);
+  if (count != null) return count;
+  final posting = data['posting_data'];
+  if (posting is! Map) return 0;
+  final list = posting['list'];
+  if (list is! List) return 0;
+  var n = 0;
+  for (final e in list) {
+    if (e is! Map) continue;
+    if (_toInt(e['homepage_hide']) != 1) n++;
+  }
+  return n;
+}
+
+/// 追光计划收集数（`avatar_collect` 模块 5）：`data.count`。
+///
+/// 依据 `playerCenterV2DressGalleryView:SetSmallComponent`
+/// （`playercenterv2dressgalleryview.lua:60-61`）：
+/// `local curScore = serverData.data.count or 0`；`standName` 亦将该模块记为
+/// `ChaseLight`（`playercenterv2config.lua:291`）。模块缺失 → `null`。
+int? homepageChaseLightCount(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'avatar_collect');
+  if (data == null) return null;
+  return _toOptInt(data['count']);
+}
+
+/// 个性装扮（已拥有）数量（`skin` 模块 4）。
+///
+/// 依据 `playerCenterV2MiniShowCompModel:SetSkinInfo`
+/// （`playercenterv2minishowcompmodel.lua:35-172`）：统计
+/// `data.skin_list`（`:51`）、`data.seat.seat_list`（`:88-89`）、
+/// `data.mount_list`（`:126`）、`data.weapon_list`（`:145`）四项。模块缺失 → `null`。
+int? homepageSkinCount(Map<String, Object?>? home) {
+  final data = _moduleDataMap(home, 'skin');
+  if (data == null) return null;
+  var n = 0;
+  final skinList = data['skin_list'];
+  if (skinList is List) n += skinList.whereType<Map>().length;
+  final mountList = data['mount_list'];
+  if (mountList is List) n += mountList.whereType<Map>().length;
+  final weaponList = data['weapon_list'];
+  if (weaponList is List) n += weaponList.whereType<Map>().length;
+  final seat = data['seat'];
+  if (seat is Map && seat['seat_list'] is List) {
+    n += (seat['seat_list'] as List).whereType<Map>().length;
+  }
+  return n;
+}
+
+/// 已拥有头像框数量（`head_frame` 模块 7）。
+///
+/// 依据 `playerCenterV2HeadFrameCompModel:SetHeadFrameInfo`
+/// （`playercenterv2headframecompmodel.lua:13-14`）：`self.headFrameList = data`
+/// 后按 `ipairs` 遍历（`:28`），即 `data` 为数组。模块缺失 → `null`。
+int? homepageHeadFrameCount(Map<String, Object?>? home) {
+  final m = home?['head_frame'];
+  if (m is! Map) return null;
+  final data = m['data'];
+  if (data is! List) return null;
+  return data.whereType<Map>().length;
+}
+
+/// 勋章列表（`achieve2` 模块 13）：`data` 为数组，逐条 `{id, max_level, level}`。
+///
+/// 依据 `playerCenterV2MedalCompCtrl:SetServerData`
+/// （`playercenterv2medalcompctrl.lua:134`：`for _, value in ipairs(serverData)`）
+/// 与 `playerCenterV2MedalCompModel:SetMedalInfo`
+/// （`playercenterv2medalcompmodel.lua:20-23`：`max_level > 0` 时
+/// `value.level = value.max_level`）。`id <= 0` 的脏条目跳过。
+List<(int, int)> homepageMedals2(Map<String, Object?>? home) {
+  final m = home?['achieve2'];
+  if (m is! Map) return const <(int, int)>[];
+  final data = m['data'];
+  if (data is! List) return const <(int, int)>[];
+  final out = <(int, int)>[];
+  for (final e in data) {
+    if (e is! Map) continue;
+    final mm = e.cast<String, Object?>();
+    final id = _toInt(mm['id'] ?? mm['ID']);
+    if (id <= 0) continue;
+    final maxLevel = _toInt(mm['max_level'] ?? mm['maxLevel']);
+    final level = maxLevel > 0
+        ? maxLevel
+        : _toInt(mm['level'] ?? mm['Level']);
+    out.add((id, level));
+  }
+  return out;
+}
+
+/// 顶部四项统计（`role_info` 模块 1）。
+///
+/// 字段依据：
+///   - 关注 `role_info.data.profile.relation.friend_attention`
+///     （`playercenterv2homepageview.lua:197-203`）；
+///   - 粉丝 `role_info.data.profile.relation.friend_beattention`
+///     （`playercenterv2homepageview.lua:154-160`）；
+///   - 人气值 `role_info.data.popularity`
+///     （`playercenterv2popularctrl.lua:36`）；
+///   - 信用分 `role_info.data.credit`
+///     （`playercenterv2homepageview.lua:171-181`）。
+///
+/// `role_info` 缺失 → `null`；单项缺失时该字段为 `null`（与真实的 0 区分）。
+HomeStats? homepageStats(Map<String, Object?>? home) {
+  final role = home?['role_info'];
+  if (role is! Map) return null;
+  final data = role['data'];
+  if (data is! Map) return null;
+  final d = data.cast<String, Object?>();
+  final profile = d['profile'];
+  final relation = profile is Map ? profile['relation'] : null;
+  final rel = relation is Map
+      ? relation.cast<String, Object?>()
+      : const <String, Object?>{};
+  return HomeStats(
+    following: _toOptInt(rel['friend_attention']),
+    followers: _toOptInt(rel['friend_beattention']),
+    popularity: _toOptInt(d['popularity']),
+    credit: _toOptInt(d['credit']),
+  );
+}
+
+/// 一条已发布作品（`map.data.map_list` 条目）。
+class HomeWork {
+  /// 作品（地图）id。
+  final int id;
+
+  /// 作品名（缺失时回退 `#id`）。
+  final String name;
+
+  const HomeWork({required this.id, required this.name});
+}
+
+/// 个人主页顶部四项统计；`null` 字段表示该项未下发。
+class HomeStats {
+  /// 关注数（`friend_attention`）。
+  final int? following;
+
+  /// 粉丝数（`friend_beattention`）。
+  final int? followers;
+
+  /// 人气值（`popularity`）。
+  final int? popularity;
+
+  /// 信用分（`credit`）。
+  final int? credit;
+
+  const HomeStats({
+    this.following,
+    this.followers,
+    this.popularity,
+    this.credit,
+  });
 }
