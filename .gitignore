@@ -20,3 +20,6 @@ session.json
 config.yaml
 # Widget Preview related
 .widget_preview/
+
+# opencode 会话产物（不提交）
+ses_*.json
