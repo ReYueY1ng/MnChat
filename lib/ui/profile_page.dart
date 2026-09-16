@@ -28,8 +28,16 @@
 ///     （`contentfavsservice.lua:205-209`）与 `miniw/camera?act=get_photo_homepage`
 ///     （`multimediaalbumservice.lua:255-261`），经 `PlayerHomeClient` 取数。
 ///
+/// 已接入的独立协议 / 端点（逐条 file:line 出处见 `.omo/docs/protocol-notes.md`）：
+///   - `置顶动态`：`set_top_flag`（module_id = posting 3）
+///     （`playercenterv2homepageservice.lua:309-325`）；
+///   - `编辑布局`：`get_homepage_layout` / `change_homepage_layout`
+///     （同文件 `:26-66`）；
+///   - 页脚 `IP属地`：`miniw/user_ext?act=get_user_addr`
+///     （`playercenteripadressctrl.lua:77-105`）；空值回退 `GetS(4896)`=「未知」。
+///
 /// 已知缺口（外部客户端无对应协议，**只保留版块外壳与「—」占位，不臆造数据**）：
-///   - `动态` 正文与 `置顶`；`编辑布局`；页脚 `IP属地`。
+///   - `动态` 正文（本卡只展示条数，正文请在动态页查看）。
 library;
 
 import 'package:flutter/material.dart';
@@ -56,6 +64,7 @@ import 'visitor_list_page.dart';
 import 'widgets/avatar_edit_dialog.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
+import 'widgets/home_layout_dialog.dart';
 import 'widgets/partner_badges.dart';
 import 'widgets/rich_text_view.dart';
 
@@ -346,11 +355,48 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     await _loadHomeModules();
   }
 
-  /// 无协议支持的操作（参考图存在但外部客户端无对应接口）：提示暂不支持。
-  void _notSupported(String feature) {
+  /// 打开「编辑布局」：拉取服务端布局 → 拖拽排序 → 保存。
+  ///
+  /// 协议 `get_homepage_layout` / `change_homepage_layout`
+  /// （`playercenterv2homepageservice.lua:26-66`）。布局条目由服务端以 JSON 串
+  /// 下发（同文件 `:87`），本流程**只改顺序、原样回传**，不臆造布局 schema。
+  Future<void> _openLayoutEditor() async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+
+    List<Map<String, Object?>> layout;
+    try {
+      layout = await client.getHomepageLayout(auth.uin);
+    } catch (e) {
+      log.warn('主页布局拉取失败: $e', tag: _logTag);
+      layout = const <Map<String, Object?>>[];
+    }
+    if (!mounted) return;
+    if (layout.isEmpty) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('未取到主页布局')));
+      return;
+    }
+
+    final saved = await showHomeLayoutDialog(
+      context,
+      layout: layout,
+      save: (next) async {
+        try {
+          return await client.changeHomepageLayout(next);
+        } catch (e) {
+          log.warn('主页布局保存失败: $e', tag: _logTag);
+          return false;
+        }
+      },
+    );
+    if (!mounted || !saved) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text('外部客户端暂不支持$feature')));
+    ).showSnackBar(const SnackBar(content: Text('布局已保存')));
+    await _loadHomeModules();
   }
 
   /// 复制迷你号到剪贴板。
@@ -768,7 +814,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 stats: stats,
                 onCopyUin: () => _copyUin(uin),
                 onVisitors: () => _openVisitors(uin),
-                onEditLayout: () => _notSupported('编辑主页布局'),
+                onEditLayout: _openLayoutEditor,
                 onRename: _editNickname,
                 onHomeland: () => _openHomeland(uin),
                 onEditAvatar: _openAvatarEdit,

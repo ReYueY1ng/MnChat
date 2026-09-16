@@ -29,6 +29,8 @@
 /// 缺失（或结构不符），`0` 表示模块存在但计数确为 0，二者在 UI 上区分展示。
 library;
 
+import 'dart:convert' show jsonDecode;
+
 import '../services/social_sign.dart' show SocialDeclaration;
 
 /// 数字容错：`int` / `num` / 数字字符串 → `int`，其余 → [fallback]。
@@ -423,4 +425,59 @@ int homepagePostingLastPid(Map<String, Object?>? home) {
   final data = _moduleDataMap(home, 'posting');
   if (data == null) return 0;
   return _toOptInt(data['last_pid']) ?? 0;
+}
+
+/// 主页模块 id → 中文名（与个人主页各卡片标题一致）。
+///
+/// id 取自 `playercenterv2config.lua:42-60` 的 `moduleList`；未列出的 id
+/// 由调用方回退为 `模块 <id>`，**不臆造名称**。
+const Map<int, String> kHomeModuleNames = {
+  2: '头像',
+  3: '动态',
+  4: '个性装扮',
+  5: '追光计划',
+  6: '勋章',
+  7: '头像框',
+  8: '魅力值',
+  9: '称号',
+  11: '发布作品',
+  12: '最佳拍档',
+  13: '勋章',
+  16: '交友宣言',
+  17: '家族',
+  18: '我的收藏夹',
+  19: '迷你印迹',
+};
+
+/// 解析 `get_homepage_layout` 响应 → 布局条目列表。
+///
+/// 官方取 `ret.data.layout`（**JSON 字符串**）后 `json2table`，存入
+/// `layoutTable`（`playercenterv2homepageservice.lua:87`）；条目形如
+/// `{moduleId, sizeType}`（`playercenterv2config.lua:144+` 的 `defaultLayout`）。
+///
+/// [ret] 为完整响应；失败 / `code != 0` / 非数组 → 空列表。
+/// 条目**原样保留**（不改字段），以便保存时 round-trip 回服务端。
+List<Map<String, Object?>> homeLayoutEntries(Object? ret) {
+  if (ret is! Map) return const <Map<String, Object?>>[];
+  final m = ret.cast<String, Object?>();
+  final code = m['code'] ?? m['ret'];
+  if (code is num && code != 0) return const <Map<String, Object?>>[];
+  final data = m['data'];
+  if (data is! Map) return const <Map<String, Object?>>[];
+  final raw = data.cast<String, Object?>()['layout'];
+  final decoded = raw is String ? _tryJsonArray(raw) : raw;
+  if (decoded is! List) return const <Map<String, Object?>>[];
+  return [
+    for (final e in decoded)
+      if (e is Map) e.cast<String, Object?>(),
+  ];
+}
+
+List<Object?>? _tryJsonArray(String s) {
+  try {
+    final v = jsonDecode(s);
+    return v is List ? v : null;
+  } catch (_) {
+    return null;
+  }
 }
