@@ -1194,7 +1194,7 @@ class _ProfileHeaderCard extends StatelessWidget {
                         IconButton(
                           tooltip: '复制迷你号',
                           iconSize: 16,
-                          visualDensity: VisualDensity.compact,
+                          visualDensity: adaptiveDensity(context),
                           icon: const Icon(Icons.copy_outlined),
                           onPressed: onCopyUin,
                         ),
@@ -1210,7 +1210,8 @@ class _ProfileHeaderCard extends StatelessWidget {
           const SizedBox(height: AppSpacing.md),
           // 统计行：4 项计数 + 分隔线（取自 role_info 模块；缺失项 → 「—」）。
           SizedBox(
-            height: 44,
+            // 该行含按钮文字，高度随系统字号缩放以免裁切。
+            height: MediaQuery.textScalerOf(context).scale(44),
             child: Row(
               children: [
                 Expanded(

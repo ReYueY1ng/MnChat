@@ -7,6 +7,7 @@ import '../../core/models/messages.dart';
 import '../../core/services/dynamics.dart';
 import '../../state/providers.dart';
 import '../dynamics_detail_page.dart';
+import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'head_frame.dart';
 import 'image_viewer.dart';
@@ -487,7 +488,7 @@ class _Actions extends StatelessWidget {
         ),
         _ActionIcon(icon: Icons.reply_outlined, count: post.shareCount),
         IconButton(
-          visualDensity: VisualDensity.compact,
+          visualDensity: adaptiveDensity(context),
           padding: EdgeInsets.zero,
           icon: const Icon(Icons.more_horiz, size: 18),
           onPressed: () {},

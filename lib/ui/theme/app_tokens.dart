@@ -153,3 +153,35 @@ abstract final class AppSizes {
   /// 列表页内容。
   static const double listContent = 1000;
 }
+
+/// 是否为「紧凑宽度」（手机）。判据用最短边 < 600dp（Material 的 compact
+/// width class）——横屏手机最短边仍是 ~400dp，故横屏也算手机，
+/// 从而始终保住触控目标尺寸。
+bool isCompactWidth(BuildContext context) =>
+    MediaQuery.sizeOf(context).shortestSide < 600;
+
+/// 自适应触控密度：手机用 [VisualDensity.standard]（保住 ≥48dp 触控目标），
+/// 桌面 / 平板保留紧凑密度。
+VisualDensity adaptiveDensity(BuildContext context) =>
+    isCompactWidth(context) ? VisualDensity.standard : VisualDensity.compact;
+
+/// 弹窗内容宽度：桌面用 [preferred]，窄屏不超出可用宽度。
+///
+/// `AlertDialog` 默认左右各留 40dp 边距，故可用宽度 = 屏宽 - 80；
+/// 硬编码宽度（如 420）在 360dp 手机上会溢出。
+double dialogContentWidth(BuildContext context, double preferred) {
+  final available = MediaQuery.sizeOf(context).width - 80;
+  if (available >= preferred) return preferred;
+  return available > 0 ? available : 0;
+}
+
+/// 弹窗内容高度：桌面用 [preferred]，矮屏（手机横屏）按屏高的
+/// [fraction]（默认一半）收敛，避免连同标题/按钮一起溢出。
+double dialogContentHeight(
+  BuildContext context,
+  double preferred, {
+  double fraction = 0.5,
+}) {
+  final available = MediaQuery.sizeOf(context).height * fraction;
+  return available < preferred ? available : preferred;
+}

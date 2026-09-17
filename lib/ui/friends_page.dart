@@ -277,14 +277,14 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             ),
             IconButton(
               tooltip: '刷新',
-              visualDensity: VisualDensity.compact,
+              visualDensity: adaptiveDensity(context),
               icon: const Icon(Icons.refresh, size: 18),
               onPressed: () => ref.read(chatServiceProvider).loadSessions(),
             ),
             if (_cat != _FriendCat.group) ...[
               const SizedBox(width: 4),
               FilterChip(
-                visualDensity: VisualDensity.compact,
+                visualDensity: adaptiveDensity(context),
                 label: const Text('只看在线', style: TextStyle(fontSize: 12)),
                 selected: _onlyOnline,
                 onSelected: (v) => setState(() => _onlyOnline = v),
@@ -315,7 +315,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                   ),
               ],
               child: Chip(
-                visualDensity: VisualDensity.compact,
+                visualDensity: adaptiveDensity(context),
                 avatar: const Icon(Icons.sort, size: 16),
                 label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
               ),
@@ -323,7 +323,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             const SizedBox(width: 8),
             Expanded(
               child: SizedBox(
-                height: 36,
+                // 高度随系统字号缩放，避免大字号下输入文字被裁切。
+                height: MediaQuery.textScalerOf(context).scale(36),
                 child: TextField(
                   onChanged: (v) => setState(() => _search = v),
                   decoration: InputDecoration(

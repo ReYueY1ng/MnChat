@@ -167,7 +167,8 @@ Future<void> _showCreateGroupDialog(
       builder: (ctx, setDialogState) => AlertDialog(
         title: const Text('创建群'),
         content: SizedBox(
-          width: 420,
+          // 手机上收敛到可用宽度（360dp 机型放不下 420）。
+          width: dialogContentWidth(ctx, 420),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [

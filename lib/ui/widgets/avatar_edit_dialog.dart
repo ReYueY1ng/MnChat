@@ -1684,7 +1684,8 @@ class _TopTabs extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     return SizedBox(
-      height: 32,
+      // 页签含文字，高度随系统字号缩放以免裁切。
+      height: MediaQuery.textScalerOf(context).scale(32),
       child: ListView.separated(
         key: tabsKey,
         scrollDirection: Axis.horizontal,

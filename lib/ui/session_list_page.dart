@@ -191,7 +191,8 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
   /// 行尾出现清空按钮（见 [_clearSearch]）。
   Widget _buildSearchField() {
     return SizedBox(
-      height: 36,
+      // 高度随系统字号缩放，避免大字号下输入文字被裁切。
+      height: MediaQuery.textScalerOf(context).scale(36),
       child: TextField(
         controller: _searchCtrl,
         onChanged: (v) => setState(() => _search = v),

@@ -65,8 +65,8 @@ class _HomeLayoutDialogState extends State<_HomeLayoutDialog> {
       title: const Text('编辑布局'),
       contentPadding: const EdgeInsets.fromLTRB(0, AppSpacing.md, 0, 0),
       content: SizedBox(
-        width: 420,
-        height: 380,
+        width: dialogContentWidth(context, 420),
+        height: dialogContentHeight(context, 380),
         child: ReorderableListView.builder(
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
           itemCount: _items.length,

@@ -314,9 +314,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                       m.nickname.isNotEmpty ? m.nickname : '${m.uin}',
                     ),
                     trailing: m.isLeader
-                        ? const Chip(
-                            label: Text('族长'),
-                            visualDensity: VisualDensity.compact,
+                        ? Chip(
+                            label: const Text('族长'),
+                            visualDensity: adaptiveDensity(context),
                           )
                         : null,
                   ),

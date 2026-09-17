@@ -606,7 +606,7 @@ class _ToolBtn extends StatelessWidget {
   Widget build(BuildContext context) {
     return IconButton(
       tooltip: tooltip,
-      visualDensity: VisualDensity.compact,
+      visualDensity: adaptiveDensity(context),
       icon: Icon(icon, size: 22),
       onPressed: onTap,
     );
@@ -678,7 +678,7 @@ class _InlineEmojiBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             children: [
               // 时间戳默认隐藏，仅指针悬停本条消息时淡入（触屏无 hover 不显示）。
-              if (createdAt != null) _HoverTimeText(createdAt),
+              if (createdAt != null) _MessageTimeText(createdAt),
               const SizedBox(height: 2),
               // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
               // @提及 等（见 rich_text_view.dart）。
@@ -785,7 +785,7 @@ class _RichMediaBubble extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           if (message.createdAt != null)
-            _HoverTimeText(message.createdAt!),
+            _MessageTimeText(message.createdAt!),
           const SizedBox(height: 2),
           Text(
             customMessageText(message),
@@ -817,7 +817,7 @@ class _RichMediaBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (message.createdAt != null)
-              _HoverTimeText(message.createdAt!),
+              _MessageTimeText(message.createdAt!),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -910,7 +910,7 @@ class _RichMediaBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           children: [
             if (message.createdAt != null)
-              _HoverTimeText(message.createdAt!),
+              _MessageTimeText(message.createdAt!),
             const SizedBox(height: 4),
             Row(
               mainAxisSize: MainAxisSize.min,
@@ -1012,7 +1012,9 @@ class _RichMediaBubble extends StatelessWidget {
 
 /// 单条消息外框：沿用 flutter_chat_ui 的 [ChatMessage]（动画 / 内边距 /
 /// 分组 / 点击手势全部保留），另外附加：
-/// - [MouseRegion] 注入悬停状态（气泡内时间戳据此显隐，触屏永不触发）；
+/// - 气泡内时间戳的显隐：桌面端鼠标悬停显示；**触屏没有 hover，改为点按气泡
+///   切换**（外层 `GestureDetector`，`translucent` 不抢子级手势；公开的
+///   `ChatMessage` 在本版本未暴露 `onMessageTap`，故不走它）；
 /// - `leadingWidget` 展示对方头像（自己的消息不传，保持右对齐）；
 /// - `headerWidget` 在消息间隔超过 [kChatTimeDividerGap] 时插入居中时间条。
 class _ChatMessageRow extends StatefulWidget {
@@ -1046,8 +1048,11 @@ class _ChatMessageRow extends StatefulWidget {
 }
 
 class _ChatMessageRowState extends State<_ChatMessageRow> {
-  /// 指针是否悬停在当前消息上（触屏无 hover → 时间戳保持隐藏）。
+  /// 指针是否悬停在当前消息上（桌面端用；触屏不产生 hover 事件）。
   bool _hovering = false;
+
+  /// 是否已点按钉住时间戳（触屏端用；再点一次取消）。
+  bool _pinnedByTap = false;
 
   @override
   Widget build(BuildContext context) {
@@ -1055,19 +1060,25 @@ class _ChatMessageRowState extends State<_ChatMessageRow> {
     return MouseRegion(
       onEnter: (_) => _setHovering(true),
       onExit: (_) => _setHovering(false),
-      child: _ChatHoverScope(
-        hovering: _hovering,
-        child: ChatMessage(
-          message: widget.message,
-          index: widget.index,
-          animation: widget.animation,
-          isRemoved: widget.isRemoved,
-          groupStatus: widget.groupStatus,
-          leadingWidget: widget.avatar,
-          headerWidget: widget.showTimeDivider && time != null
-              ? _TimeDivider(time: time)
-              : null,
-          child: widget.child,
+      // 触屏没有 hover：点按气泡切换时间戳显隐。`translucent` 只参与命中、
+      // 不拦截子级——气泡内部若自带手势识别器，仍由子级优先。
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: _togglePinnedByTap,
+        child: _ChatTimeScope(
+          showTime: _hovering || _pinnedByTap,
+          child: ChatMessage(
+            message: widget.message,
+            index: widget.index,
+            animation: widget.animation,
+            isRemoved: widget.isRemoved,
+            groupStatus: widget.groupStatus,
+            leadingWidget: widget.avatar,
+            headerWidget: widget.showTimeDivider && time != null
+                ? _TimeDivider(time: time)
+                : null,
+            child: widget.child,
+          ),
         ),
       ),
     );
@@ -1077,38 +1088,43 @@ class _ChatMessageRowState extends State<_ChatMessageRow> {
     if (_hovering == value) return;
     setState(() => _hovering = value);
   }
+
+  /// 点按气泡：钉住 / 取消钉住时间戳。
+  void _togglePinnedByTap() => setState(() => _pinnedByTap = !_pinnedByTap);
 }
 
-/// 消息悬停作用域：把 [_ChatMessageRow] 的 [MouseRegion] 状态传给子级气泡，
-/// 让气泡内部的时间戳无需各自维护 hover 状态。
-class _ChatHoverScope extends InheritedWidget {
-  final bool hovering;
+/// 消息时间戳显隐作用域：把 [_ChatMessageRow] 的显隐状态传给子级气泡，
+/// 让气泡内部的时间戳无需各自维护状态。
+///
+/// 显隐条件 = 桌面端鼠标悬停 **或** 触屏端点按气泡钉住。
+class _ChatTimeScope extends InheritedWidget {
+  final bool showTime;
 
-  const _ChatHoverScope({required this.hovering, required super.child});
+  const _ChatTimeScope({required this.showTime, required super.child});
 
-  /// 读取当前消息的悬停状态；不在消息内（无作用域）时视为未悬停。
+  /// 读取当前消息的时间戳是否应显示；不在消息内（无作用域）时视为不显示。
   static bool of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_ChatHoverScope>()?.hovering ??
+      context.dependOnInheritedWidgetOfExactType<_ChatTimeScope>()?.showTime ??
       false;
 
   @override
-  bool updateShouldNotify(_ChatHoverScope oldWidget) =>
-      hovering != oldWidget.hovering;
+  bool updateShouldNotify(_ChatTimeScope oldWidget) =>
+      showTime != oldWidget.showTime;
 }
 
-/// 悬停时才显示的时间戳：默认完全透明（布局不变），指针悬停时淡入。
+/// 消息时间戳：默认完全透明（**占位不变，不引起布局跳动**），需要时淡入。
 ///
-/// 触屏设备不产生 hover 事件，时间戳始终隐藏，符合「移动端不显示时间」的预期。
-class _HoverTimeText extends StatelessWidget {
+/// 显示条件见 [_ChatTimeScope]：桌面端悬停，或触屏端点按气泡钉住。
+class _MessageTimeText extends StatelessWidget {
   final DateTime time;
 
-  const _HoverTimeText(this.time);
+  const _MessageTimeText(this.time);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AnimatedOpacity(
-      opacity: _ChatHoverScope.of(context) ? 1 : 0,
+      opacity: _ChatTimeScope.of(context) ? 1 : 0,
       duration: const Duration(milliseconds: 150),
       child: Text(
         _fmtFullTime(time),

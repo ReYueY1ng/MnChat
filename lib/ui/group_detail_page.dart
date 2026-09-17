@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/rich_text_view.dart';
@@ -439,7 +440,10 @@ class _MemberTile extends StatelessWidget {
       ),
       title: RichTextView(isSelf ? '$name（我）' : name),
       trailing: isOwner
-          ? const Chip(label: Text('群主'), visualDensity: VisualDensity.compact)
+          ? Chip(
+              label: const Text('群主'),
+              visualDensity: adaptiveDensity(context),
+            )
           : null,
     );
   }
