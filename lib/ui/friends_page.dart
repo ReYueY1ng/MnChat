@@ -176,12 +176,20 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             children: [
               _buildToolbar(theme, onlineCount, pool.length),
               const Divider(height: 1),
+              // 手机（紧凑宽度）：分类改为列表**上方**的横向 chip 行，把整屏宽度
+              // 让给好友列表；宽屏保留左侧竖排分类栏。
+              if (isCompactWidth(context)) ...[
+                _buildCategoryChips(theme),
+                const Divider(height: 1),
+              ],
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _buildCategoryRail(theme),
-                    const VerticalDivider(width: 1),
+                    if (!isCompactWidth(context)) ...[
+                      _buildCategoryRail(theme),
+                      const VerticalDivider(width: 1),
+                    ],
                     Expanded(
                       child: filtered.isEmpty
                           ? _EmptyFriends(
@@ -352,6 +360,72 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
   }
 
   /// 左侧分类栏（黑名单 / 家族复用已有页面）。
+  /// 手机端分类：横向可滚动的 chip 行（宽屏用 [_buildCategoryRail] 竖排）。
+  ///
+  /// 与竖排栏同一组分类、同一选中态，只是方向不同 —— 手机上竖栏会占掉近三成
+  /// 屏宽，把好友列表挤到只剩一半，名字被迫截断。
+  Widget _buildCategoryChips(ThemeData theme) {
+    final style = theme.textTheme.bodyMedium?.copyWith(fontSize: 13);
+    Widget chip(String label, {bool active = false, VoidCallback? onTap}) {
+      return Padding(
+        padding: const EdgeInsets.only(right: AppSpacing.sm),
+        child: ChoiceChip(
+          label: Text(label, style: style),
+          selected: active,
+          visualDensity: adaptiveDensity(context),
+          onSelected: (_) => onTap?.call(),
+        ),
+      );
+    }
+
+    return SizedBox(
+      // 高度随系统字号缩放，避免大字号下 chip 被裁切。
+      height: MediaQuery.textScalerOf(context).scale(52),
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.sm,
+        ),
+        children: [
+          chip(
+            '我的好友',
+            active: _cat == _FriendCat.friend,
+            onTap: () => setState(() => _cat = _FriendCat.friend),
+          ),
+          chip(
+            '最佳拍档',
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const PartnerPage())),
+          ),
+          chip(
+            '关注',
+            active: _cat == _FriendCat.follow,
+            onTap: () => setState(() => _cat = _FriendCat.follow),
+          ),
+          chip(
+            '群组',
+            active: _cat == _FriendCat.group,
+            onTap: () => setState(() => _cat = _FriendCat.group),
+          ),
+          chip(
+            '黑名单',
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const BlacklistPage())),
+          ),
+          chip(
+            '家族',
+            onTap: () => Navigator.of(
+              context,
+            ).push(MaterialPageRoute(builder: (_) => const FamilyPage())),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildCategoryRail(ThemeData theme) {
     Widget item(String label, {bool active = false, VoidCallback? onTap}) {
       return Padding(

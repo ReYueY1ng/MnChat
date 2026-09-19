@@ -256,28 +256,28 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         showTimeDivider: _showTimeDivider(index, message),
                         child: child,
                       ),
-                  // 仅对消息列表套用字号缩放：包住 ChatAnimatedList 而非整个 Chat，
-                  // 这样输入框、快捷短语与工具栏（Composer 在 Stack 中独立于列表）
-                  // 不会被连带缩放，保证输入不受影响。
+                  // 空会话时用中文空态**替换消息列表区**（而不是覆盖整个 Chat）。
+                  // 旧实现用 `Positioned.fill` 遮罩，会把输入框/工具栏一起盖住：
+                  // 新会话既看不到输入框，空态里的按钮也「点了没反应」（它只是往被
+                  // 遮住的输入框塞字），导致新会话完全无法开始。
                   chatAnimatedListBuilder: (context, itemBuilder) => MediaQuery(
                     data: MediaQuery.of(context).copyWith(
                       textScaler: TextScaler.linear(chatFontScale),
                     ),
-                    child: ChatAnimatedList(itemBuilder: itemBuilder),
+                    child: StreamBuilder<void>(
+                      stream: _controller.operationsStream,
+                      builder: (context, _) => _controller.messages.isEmpty
+                          // 「打个招呼」直接发送，而不是往输入框塞字。
+                          ? _EmptyChatState(onSayHi: () => _send('嗨~'))
+                          : ChatAnimatedList(itemBuilder: itemBuilder),
+                    ),
                   ),
                   linkPreviewBuilder: (context, message, isSentByMe) => null,
                 ),
               ),
               // 空状态中文化：flutter_chat_ui 内置文案为英文 "No messages yet"
-              // 且未暴露覆写参数 → 用同色遮罩覆盖并显示中文空态。
-              Positioned.fill(
-                child: StreamBuilder<void>(
-                  stream: _controller.operationsStream,
-                  builder: (context, _) => _controller.messages.isEmpty
-                      ? _EmptyChatState(onSayHi: () => _insertText('嗨~'))
-                      : const SizedBox.shrink(),
-                ),
-              ),
+              // 且未暴露覆写参数。空态改由 `chatAnimatedListBuilder` 在
+              // 消息列表区渲染（见上），这里不再用遮罩覆盖整个 Chat。
             ],
           ),
         ),
