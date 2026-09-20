@@ -23,3 +23,10 @@ config.yaml
 
 # opencode 会话产物（不提交）
 ses_*.json
+
+# 真机调试产物：日志与聊天数据库（含私人聊天记录，绝不入库）
+logcat
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
