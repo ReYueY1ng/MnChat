@@ -118,7 +118,17 @@ class ChatService {
 
   Stream<ChatServiceState> get stateStream => _stateCtrl.stream;
   Stream<ChatEvent> get eventStream => _eventCtrl.stream;
-  Stream<SessionSnapshot> get sessionStream => _sessionCtrl.stream;
+  /// 会话快照流：**订阅时先回放当前状态**，再转发后续事件。
+  ///
+  /// [_sessionCtrl] 是 broadcast 流、没有回放缓冲；而 UI 侧 `MainShell` 要等
+  /// 登录状态变化后才挂载（见 `main.dart` 的 `loggedIn`），`login()` 里的
+  /// `_bootstrapSessions()` 很可能在订阅建立之前就已 emit 完毕 —— 那样订阅者
+  /// 只能干等下一个事件，重启后表现就是「会话列表空 / 会话丢失」。
+  /// 先回放当前状态可彻底消除这个竞态。
+  Stream<SessionSnapshot> get sessionStream async* {
+    yield SessionSnapshot(sessions, _contacts);
+    yield* _sessionCtrl.stream;
+  }
   Stream<List<FriendRequest>> get friendRequestStream => _friendReqCtrl.stream;
 
   /// 待处理好友申请（pending 优先，按时间倒序）。结果缓存，数据变更时失效。
@@ -1350,8 +1360,14 @@ class ChatService {
       }
       final list = data['groups'] ?? data['groupList'] ?? data['list'];
       if (list is List) {
-        _groupSessions.clear();
-        _groupInfos.clear();
+        // 与 [_loadFriendSessions] 一样做「新旧合并」而不是直接 clear：网络列表
+        // 可能不包含本地已有聊天记录的群（已退群、或本次返回不完整），直接清空
+        // 会把整段群会话从列表里抹掉 —— 重启后就是「会话丢失」。
+        final oldSessions = <int, ChatSession>{..._groupSessions};
+        final oldInfos = <int, GroupInfo>{..._groupInfos};
+        final newSessions = <int, ChatSession>{};
+        final newInfos = <int, GroupInfo>{};
+        final seen = <int>{};
         for (final item in list) {
           if (item is! Map) continue;
           final m = item.cast<String, Object?>();
@@ -1360,13 +1376,29 @@ class ChatService {
           final g = gid.toInt();
           final gname = (m['group_name'] ?? m['groupName'] ?? '群 $g')
               .toString();
-          _groupSessions[g] = ChatSession(
-            id: g,
-            type: ChatSessionType.group,
-            name: gname,
-          );
-          _groupInfos[g] = _groupInfoFrom(m, g, gname);
+          final old = oldSessions[g];
+          seen.add(g);
+          // 沿用本地已有的最后消息 / 未读数等，仅把群名刷新为服务端值。
+          newSessions[g] = old != null
+              ? old.copyWith(name: gname)
+              : ChatSession(id: g, type: ChatSessionType.group, name: gname);
+          newInfos[g] = _groupInfoFrom(m, g, gname);
         }
+        // 网络列表里没有、但本地有历史的群会话继续保留（判据同好友路径）。
+        oldSessions.forEach((g, s) {
+          if (seen.contains(g)) return;
+          final cached = _messagesCache[_sessionKey(ChatSessionType.group, g)];
+          if (s.lastMessage != null || (cached?.isNotEmpty ?? false)) {
+            newSessions[g] = s;
+          }
+        });
+        oldInfos.forEach((g, i) => newInfos.putIfAbsent(g, () => i));
+        _groupSessions
+          ..clear()
+          ..addAll(newSessions);
+        _groupInfos
+          ..clear()
+          ..addAll(newInfos);
       }
     } catch (e) {
       log.warn('query_user_groups failed: $e', tag: _logTag);
@@ -1478,6 +1510,19 @@ class ChatService {
         unreadCount: m.uin == myUin
             ? existing.unreadCount
             : existing.unreadCount + 1,
+      );
+    } else {
+      // 会话不存在时补建（与 [_upsertGroupMessage] 的群路径一致）：从好友列表
+      // 直接进聊天时可能还没有会话对象，若不补建，消息虽然照常落库却没有
+      // `chat_sessions` 行（[_persistSession] 以会话已存在为前提）—— 于是重启后
+      // 该会话根本不会出现在列表里，表现为「聊天记录/会话丢失」。
+      // 昵称先用迷你号兜底，登录时 `_loadFriendSessions` / 好友缓存会补成真昵称。
+      _friendSessions[uin2] = ChatSession(
+        id: uin2,
+        type: ChatSessionType.friend,
+        name: '$uin2',
+        lastMessage: m,
+        unreadCount: m.uin == myUin ? 0 : 1,
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
