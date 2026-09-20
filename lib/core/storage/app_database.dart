@@ -76,7 +76,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 7;
+  int get schemaVersion => 8;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -85,7 +85,17 @@ class AppDatabase extends _$AppDatabase {
     // v3→v4: 新增 settings 设置表；v4→v5: chat_messages 新增 msg_type 列；
     // v5→v6: friends 新增 relation/mark 列（好友关系位掩码）；
     // v6→v7: 多账号隔离 —— chat_messages/chat_sessions/friends 新增 ownerUin 列
-    //        （0=旧数据，首次登录时收养到当前账号）。
+    //        （0=旧数据，首次登录时收养到当前账号）。**当年这一步误用 addColumn，
+    //        见下 v7→v8 的修表说明。**
+    // v7→v8: 修复被 v6→v7 建坏的表：ownerUin 是 chat_sessions / friends 主键的
+    //        一部分（{sessionKey,ownerUin} / {uin,ownerUin}），而 SQLite 的
+    //        ALTER TABLE ADD COLUMN 改不了主键 —— addColumn 只把列加了进去，
+    //        表的主键仍是 (session_key) / (uin)。drift 为 `insertOnConflictUpdate`
+    //        生成的是 `ON CONFLICT("session_key","owner_uin") DO UPDATE`，与实表
+    //        主键不匹配 → 每次写会话/好友都抛
+    //        "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint"
+    //        （且是未捕获的异步异常）→ 会话行永远写不进去 → 重启后「会话丢失」。
+    //        这两张表必须整表重建（alterTable 会按当前 Dart 定义建表并搬迁数据）。
     onUpgrade: (m, from, to) async {
       if (from < 2) {
         await m.deleteTable('chat_sessions');
@@ -107,9 +117,21 @@ class AppDatabase extends _$AppDatabase {
         await m.addColumn(friends, friends.mark);
       }
       if (from < 7) {
+        // chat_messages 主键是自增 id、不含 ownerUin，ADD COLUMN 没问题。
         await m.addColumn(chatMessages, chatMessages.ownerUin);
-        await m.addColumn(chatSessions, chatSessions.ownerUin);
-        await m.addColumn(friends, friends.ownerUin);
+        // 这两张表 ownerUin 在主键里 → 只能重建。`newColumns` 告诉 drift 该列在
+        // 旧表里尚不存在（由列默认值 0 填充），其余列按名字原样搬迁。
+        await m.alterTable(
+          TableMigration(chatSessions, newColumns: [chatSessions.ownerUin]),
+        );
+        await m.alterTable(
+          TableMigration(friends, newColumns: [friends.ownerUin]),
+        );
+      } else if (from == 7) {
+        // 已在 v7 的库：表里有 owner_uin 列、但主键是旧的 —— 不带 newColumns /
+        // columnTransformer 重建，按列名原样搬迁，保留已有 owner_uin 值。
+        await m.alterTable(TableMigration(chatSessions));
+        await m.alterTable(TableMigration(friends));
       }
     },
   );

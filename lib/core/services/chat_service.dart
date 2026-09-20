@@ -942,6 +942,45 @@ class ChatService {
           }
         }
       }
+      // 兜底一：库里有消息、却没有对应会话行时，用消息把会话补出来。
+      // messages 才是真正的事实来源 —— 历史上出现过「消息写得进、会话行写不进」
+      // 的 bug（见 app_database 的迁移说明），这类会话原先在列表里完全看不到。
+      for (final entry in msgsByKey.entries) {
+        final key = entry.key;
+        final rows = entry.value;
+        if (rows.isEmpty || _messagesCache.containsKey(key)) continue;
+        final sep = key.lastIndexOf('_');
+        if (sep <= 0) continue;
+        final id = int.tryParse(key.substring(sep + 1));
+        if (id == null || id == 0) continue;
+        final isGroup = key.substring(0, sep) == ChatSessionType.group.name;
+        final msgs = rows.take(200).map(chatMessageFromRecord).toList();
+        _messagesCache[key] = msgs;
+        final target = isGroup ? _groupSessions : _friendSessions;
+        if (target.containsKey(id)) continue;
+        // 名字先用迷你号 / 「群 N」兜底，登录后由好友列表、群列表刷新成真名。
+        target[id] = ChatSession(
+          id: id,
+          type: isGroup ? ChatSessionType.group : ChatSessionType.friend,
+          name: isGroup ? '群 $id' : '$id',
+          lastMessage: msgs.last,
+        );
+      }
+      // 兜底二：会话有本地消息、但会话行的 last_time/last_text 缺失（或会话是刚由
+      // 好友缓存补建的）时，用本地最后一条消息补上 —— 否则列表按 lastMessage 排序
+      // 会把它排到最后、也不显示消息预览。
+      _messagesCache.forEach((key, msgs) {
+        if (msgs.isEmpty) return;
+        final sep = key.lastIndexOf('_');
+        if (sep <= 0) return;
+        final id = int.tryParse(key.substring(sep + 1));
+        if (id == null || id == 0) return;
+        final isGroup = key.substring(0, sep) == ChatSessionType.group.name;
+        final target = isGroup ? _groupSessions : _friendSessions;
+        final s = target[id];
+        if (s == null || s.lastMessage != null) return;
+        target[id] = s.copyWith(lastMessage: msgs.last);
+      });
       _emitSessionSnapshot();
     } catch (e) {
       log.warn('load offline cache failed: $e', tag: _logTag);
@@ -1586,7 +1625,16 @@ class ChatService {
         ? _friendSessions[id]
         : _groupSessions[id];
     if (s == null) return;
-    unawaited(db.upsertSession(chatSessionToCompanion(s, ownerUin: myUin)));
+    unawaited(() async {
+      try {
+        await db.upsertSession(chatSessionToCompanion(s, ownerUin: myUin));
+      } catch (e) {
+        // 写会话行失败必须留痕：历史上这里没有 try/catch，schema 与 drift 生成的
+        // ON CONFLICT 不匹配时抛的是「未捕获的异步异常」，只在 logcat 里刷
+        // Unhandled Exception，应用侧完全无感 —— 表现就是重启后会话丢失。
+        log.error('persist session failed: $e', tag: _logTag);
+      }
+    }());
   }
 
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
