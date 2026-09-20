@@ -246,6 +246,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         message: message,
                         index: index,
                         animation: animation,
+                        isSentByMe: isSentByMe,
                         isRemoved: isRemoved,
                         groupStatus: groupStatus,
                         // 对方消息带头像；自己的消息右对齐、不带头像。
@@ -658,7 +659,6 @@ class _InlineEmojiBubble extends StatelessWidget {
           _ => '',
         };
     final maxWidth = MediaQuery.of(context).size.width * 0.62;
-    final createdAt = message.createdAt;
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
@@ -677,9 +677,6 @@ class _InlineEmojiBubble extends StatelessWidget {
                 : CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 时间戳默认隐藏，仅指针悬停本条消息时淡入（触屏无 hover 不显示）。
-              if (createdAt != null) _MessageTimeText(createdAt),
-              const SizedBox(height: 2),
               // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
               // @提及 等（见 rich_text_view.dart）。
               Text.rich(
@@ -784,9 +781,6 @@ class _RichMediaBubble extends StatelessWidget {
             : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (message.createdAt != null)
-            _MessageTimeText(message.createdAt!),
-          const SizedBox(height: 2),
           Text(
             customMessageText(message),
             style: const TextStyle(fontStyle: FontStyle.italic),
@@ -816,9 +810,6 @@ class _RichMediaBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (message.createdAt != null)
-              _MessageTimeText(message.createdAt!),
-            const SizedBox(height: 6),
             Row(
               children: [
                 Container(
@@ -909,9 +900,6 @@ class _RichMediaBubble extends StatelessWidget {
               : CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (message.createdAt != null)
-              _MessageTimeText(message.createdAt!),
-            const SizedBox(height: 4),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -1012,12 +1000,12 @@ class _RichMediaBubble extends StatelessWidget {
 
 /// 单条消息外框：沿用 flutter_chat_ui 的 [ChatMessage]（动画 / 内边距 /
 /// 分组 / 点击手势全部保留），另外附加：
-/// - 气泡内时间戳的显隐：桌面端鼠标悬停显示；**触屏没有 hover，改为点按气泡
-///   切换**（外层 `GestureDetector`，`translucent` 不抢子级手势；公开的
-///   `ChatMessage` 在本版本未暴露 `onMessageTap`，故不走它）；
+/// - 时间戳：**气泡外**下方灰字常显，与气泡同侧对齐。此前内嵌在气泡顶部、
+///   默认透明并靠悬停淡入；手机端点按虽然接了 `GestureDetector`，但点按多半
+///   落在气泡内的富文本上被其手势吃掉，实际永远看不到；
 /// - `leadingWidget` 展示对方头像（自己的消息不传，保持右对齐）；
 /// - `headerWidget` 在消息间隔超过 [kChatTimeDividerGap] 时插入居中时间条。
-class _ChatMessageRow extends StatefulWidget {
+class _ChatMessageRow extends StatelessWidget {
   final Message message;
   final int index;
   final Animation<double> animation;
@@ -1030,107 +1018,56 @@ class _ChatMessageRow extends StatefulWidget {
   /// 是否在消息上方插入时间分隔条（见 [_ChatPageState._showTimeDivider]）。
   final bool showTimeDivider;
 
+  /// 是否为自己发送（决定时间戳与气泡的左右对齐）。
+  final bool isSentByMe;
+
   final Widget child;
 
   const _ChatMessageRow({
     required this.message,
     required this.index,
     required this.animation,
+    required this.isSentByMe,
+    required this.child,
     this.isRemoved,
     this.groupStatus,
     this.avatar,
     this.showTimeDivider = false,
-    required this.child,
   });
-
-  @override
-  State<_ChatMessageRow> createState() => _ChatMessageRowState();
-}
-
-class _ChatMessageRowState extends State<_ChatMessageRow> {
-  /// 指针是否悬停在当前消息上（桌面端用；触屏不产生 hover 事件）。
-  bool _hovering = false;
-
-  /// 是否已点按钉住时间戳（触屏端用；再点一次取消）。
-  bool _pinnedByTap = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final time = widget.message.resolvedTime;
-    return MouseRegion(
-      onEnter: (_) => _setHovering(true),
-      onExit: (_) => _setHovering(false),
-      // 触屏没有 hover：点按气泡切换时间戳显隐。`translucent` 只参与命中、
-      // 不拦截子级——气泡内部若自带手势识别器，仍由子级优先。
-      child: GestureDetector(
-        behavior: HitTestBehavior.translucent,
-        onTap: _togglePinnedByTap,
-        child: _ChatTimeScope(
-          showTime: _hovering || _pinnedByTap,
-          child: ChatMessage(
-            message: widget.message,
-            index: widget.index,
-            animation: widget.animation,
-            isRemoved: widget.isRemoved,
-            groupStatus: widget.groupStatus,
-            leadingWidget: widget.avatar,
-            headerWidget: widget.showTimeDivider && time != null
-                ? _TimeDivider(time: time)
-                : null,
-            child: widget.child,
-          ),
-        ),
-      ),
-    );
-  }
-
-  void _setHovering(bool value) {
-    if (_hovering == value) return;
-    setState(() => _hovering = value);
-  }
-
-  /// 点按气泡：钉住 / 取消钉住时间戳。
-  void _togglePinnedByTap() => setState(() => _pinnedByTap = !_pinnedByTap);
-}
-
-/// 消息时间戳显隐作用域：把 [_ChatMessageRow] 的显隐状态传给子级气泡，
-/// 让气泡内部的时间戳无需各自维护状态。
-///
-/// 显隐条件 = 桌面端鼠标悬停 **或** 触屏端点按气泡钉住。
-class _ChatTimeScope extends InheritedWidget {
-  final bool showTime;
-
-  const _ChatTimeScope({required this.showTime, required super.child});
-
-  /// 读取当前消息的时间戳是否应显示；不在消息内（无作用域）时视为不显示。
-  static bool of(BuildContext context) =>
-      context.dependOnInheritedWidgetOfExactType<_ChatTimeScope>()?.showTime ??
-      false;
-
-  @override
-  bool updateShouldNotify(_ChatTimeScope oldWidget) =>
-      showTime != oldWidget.showTime;
-}
-
-/// 消息时间戳：默认完全透明（**占位不变，不引起布局跳动**），需要时淡入。
-///
-/// 显示条件见 [_ChatTimeScope]：桌面端悬停，或触屏端点按气泡钉住。
-class _MessageTimeText extends StatelessWidget {
-  final DateTime time;
-
-  const _MessageTimeText(this.time);
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AnimatedOpacity(
-      opacity: _ChatTimeScope.of(context) ? 1 : 0,
-      duration: const Duration(milliseconds: 150),
-      child: Text(
-        _fmtFullTime(time),
-        style: theme.textTheme.labelSmall?.copyWith(
-          color: theme.colorScheme.outline,
-        ),
+    final time = message.resolvedTime;
+    return ChatMessage(
+      message: message,
+      index: index,
+      animation: animation,
+      isRemoved: isRemoved,
+      groupStatus: groupStatus,
+      leadingWidget: avatar,
+      headerWidget: showTimeDivider && time != null
+          ? _TimeDivider(time: time)
+          : null,
+      // 时间戳挂在气泡**外**：Column 里排在内层气泡之下。
+      child: Column(
+        crossAxisAlignment: isSentByMe
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          child,
+          if (time != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                _fmtFullTime(time),
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }

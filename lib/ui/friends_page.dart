@@ -271,90 +271,105 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
   /// 工具条位于列表上方的 Column 中，必须是不透明实心条：透明背景会让下方
   /// 内容透出（"遮不住卡片"）。用页面底色铺底，保持与页面视觉无缝。
   Widget _buildToolbar(ThemeData theme, int online, int total) {
+    // 搜索框：高度随系统字号缩放，避免大字号下输入文字被裁切。
+    final searchField = SizedBox(
+      height: MediaQuery.textScalerOf(context).scale(36),
+      child: TextField(
+        onChanged: (v) => setState(() => _search = v),
+        decoration: InputDecoration(
+          hintText: '搜索好友昵称 / 迷你号…',
+          isDense: true,
+          prefixIcon: const Icon(Icons.search, size: 18),
+          suffixIcon: _search.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.clear, size: 16),
+                  onPressed: () => setState(() => _search = ''),
+                ),
+          contentPadding: const EdgeInsets.symmetric(
+            vertical: 6,
+            horizontal: 8,
+          ),
+        ),
+      ),
+    );
+    final controls = <Widget>[
+      Text(
+        '在线 $online / $total',
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+      IconButton(
+        tooltip: '刷新',
+        visualDensity: adaptiveDensity(context),
+        icon: const Icon(Icons.refresh, size: 18),
+        onPressed: () => ref.read(chatServiceProvider).loadSessions(),
+      ),
+      if (_cat != _FriendCat.group) ...[
+        const SizedBox(width: 4),
+        FilterChip(
+          visualDensity: adaptiveDensity(context),
+          label: const Text('只看在线', style: TextStyle(fontSize: 12)),
+          selected: _onlyOnline,
+          onSelected: (v) => setState(() => _onlyOnline = v),
+        ),
+      ],
+    ];
+    final sortButton = PopupMenuButton<_SortMode>(
+      tooltip: '排序方式',
+      onSelected: (m) => setState(() => _sort = m),
+      itemBuilder: (ctx) => [
+        for (final m in _SortMode.values)
+          PopupMenuItem(
+            value: m,
+            child: Row(
+              children: [
+                if (m == _sort)
+                  Icon(
+                    Icons.check,
+                    size: 16,
+                    color: theme.colorScheme.primary,
+                  )
+                else
+                  const SizedBox(width: 16),
+                const SizedBox(width: 8),
+                Text(m.label),
+              ],
+            ),
+          ),
+      ],
+      child: Chip(
+        visualDensity: adaptiveDensity(context),
+        avatar: const Icon(Icons.sort, size: 16),
+        label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
+      ),
+    );
+
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        child: Row(
-          children: [
-            Text(
-              '在线 $online / $total',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
+        // 手机（紧凑宽度）：控件一行、搜索框独占下一行整宽。此前控件与搜索框全挤在
+        // 同一个 Row 里，控件固定占掉近 300dp，搜索框只剩百来 dp 被挤到角落。
+        child: isCompactWidth(context)
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(children: [...controls, const Spacer(), sortButton]),
+                  const SizedBox(height: 8),
+                  searchField,
+                ],
+              )
+            : Row(
+                children: [
+                  ...controls,
+                  const SizedBox(width: 8),
+                  sortButton,
+                  const SizedBox(width: 8),
+                  Expanded(child: searchField),
+                ],
               ),
-            ),
-            IconButton(
-              tooltip: '刷新',
-              visualDensity: adaptiveDensity(context),
-              icon: const Icon(Icons.refresh, size: 18),
-              onPressed: () => ref.read(chatServiceProvider).loadSessions(),
-            ),
-            if (_cat != _FriendCat.group) ...[
-              const SizedBox(width: 4),
-              FilterChip(
-                visualDensity: adaptiveDensity(context),
-                label: const Text('只看在线', style: TextStyle(fontSize: 12)),
-                selected: _onlyOnline,
-                onSelected: (v) => setState(() => _onlyOnline = v),
-              ),
-            ],
-            const SizedBox(width: 8),
-            PopupMenuButton<_SortMode>(
-              tooltip: '排序方式',
-              onSelected: (m) => setState(() => _sort = m),
-              itemBuilder: (ctx) => [
-                for (final m in _SortMode.values)
-                  PopupMenuItem(
-                    value: m,
-                    child: Row(
-                      children: [
-                        if (m == _sort)
-                          Icon(
-                            Icons.check,
-                            size: 16,
-                            color: theme.colorScheme.primary,
-                          )
-                        else
-                          const SizedBox(width: 16),
-                        const SizedBox(width: 8),
-                        Text(m.label),
-                      ],
-                    ),
-                  ),
-              ],
-              child: Chip(
-                visualDensity: adaptiveDensity(context),
-                avatar: const Icon(Icons.sort, size: 16),
-                label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: SizedBox(
-                // 高度随系统字号缩放，避免大字号下输入文字被裁切。
-                height: MediaQuery.textScalerOf(context).scale(36),
-                child: TextField(
-                  onChanged: (v) => setState(() => _search = v),
-                  decoration: InputDecoration(
-                    hintText: '搜索好友昵称 / 迷你号…',
-                    isDense: true,
-                    prefixIcon: const Icon(Icons.search, size: 18),
-                    suffixIcon: _search.isEmpty
-                        ? null
-                        : IconButton(
-                            icon: const Icon(Icons.clear, size: 16),
-                            onPressed: () => setState(() => _search = ''),
-                          ),
-                    contentPadding: const EdgeInsets.symmetric(
-                      vertical: 6,
-                      horizontal: 8,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
       ),
     );
   }
