@@ -50,7 +50,8 @@ class ChatPage extends ConsumerStatefulWidget {
   ConsumerState<ChatPage> createState() => _ChatPageState();
 }
 
-class _ChatPageState extends ConsumerState<ChatPage> {
+class _ChatPageState extends ConsumerState<ChatPage>
+    with WidgetsBindingObserver {
   bool _historyLoaded = false;
   final TextEditingController _composerController = TextEditingController();
 
@@ -78,6 +79,7 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     _controller = _bridge.controllerFor(widget.type, widget.sessionId);
     // 提前持有：Riverpod 3.x 禁止在 dispose 中再访问 ref。
     _service = ref.read(chatServiceProvider);
+    WidgetsBinding.instance.addObserver(this);
     // 进入会话：登记为「正在查看」并（默认）标记已读。
     // 登记后，停留期间到达的消息不再累加未读；离开时 [dispose] 再补一次已读，
     // 保证返回列表后红点一定消掉。由「进入会话自动已读」设置控制（默认开启）。
@@ -124,8 +126,29 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     });
   }
 
+  /// 前后台切换：退到后台就不再算「正在查看」，否则后台期间到达的消息不会
+  /// 计入未读、回前台也不会亮红点（用户可能真漏消息）。回到前台重新登记。
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _service.setViewing(
+          widget.type,
+          widget.sessionId,
+          autoRead: _autoRead,
+        );
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _service.setViewing(null, null, autoRead: false);
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        break;
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // 离开会话：清空「正在查看」并把刚在看的会话补标已读 —— 否则停留期间到达的
     // 消息会一直留在未读数里，返回列表后红点消不掉（见 [ChatService.setViewing]）。
     _service.setViewing(null, null, autoRead: _autoRead);
