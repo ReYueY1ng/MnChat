@@ -18,6 +18,7 @@ import '../core/services/partner.dart';
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
+import '../core/utils/log.dart';
 
 /// ChatService 单例（注入本地 SQLite 用于持久化；main() 中 override databaseProvider）。
 final chatServiceProvider = Provider<ChatService>((ref) {
@@ -385,25 +386,45 @@ class MyAvatarInfo {
   });
 }
 
-/// 本人头像资料缓存：与资料页同源（DIY 头像 → 资料头像 → 头像本体 type/id）。
+/// 本人头像资料缓存：与资料页/好友资料同源。
 ///
-/// 各接口独立 try/catch，任一失败只回退昵称首字占位，不影响聊天页展示。
-/// `FutureProvider` 自带缓存 —— 聊天页逐条消息读取不会重复发起请求。
+/// 走的是**好友资料已在用的那套接口**（`getPersonCenterHeadInfos`，一次同时返回
+/// DIY 自定义头像与头像本体 type/id；其中 `isSelf` 分支会放行本人审核中的
+/// `pre_url`），头像框另由 `getMyProfile()` 下发（`HeadSlot` 里没有框）。
+/// 失败不再静默吞掉 —— 写 warn 日志，便于从 logcat 定位成因为何头像/框没出来。
+/// `FutureProvider` 自带缓存，聊天页逐条消息读取不会重复请求。
 final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   final auth = ref.watch(authProvider).auth;
   final name = auth?.name ?? '';
   if (auth == null) return MyAvatarInfo(name: name);
   final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+  const tag = 'myAvatarInfo';
 
   String? avatarUrl;
-  int? frameId;
   int? headType;
   int? headId;
+  int? frameId;
   try {
-    // DIY 自定义头像优先（游戏主界面 / 资料页同源）
-    avatarUrl = (await client.getPersonCenterHeadInfo([auth.uin]))[auth.uin];
-  } catch (_) {
-    // 忽略：DIY 头像拉取失败时回退批量资料头像
+    final slot = (await client.getPersonCenterHeadInfos([auth.uin]))[auth.uin];
+    if (slot != null) {
+      avatarUrl = slot.diyUrl;
+      headType = slot.type;
+      headId = slot.id;
+    }
+  } catch (e) {
+    log.warn('getPersonCenterHeadInfos 失败: $e', tag: tag);
+  }
+  // 头像本体兜底：个别账号该端点不下发 type/id 时用 getMyHeadInfo 补。
+  if (headType == null || headId == null) {
+    try {
+      final head = await client.getMyHeadInfo();
+      if (head != null) {
+        headType ??= head.type;
+        headId ??= head.id;
+      }
+    } catch (e) {
+      log.warn('getMyHeadInfo 失败: $e', tag: tag);
+    }
   }
   try {
     final profile = await client.getMyProfile();
@@ -411,18 +432,14 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
       avatarUrl ??= profile.avatarUrl;
       frameId = profile.headFrameId;
     }
-  } catch (_) {
-    // 忽略：资料拉取失败时仅展示占位头像
+  } catch (e) {
+    log.warn('getMyProfile 失败: $e', tag: tag);
   }
-  try {
-    final head = await client.getMyHeadInfo();
-    if (head != null) {
-      headType = head.type;
-      headId = head.id;
-    }
-  } catch (_) {
-    // 忽略：头像本体拉取失败时仅展示占位头像
-  }
+  log.debug(
+    '本人头像资料: head=$headType/$headId frame=$frameId '
+    'avatar=${avatarUrl == null || avatarUrl.isEmpty ? "无" : "有"}',
+    tag: tag,
+  );
   return MyAvatarInfo(
     name: name,
     avatarUrl: avatarUrl,

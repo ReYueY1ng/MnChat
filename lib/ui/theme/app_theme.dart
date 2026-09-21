@@ -57,6 +57,13 @@ ThemeData buildAppTheme(Brightness brightness, {Color? seedColor}) {
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
+      // 标题栏整体压小一档：默认 M3 的 56 高度 + 22px 标题在手机上偏大。
+      toolbarHeight: 48,
+      titleTextStyle: TextStyle(
+        fontSize: 18,
+        fontWeight: FontWeight.w600,
+        color: scheme.onSurface,
+      ),
     ),
     cardTheme: CardThemeData(
       elevation: 0,

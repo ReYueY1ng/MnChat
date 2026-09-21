@@ -306,15 +306,16 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         icon: const Icon(Icons.refresh, size: 18),
         onPressed: () => ref.read(chatServiceProvider).loadSessions(),
       ),
-      if (_cat != _FriendCat.group) ...[
-        const SizedBox(width: 4),
+    ];
+    // 「只看在线」单独一份：窄屏时要和排序一起靠右，宽屏时紧跟刷新按钮。
+    final onlineOnlyChip = <Widget>[
+      if (_cat != _FriendCat.group)
         FilterChip(
           visualDensity: adaptiveDensity(context),
           label: const Text('只看在线', style: TextStyle(fontSize: 12)),
           selected: _onlyOnline,
           onSelected: (v) => setState(() => _onlyOnline = v),
         ),
-      ],
     ];
     final sortButton = PopupMenuButton<_SortMode>(
       tooltip: '排序方式',
@@ -356,7 +357,16 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             ? Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Row(children: [...controls, const Spacer(), sortButton]),
+                  Row(
+                    children: [
+                      ...controls,
+                      // 窄屏：只看在线 + 排序都推到右边。
+                      const Spacer(),
+                      ...onlineOnlyChip,
+                      const SizedBox(width: 8),
+                      sortButton,
+                    ],
+                  ),
                   const SizedBox(height: 8),
                   searchField,
                 ],
@@ -364,6 +374,10 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             : Row(
                 children: [
                   ...controls,
+                  if (onlineOnlyChip.isNotEmpty) ...[
+                    const SizedBox(width: 4),
+                    ...onlineOnlyChip,
+                  ],
                   const SizedBox(width: 8),
                   sortButton,
                   const SizedBox(width: 8),

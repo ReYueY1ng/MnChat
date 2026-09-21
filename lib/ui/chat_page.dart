@@ -761,13 +761,6 @@ class _InlineEmojiBubble extends StatelessWidget {
   }
 }
 
-/// 完整时间戳：`yyyy-M-d HH:mm:ss`（对齐原版气泡上方时间）。
-String _fmtFullTime(DateTime dt) {
-  final l = dt.toLocal();
-  String p(int v) => v.toString().padLeft(2, '0');
-  return '${l.year}-${p(l.month)}-${p(l.day)} ${p(l.hour)}:${p(l.minute)}:${p(l.second)}';
-}
-
 /// 时间分隔条文案：同一天 → `HH:mm`，跨天 → `MM-DD HH:mm`。
 ///
 /// 与 `session_list_page.dart` / `friend_request_page.dart` 的 `_fmtTime`
@@ -1103,7 +1096,6 @@ class _ChatMessageRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final time = message.resolvedTime;
     return ChatMessage(
       message: message,
@@ -1118,26 +1110,9 @@ class _ChatMessageRow extends StatelessWidget {
       headerWidget: showTimeDivider && time != null
           ? _TimeDivider(time: time)
           : null,
-      // 时间戳挂在气泡**外**：Column 里排在内层气泡之下。
-      child: Column(
-        crossAxisAlignment: isSentByMe
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          child,
-          if (time != null)
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text(
-                _fmtFullTime(time),
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.outline,
-                ),
-              ),
-            ),
-        ],
-      ),
+      // 气泡下方不再常显灰字时间戳（观感差）。跨段的时间信息仍由 headerWidget
+      // 的居中时间条承载。
+      child: child,
     );
   }
 }
