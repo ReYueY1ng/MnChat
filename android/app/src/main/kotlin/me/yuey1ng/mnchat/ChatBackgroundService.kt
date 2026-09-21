@@ -9,68 +9,216 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.IBinder
+import android.util.Log
 
 /**
- * 前台服务：后台保持进程活跃（接收 ChatPush 推送），并承载新消息通知。
+ * 前台服务：应用退到后台时保持进程活跃（持续接收 ChatPush 推送），并承载消息通知。
  *
- * 由 MainActivity 通过 MethodChannel 启动/停止。Flutter 侧推送到达时调用
- * showNotification() 弹出系统通知（即使应用在后台也能收到）。
+ * 与旧实现的三点关键区别：
+ * 1. **只在后台运行**：由 Dart 侧在应用退到后台时 start、回到前台时 stop ——
+ *    所以常驻通知只在后台出现，启动应用时通知栏是干净的。旧实现一进主界面就挂
+ *    常驻通知（keepAlive 默认 true），用户反馈「哪个聊天软件会这样干」。
+ * 2. **消息通知按会话区分**：通知 id 用 `sessionKey.hashCode()`，不同会话可以并存，
+ *    不再全部挤在 id=1 上互相覆盖（旧实现永远只留最后一条）。
+ * 3. **两个通知渠道**：消息走 [CHANNEL_MESSAGES]（HIGH，有提示音），常驻走
+ *    [CHANNEL_SERVICE]（MIN，无声、无角标）—— 常驻不会像消息那样打扰。
+ *
+ * 所有对外方法自带 try/catch：Android 12+ 从后台启动前台服务会抛
+ * `ForegroundServiceStartNotAllowedException`，此处降级为「启动失败」而绝不崩溃。
  */
 class ChatBackgroundService : Service() {
     companion object {
         const val ACTION_START = "me.yuey1ng.mnchat.action.START"
         const val ACTION_STOP = "me.yuey1ng.mnchat.action.STOP"
-        const val CHANNEL_ID = "mnchat_messages"
-        const val NOTIFICATION_ID = 1
 
-        /** 是否已启动 */
+        /** 消息通知渠道（有提示音）。 */
+        const val CHANNEL_MESSAGES = "mnchat_messages"
+
+        /** 常驻服务渠道（无声、无角标、最低优先级）。 */
+        const val CHANNEL_SERVICE = "mnchat_service"
+
+        /** 常驻通知 id；消息通知用 sessionKey.hashCode()，需避开它。 */
+        const val SERVICE_NOTIFICATION_ID = 1
+
+        /** 通知点击时随 Intent 带回的会话 key（供 Dart 侧跳转到对应会话）。 */
+        const val EXTRA_SESSION_KEY = "mnchat_session_key"
+
+        private const val TAG = "MnChat"
+
+        /** 消息通知的聚合组名（同组的多会话通知在通知栏折叠成一堆）。 */
+        private const val GROUP_KEY = "mnchat.messages"
+
+        /** 已弹出的消息通知 id（用于「全部清除」；不含常驻通知）。 */
+        private val messageIds = mutableSetOf<Int>()
+
         var isRunning = false
             private set
 
-        fun start(context: Context) {
-            if (isRunning) return
-            val intent = Intent(context, ChatBackgroundService::class.java).setAction(ACTION_START)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
+        /** 由 sessionKey 推导通知 id，并避开常驻通知 id（避免互相顶掉）。 */
+        fun messageIdFor(sessionKey: String): Int {
+            val id = sessionKey.hashCode()
+            return if (id == SERVICE_NOTIFICATION_ID) id + 1 else id
+        }
+
+        /**
+         * 启动前台服务。
+         *
+         * @return 是否成功。Android 12+ 在后台启动可能被系统拒绝（返回 false），
+         *   此时不崩，退化为「进程活着就能收消息」。
+         */
+        fun start(context: Context): Boolean {
+            return try {
+                val intent = Intent(context, ChatBackgroundService::class.java)
+                    .setAction(ACTION_START)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(intent)
+                } else {
+                    context.startService(intent)
+                }
+                true
+            } catch (e: Exception) {
+                Log.w(TAG, "启动前台服务失败: $e")
+                false
             }
         }
 
+        /** 停止前台服务（常驻通知随之移除）。 */
         fun stop(context: Context) {
-            if (!isRunning) return
-            context.stopService(Intent(context, ChatBackgroundService::class.java))
+            try {
+                context.stopService(Intent(context, ChatBackgroundService::class.java))
+            } catch (e: Exception) {
+                Log.w(TAG, "停止前台服务失败: $e")
+            }
         }
 
-        /** 弹出新消息通知（应用前台时也会发，由 Dart 侧控制是否需要）。 */
-        fun showNotification(context: Context, title: String, text: String, sessionKey: String) {
-            val nm = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            createChannel(context, nm)
-            val intent = context.packageManager.getLaunchIntentForPackage(context.packageName)
-            val pending = PendingIntent.getActivity(
+        /** 建好两个渠道（幂等；API < 26 无渠道概念）。 */
+        fun createChannels(context: Context) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_MESSAGES,
+                        "聊天消息",
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply { description = "好友 / 群聊新消息" }
+                )
+                nm.createNotificationChannel(
+                    NotificationChannel(
+                        CHANNEL_SERVICE,
+                        "后台运行",
+                        NotificationManager.IMPORTANCE_MIN
+                    ).apply {
+                        description = "退到后台时保持连接（常驻通知）"
+                        setShowBadge(false)
+                    }
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "创建通知渠道失败: $e")
+            }
+        }
+
+        /** 兼容 API < 26 的通知构造（带 channel 的构造在低版本会崩）。 */
+        private fun builder(context: Context, channelId: String): Notification.Builder =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Notification.Builder(context, channelId)
+            } else {
+                @Suppress("DEPRECATION")
+                Notification.Builder(context)
+            }
+
+        /** 构造「点击后带着 sessionKey 打开应用」的 PendingIntent。 */
+        private fun launchPending(
+            context: Context,
+            sessionKey: String,
+            requestCode: Int
+        ): PendingIntent? {
+            val intent = context.packageManager
+                .getLaunchIntentForPackage(context.packageName) ?: return null
+            intent.putExtra(EXTRA_SESSION_KEY, sessionKey)
+            // singleTop + 该 flag：应用已在运行时点通知走 onNewIntent（热启动），
+            // 未运行时由启动 Intent 带回（冷启动）。
+            intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            return PendingIntent.getActivity(
                 context,
-                sessionKey.hashCode(),
+                requestCode,
                 intent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            val notification = Notification.Builder(context, CHANNEL_ID)
-                .setSmallIcon(android.R.drawable.stat_notify_chat)
-                .setContentTitle(title)
-                .setContentText(text)
-                .setContentIntent(pending)
-                .setAutoCancel(true)
-                .build()
-            nm.notify(NOTIFICATION_ID, notification)
         }
 
-        private fun createChannel(context: Context, nm: NotificationManager) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    CHANNEL_ID,
-                    "聊天消息",
-                    NotificationManager.IMPORTANCE_DEFAULT
-                )
-                nm.createNotificationChannel(channel)
+        /**
+         * 弹出一条会话消息通知。
+         *
+         * 同一会话重复收到时原地更新那一条；不同会话各自一条、并存不覆盖。
+         *
+         * @param lines 该会话最近若干条正文，用 InboxStyle 展开显示（最多 5 条）。
+         */
+        fun showMessageNotification(
+            context: Context,
+            sessionKey: String,
+            title: String,
+            text: String,
+            lines: List<String>,
+            group: Boolean
+        ) {
+            try {
+                createChannels(context)
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+                val id = messageIdFor(sessionKey)
+                val nb = builder(context, CHANNEL_MESSAGES)
+                    .setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle(title)
+                    .setContentText(text)
+                    .setAutoCancel(true)
+                    .setGroup(GROUP_KEY)
+                launchPending(context, sessionKey, id)?.let { nb.setContentIntent(it) }
+                if (lines.size > 1) {
+                    val style = Notification.InboxStyle().setBigContentTitle(title)
+                    lines.take(5).forEach { style.addLine(it.take(80)) }
+                    nb.setStyle(style)
+                } else {
+                    nb.setStyle(Notification.BigTextStyle().bigText(text))
+                }
+                nm.notify(id, nb.build())
+                synchronized(messageIds) { messageIds.add(id) }
+                if (group) {
+                    // 群聊与好友分开成两个通知栏小组，便于折叠（失败不影响通知本身）
+                    nm.createNotificationChannelGroup(
+                        android.app.NotificationChannelGroup("mnchat.groups", "群聊")
+                    )
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "弹出通知失败: $e")
+            }
+        }
+
+        /** 取消某个会话的通知。 */
+        fun cancelMessageNotification(context: Context, sessionKey: String) {
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+                val id = messageIdFor(sessionKey)
+                nm.cancel(id)
+                synchronized(messageIds) { messageIds.remove(id) }
+            } catch (e: Exception) {
+                Log.w(TAG, "取消通知失败: $e")
+            }
+        }
+
+        /** 取消全部消息通知（**不动**常驻通知）。 */
+        fun cancelAllMessageNotifications(context: Context) {
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+                synchronized(messageIds) {
+                    messageIds.forEach { nm.cancel(it) }
+                    messageIds.clear()
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "清空通知失败: $e")
             }
         }
     }
@@ -78,35 +226,49 @@ class ChatBackgroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action
-        if (action == ACTION_STOP) {
-            stopForeground(STOP_FOREGROUND_REMOVE)
+        if (intent?.action == ACTION_STOP) {
+            removeForeground()
             stopSelf()
             return START_NOT_STICKY
         }
-        startInForeground()
-        return START_STICKY
+        return try {
+            startInForeground()
+            START_STICKY
+        } catch (e: Exception) {
+            // 前台服务启动被拒（Android 12+ 后台限制）/ 通知渠道异常：
+            // 收起服务，不影响应用本体运行。
+            Log.w(TAG, "前台服务启动失败: $e")
+            stopSelf()
+            START_NOT_STICKY
+        }
     }
 
+    /** 常驻通知：低优先级渠道、Ongoing、文案中性。 */
     private fun startInForeground() {
-        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        ChatBackgroundService.createChannel(this, nm)
-        val launch = packageManager.getLaunchIntentForPackage(packageName)
-        val pending = PendingIntent.getActivity(
-            this,
-            0,
-            launch,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-        val notification = Notification.Builder(this, CHANNEL_ID)
+        createChannels(this)
+        val nb = builder(this, CHANNEL_SERVICE)
             .setSmallIcon(android.R.drawable.stat_notify_chat)
-            .setContentTitle("MnChat 运行中")
-            .setContentText("正在后台接收聊天消息")
-            .setContentIntent(pending)
+            .setContentTitle("MnChat 后台运行中")
+            .setContentText("保持连接以接收消息")
             .setOngoing(true)
-            .build()
-        startForeground(NOTIFICATION_ID, notification)
+        launchPending(this, "", SERVICE_NOTIFICATION_ID)?.let { nb.setContentIntent(it) }
+        startForeground(SERVICE_NOTIFICATION_ID, nb.build())
         isRunning = true
+    }
+
+    /** 移除前台状态与常驻通知（兼容 API < 24）。 */
+    private fun removeForeground() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+            } else {
+                @Suppress("DEPRECATION")
+                stopForeground(true)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "移除前台通知失败: $e")
+        }
+        isRunning = false
     }
 
     override fun onDestroy() {

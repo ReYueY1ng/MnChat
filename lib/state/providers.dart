@@ -14,6 +14,7 @@ import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart';
 import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
+import '../core/services/notification_service.dart';
 import '../core/services/partner.dart';
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
@@ -353,6 +354,13 @@ class KeepAliveNotifier extends Notifier<bool> {
 /// 已登录用户 uin（供聊天页判断消息方向）。
 ///
 /// 必须从 [authProvider]（Notifier）派生而非直接读 chatServiceProvider：
+/// 通知服务：按平台选择实现（Android 原生 / Linux dbus / 其他 Noop）。
+///
+/// 单元测试环境不会碰到原生通道或 dbus —— Noop 实现什么都不做、也不抛异常。
+final notificationServiceProvider = Provider<NotificationService>(
+  (ref) => createNotificationService(),
+);
+
 /// 直接 `watch(chatServiceProvider).myUin` 时，依赖（单例 ChatService 实例）
 /// 永不变化 → 切账号后 provider 不重建、永远返回**旧账号** uin，导致
 /// newMsg 的 authorId 与新 currentUserId 不匹配，flutter_chat_ui 把"我发的"

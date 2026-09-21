@@ -40,12 +40,24 @@ class _MainShellState extends ConsumerState<MainShell> {
     ref.listenManual(keepAliveProvider, (_, next) => _applyKeepAlive(next));
   }
 
+  /// 后台保活设置变化：这里只负责「关掉时立刻停」。
+  ///
+  /// 前台服务**不再在这里启动** —— 应用在前台时通知栏必须是干净的（旧实现一进
+  /// 主界面就挂常驻通知「MnChat 运行中」，用户明确不接受）。启动时机交给
+  /// `MnChatApp` 的生命周期回调：退到后台才 start、回到前台就 stop。
   void _applyKeepAlive(bool enabled) {
-    if (enabled) {
-      NativeBridge.startBackgroundService();
-    } else {
-      NativeBridge.stopBackgroundService();
+    final svc = ref.read(notificationServiceProvider);
+    if (!enabled) {
+      svc.setBackgroundMode(false);
+      return;
     }
+    // 设置页在前台打开，正常不会命中；稳妥起见按当前生命周期判断一次。
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final background =
+        lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.detached;
+    svc.setBackgroundMode(background);
   }
 
   void _switchTab(int index) {

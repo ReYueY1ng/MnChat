@@ -6,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/models/messages.dart';
 import 'core/services/app_lock.dart';
-import 'core/services/chat_service.dart' show ChatEvent;
-import 'core/services/native_bridge.dart';
+import 'core/services/chat_service.dart' show ChatEvent, ChatService;
+import 'core/services/notification_service.dart';
 import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
@@ -87,6 +87,21 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 后台通知订阅（dispose 时必须取消，否则泄漏）。
   StreamSubscription<ChatEvent>? _notifySub;
 
+  /// 通知服务（按平台选择实现）；dispose 时释放。
+  NotificationService? _notifications;
+
+  /// 通知点击订阅（点通知 → 打开对应会话）。
+  StreamSubscription<String>? _tapSub;
+
+  /// 每个会话最近的若干条正文，供通知折叠面板展示。
+  final Map<String, List<String>> _recentTexts = {};
+
+  /// 登录前点到通知：先记住 key，登录成功后补开。
+  String? _pendingTapSessionKey;
+
+  /// 通知权限是否已申请过（只申请一次）。
+  bool _notifyPermissionAsked = false;
+
   @override
   void initState() {
     super.initState();
@@ -98,6 +113,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       if (prev?.isLoggedIn == true && next.isLoggedIn == false && mounted) {
         if (_autoLoginAvailable) setState(() => _autoLoginAvailable = false);
       }
+      // 登录成功：申请通知权限（Android 13+）并补开「登录前点击的通知」
+      if (prev?.isLoggedIn != true && next.isLoggedIn) _afterLogin();
     });
     // 设置页开关变化即时同步（关闭时立刻取消锁定态）
     ref.listenManual(lockEnabledProvider, (_, next) {
@@ -124,14 +141,82 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       _lockEnabled = lockOn;
       _locked = hasPin;
     });
-    // 后台新消息通知监听
-    _subscribeNotifications();
+    // 后台新消息通知监听（含通知点击跳转 / 平台通知实现初始化）
+    await _initNotifications();
     // 等设置读取完成后再尝试自动登录，消除与启动页的竞态
     await _tryAutoLogin();
   }
 
-  /// 订阅 ChatService 事件流：收新消息 → 系统通知（仅后台时弹，避免打扰前台）。
-  void _subscribeNotifications() {
+  /// 初始化通知服务，并接上事件流与点击回调。
+  Future<void> _initNotifications() async {
+    final svc = ref.read(notificationServiceProvider);
+    _notifications = svc;
+    await svc.init();
+    // 点击通知 → 打开对应会话（热启动）
+    _tapSub = svc.taps.listen(_openSessionFromKey);
+    // 冷启动：应用是被点击通知拉起来的 → 直接进那个会话
+    final initial = await svc.initialTapSessionKey();
+    if (initial != null && initial.isNotEmpty) _openSessionFromKey(initial);
+    _subscribeNotifications(svc);
+  }
+
+  /// 点击通知 → 打开对应会话（key 形如 `friend_123` / `group_456`）。
+  void _openSessionFromKey(String key) {
+    final sep = key.lastIndexOf('_');
+    if (sep <= 0) return;
+    final id = int.tryParse(key.substring(sep + 1));
+    if (id == null || id == 0) return;
+    // 尚未登录（冷启动早期）→ 先记住，登录成功后补开
+    if (!mounted || !ref.read(authProvider).isLoggedIn) {
+      _pendingTapSessionKey = key;
+      return;
+    }
+    final type = key.substring(0, sep) == ChatSessionType.group.name
+        ? ChatSessionType.group
+        : ChatSessionType.friend;
+    ref.read(activeSessionProvider.notifier).open(type, id);
+  }
+
+  /// 登录成功后的通知相关动作：申请权限 + 补开「登录前点击的通知」。
+  void _afterLogin() {
+    if (!_notifyPermissionAsked) {
+      _notifyPermissionAsked = true;
+      // Android 13+ 必须在运行时申请，否则系统静默丢弃所有通知
+      unawaited(ref.read(notificationServiceProvider).requestPermission());
+    }
+    final pending = _pendingTapSessionKey;
+    if (pending != null) {
+      _pendingTapSessionKey = null;
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _openSessionFromKey(pending),
+      );
+    }
+  }
+
+  /// 是否处于「用户看不到界面」的状态。
+  ///
+  /// **`inactive` 不算后台**：Android 上它只表示「可见但失焦」（系统弹窗、下拉
+  /// 通知栏、切换任务都会触发），把它当后台正是「前台也在弹通知」的来源。
+  bool get _isBackground {
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    return lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.detached;
+  }
+
+  /// 前后台切换时同步保活：Android 只在后台启动前台服务（前台通知栏保持干净）。
+  void _syncBackgroundService(AppLifecycleState state) {
+    final svc = _notifications;
+    if (svc == null) return;
+    final background =
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached;
+    svc.setBackgroundMode(background && ref.read(keepAliveProvider));
+  }
+
+  /// 订阅 ChatService 事件流：仅**后台**弹系统通知，且按会话聚合。
+  void _subscribeNotifications(NotificationService svc) {
     final service = ref.read(chatServiceProvider);
     _notifySub?.cancel();
     _notifySub = service.eventStream.listen((event) {
@@ -144,28 +229,46 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
           ref.read(dndWindowProvider).contains(DateTime.now())) {
         return;
       }
-      final lifecycle = WidgetsBinding.instance.lifecycleState;
-      final inBackground =
-          lifecycle == AppLifecycleState.paused ||
-          lifecycle == AppLifecycleState.hidden ||
-          lifecycle == AppLifecycleState.detached ||
-          lifecycle == AppLifecycleState.inactive;
-      if (!inBackground) return; // 前台时由 UI 直接展示，不弹系统通知
-      // 「通知隐藏内容」开启时只提示有新消息，不泄露正文
+      // 前台不弹系统通知（UI 自己会展示）；inactive 不算后台
+      if (!_isBackground) return;
+
+      final key = '${event.sessionType.name}_${event.sessionId}';
       final hide = ref.read(hideNotifyContentProvider);
-      final name = hide
-          ? '你有一条新消息'
-          : (event.message.text.length > 30
-                ? '${event.message.text.substring(0, 30)}…'
-                : event.message.text);
-      NativeBridge.showNotification(
-        title: hide
-            ? 'MnChat'
-            : (event.sessionType == ChatSessionType.group ? '群聊新消息' : '新消息'),
-        text: name,
-        sessionKey: '${event.sessionType.name}_${event.sessionId}',
+      final raw = event.message.text;
+      // 该会话最近几条正文（隐私模式下不收集）
+      final recent = _recentTexts.putIfAbsent(key, () => <String>[]);
+      if (!hide && raw.isNotEmpty) {
+        recent.add(raw.length > 60 ? '${raw.substring(0, 60)}…' : raw);
+        if (recent.length > 5) recent.removeRange(0, recent.length - 5);
+      }
+      svc.showMessage(
+        MessageNotification(
+          sessionKey: key,
+          title: hide ? 'MnChat · 新消息' : _sessionNameOf(service, event),
+          text: hide
+              ? '你有一条新消息'
+              : (raw.isEmpty
+                    ? '新消息'
+                    : (raw.length > 30
+                          ? '${raw.substring(0, 30)}…'
+                          : raw)),
+          lines: hide ? const [] : List<String>.from(recent),
+          group: event.sessionType == ChatSessionType.group,
+        ),
       );
     });
+  }
+
+  /// 通知标题用的会话名；取不到时退化为「新消息」。
+  String _sessionNameOf(ChatService service, ChatEvent event) {
+    final isGroup = event.sessionType == ChatSessionType.group;
+    for (final s in service.sessions) {
+      if (s.type == event.sessionType && s.id == event.sessionId) {
+        final name = s.name.trim();
+        if (name.isNotEmpty) return isGroup ? '群聊 · $name' : name;
+      }
+    }
+    return isGroup ? '群聊新消息' : '新消息';
   }
 
   /// 自动登录：成功后进入会话页；失败/无凭据回登录页。
@@ -184,11 +287,17 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     WidgetsBinding.instance.removeObserver(this);
     _notifySub?.cancel();
     _notifySub = null;
+    _tapSub?.cancel();
+    _tapSub = null;
+    _notifications?.dispose();
+    _notifications = null;
     super.dispose();
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 前后台切换同步保活：只在后台挂前台服务，回到前台立刻摘掉常驻通知
+    _syncBackgroundService(state);
     // 回前台：若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
     if (state == AppLifecycleState.resumed) {
       ref.read(chatServiceProvider).ensureConnection();
