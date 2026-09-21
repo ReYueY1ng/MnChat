@@ -10,6 +10,7 @@ import '../core/emoticon.dart' show EmoticonImage;
 // 只取会话类型/会话模型：`messages.dart` 的 `ChatMessage` 与 flutter_chat_ui
 // 导出的消息组件同名，隐藏它以保证本文件里的 `ChatMessage` 指 UI 组件。
 import '../core/models/messages.dart' show ChatSession, ChatSessionType;
+import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart' show DynamicsClient;
 import '../core/services/rich_media.dart' show RichMedia;
 import '../core/storage/settings_store.dart' show SettingsKeys;
@@ -27,7 +28,10 @@ import 'widgets/rich_text_view.dart';
 const Duration kChatTimeDividerGap = Duration(minutes: 5);
 
 /// 消息行内头像半径（带头像框时槽位由 [headFrameSlotSize] 自动放大）。
-const double _kChatAvatarRadius = 16;
+const double _kChatAvatarRadius = 22;
+
+/// 气泡最大宽度占屏宽比例（原来 0.62 偏窄，手机上长句子折行过多）。
+const double _kBubbleMaxWidthFactor = 0.75;
 
 /// 聊天窗口（右侧）。
 class ChatPage extends ConsumerStatefulWidget {
@@ -57,6 +61,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// Riverpod 3.x 禁止在 State.dispose 中再访问 ref，必须提前持有。
   late final ChatBridge _bridge;
 
+  /// 同上：dispose 中要用它清空「正在查看的会话」并补标已读。
+  late final ChatService _service;
+
+  /// 「进入会话自动已读」设置解析结果；dispose 时据此决定是否补标已读。
+  bool _autoRead = true;
+
   /// 本会话的聊天控制器。在 [initState] 中一次性取得（[ChatBridge.controllerFor]
   /// 有创建/缓存副作用，不能在 build 中调用），build 直接复用。
   late final ChatController _controller;
@@ -66,23 +76,29 @@ class _ChatPageState extends ConsumerState<ChatPage> {
     super.initState();
     _bridge = ref.read(chatBridgeProvider);
     _controller = _bridge.controllerFor(widget.type, widget.sessionId);
-    // 进入会话时标记已读 + 拉取历史（仅首次，避免每次 build 重复触发）；
-    // 由「进入会话自动已读」设置控制（默认开启，关闭后保留未读状态）。
-    // 测试环境可能未注入 databaseProvider → 回退为直接标记已读。
+    // 提前持有：Riverpod 3.x 禁止在 dispose 中再访问 ref。
+    _service = ref.read(chatServiceProvider);
+    // 进入会话：登记为「正在查看」并（默认）标记已读。
+    // 登记后，停留期间到达的消息不再累加未读；离开时 [dispose] 再补一次已读，
+    // 保证返回列表后红点一定消掉。由「进入会话自动已读」设置控制（默认开启）。
+    // 测试环境可能未注入 databaseProvider → 回退为直接登记。
     try {
       ref
           .read(settingsProvider)
           .getBool(SettingsKeys.autoMarkRead, fallback: true)
           .then((auto) {
-            if (auto && mounted) {
-              ref
-                  .read(chatServiceProvider)
-                  .markRead(widget.type, widget.sessionId);
+            if (mounted) {
+              _autoRead = auto;
+              _service.setViewing(
+                widget.type,
+                widget.sessionId,
+                autoRead: auto,
+              );
             }
           })
           .catchError((Object _) {});
     } catch (_) {
-      ref.read(chatServiceProvider).markRead(widget.type, widget.sessionId);
+      _service.setViewing(widget.type, widget.sessionId);
     }
     // 加载快捷短语（用户可增删；失败/无存储环境保持默认，如 widget 测试）
     try {
@@ -110,6 +126,9 @@ class _ChatPageState extends ConsumerState<ChatPage> {
 
   @override
   void dispose() {
+    // 离开会话：清空「正在查看」并把刚在看的会话补标已读 —— 否则停留期间到达的
+    // 消息会一直留在未读数里，返回列表后红点消不掉（见 [ChatService.setViewing]）。
+    _service.setViewing(null, null, autoRead: _autoRead);
     // 释放本会话控制器，避免 ChatBridge 的控制器映射随会话开关累积泄漏。
     _bridge.release(widget.type, widget.sessionId);
     _composerController.dispose();
@@ -249,10 +268,12 @@ class _ChatPageState extends ConsumerState<ChatPage> {
                         isSentByMe: isSentByMe,
                         isRemoved: isRemoved,
                         groupStatus: groupStatus,
-                        // 对方消息带头像；自己的消息右对齐、不带头像。
-                        avatar: isSentByMe
-                            ? null
-                            : _avatarFor(message, sessions),
+                        // 双方都带头像：对方在气泡左侧，自己在右侧。
+                        avatar: _avatarFor(
+                          message,
+                          sessions,
+                          isSentByMe: isSentByMe,
+                        ),
                         // 与前一条间隔超过 [kChatTimeDividerGap] 时插入时间条。
                         showTimeDivider: _showTimeDivider(index, message),
                         child: child,
@@ -325,8 +346,28 @@ class _ChatPageState extends ConsumerState<ChatPage> {
   /// - 好友会话：会话快照（与 SessionListPage / FriendsPage 同一组字段）；
   /// - 群会话：ChatService 缓存的群成员资料，未缓存时退化为首字占位。
   /// 消息发送者一律按「个人」样式渲染（群成员同样使用头像框）。
-  Widget? _avatarFor(Message message, List<ChatSession> sessions) {
+  Widget? _avatarFor(
+    Message message,
+    List<ChatSession> sessions, {
+    required bool isSentByMe,
+  }) {
     if (message is SystemMessage) return null;
+    // 自己的消息：用本人资料（与资料页同源 —— DIY 头像 / 头像框 / 头像本体）。
+    // 尚未拉到或未登录时回退昵称首字占位，不阻塞气泡渲染。
+    if (isSentByMe) {
+      final info = ref.watch(myAvatarInfoProvider).asData?.value;
+      final ownName = info?.name ?? '';
+      final auth = ref.watch(authProvider).auth;
+      return AvatarView(
+        name: ownName.isNotEmpty ? ownName : (auth?.name ?? ''),
+        avatarUrl: info?.avatarUrl,
+        type: ChatSessionType.friend,
+        radius: _kChatAvatarRadius,
+        headType: info?.headType,
+        headId: info?.headId,
+        frameId: info?.frameId,
+      );
+    }
     final uin = int.tryParse(message.authorId) ?? 0;
     var name = message.authorId;
     String? avatarUrl;
@@ -658,13 +699,14 @@ class _InlineEmojiBubble extends StatelessWidget {
           SystemMessage m => m.text,
           _ => '',
         };
-    final maxWidth = MediaQuery.of(context).size.width * 0.62;
+    final maxWidth =
+        MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor;
     return Align(
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(maxWidth: maxWidth),
         child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
             color: isSentByMe
                 ? theme.colorScheme.primaryContainer
@@ -751,7 +793,8 @@ class _RichMediaBubble extends StatelessWidget {
       alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
       child: ConstrainedBox(
         constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.62,
+          maxWidth:
+              MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor,
         ),
         child: Container(
           margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
@@ -774,7 +817,7 @@ class _RichMediaBubble extends StatelessWidget {
   /// 无法解码 → 回退纯文本卡。
   Widget _plainText() {
     return Padding(
-      padding: const EdgeInsets.all(10),
+      padding: const EdgeInsets.all(12),
       child: Column(
         crossAxisAlignment: isSentByMe
             ? CrossAxisAlignment.end
@@ -805,7 +848,7 @@ class _RichMediaBubble extends StatelessWidget {
         );
       },
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -893,7 +936,7 @@ class _RichMediaBubble extends StatelessWidget {
             }
           : null,
       child: Padding(
-        padding: const EdgeInsets.all(10),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: isSentByMe
               ? CrossAxisAlignment.end
@@ -1003,7 +1046,7 @@ class _RichMediaBubble extends StatelessWidget {
 /// - 时间戳：**气泡外**下方灰字常显，与气泡同侧对齐。此前内嵌在气泡顶部、
 ///   默认透明并靠悬停淡入；手机端点按虽然接了 `GestureDetector`，但点按多半
 ///   落在气泡内的富文本上被其手势吃掉，实际永远看不到；
-/// - `leadingWidget` 展示对方头像（自己的消息不传，保持右对齐）；
+/// - `leadingWidget` / `trailingWidget` 展示双方头像：对方在气泡左、自己在右；
 /// - `headerWidget` 在消息间隔超过 [kChatTimeDividerGap] 时插入居中时间条。
 class _ChatMessageRow extends StatelessWidget {
   final Message message;
@@ -1045,7 +1088,10 @@ class _ChatMessageRow extends StatelessWidget {
       animation: animation,
       isRemoved: isRemoved,
       groupStatus: groupStatus,
-      leadingWidget: avatar,
+      // 对方头像在气泡左侧、自己的头像在右侧 —— ChatMessage 的 Row 依次摆放
+      // leadingWidget / trailingWidget，正好让两侧头像对称。
+      leadingWidget: isSentByMe ? null : avatar,
+      trailingWidget: isSentByMe ? avatar : null,
       headerWidget: showTimeDivider && time != null
           ? _TimeDivider(time: time)
           : null,

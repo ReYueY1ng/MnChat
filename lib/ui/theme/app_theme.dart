@@ -2,6 +2,23 @@ import 'package:flutter/material.dart';
 
 import 'app_tokens.dart';
 
+/// 全局滚动行为：**关闭过度滚动（overscroll）指示器**。
+///
+/// Android + M3 下默认是 `StretchOverscrollIndicator`：在列表顶部继续下拉会把
+/// 整个列表内容**纵向拉伸** —— 卡片被拉长、头像变成长方形、文字与卡片背景看起来
+/// 互相错位，相邻的工具栏 / 分类栏附近也会出现内容外溢的观感（「内容与卡片错位」、
+/// 「列表穿透到分类栏下面」）。这里返回 child 即不自带指示器，滚到边界即止。
+class AppScrollBehavior extends MaterialScrollBehavior {
+  const AppScrollBehavior();
+
+  @override
+  Widget buildOverscrollIndicator(
+    BuildContext context,
+    Widget child,
+    ScrollableDetails details,
+  ) => child;
+}
+
 /// 全局主题：M3 tonal 色彩系统 + 统一圆角与描边。
 ///
 /// 策略：

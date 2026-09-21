@@ -1543,12 +1543,12 @@ class ChatService {
     if (list.length > 50) list.removeRange(0, list.length - 50);
 
     final existing = _friendSessions[uin2];
+    // 自己发的、或正在查看该会话 → 不计未读（消息就在眼前，亮红点没有意义）。
+    final muted = m.uin == myUin || _isViewing(ChatSessionType.friend, uin2);
     if (existing != null) {
       _friendSessions[uin2] = existing.copyWith(
         lastMessage: m,
-        unreadCount: m.uin == myUin
-            ? existing.unreadCount
-            : existing.unreadCount + 1,
+        unreadCount: muted ? existing.unreadCount : existing.unreadCount + 1,
       );
     } else {
       // 会话不存在时补建（与 [_upsertGroupMessage] 的群路径一致）：从好友列表
@@ -1561,7 +1561,7 @@ class ChatService {
         type: ChatSessionType.friend,
         name: '$uin2',
         lastMessage: m,
-        unreadCount: m.uin == myUin ? 0 : 1,
+        unreadCount: muted ? 0 : 1,
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
@@ -1578,14 +1578,14 @@ class ChatService {
     if (list.length > 100) list.removeRange(0, list.length - 100);
 
     final existing = _groupSessions[groupId];
+    // 同好友路径：自己发的 / 正在查看该会话 → 不计未读。
+    final muted = m.uin == myUin || _isViewing(ChatSessionType.group, groupId);
     if (existing != null) {
       _groupSessions[groupId] = existing.copyWith(
         lastMessage: m,
-        unreadCount: m.uin == myUin
-            ? existing.unreadCount
-            : existing.unreadCount + 1,
+        unreadCount: muted ? existing.unreadCount : existing.unreadCount + 1,
       );
-    } else if (m.uin != myUin) {
+    } else if (!muted) {
       _groupSessions[groupId] = ChatSession(
         id: groupId,
         type: ChatSessionType.group,
@@ -1691,6 +1691,36 @@ class ChatService {
   void _emitSessionSnapshot() {
     _sessionsCache = null; // 会话数据变更 → 下次访问重算
     _sessionCtrl.add(SessionSnapshot(sessions, _contacts));
+  }
+
+  // ── 正在查看的会话 ───────────────────────────────────────────────────
+
+  /// 用户此刻正在看的会话（聊天页进入时登记、离开时清空）。
+  ChatSessionType? _viewingType;
+  int? _viewingId;
+
+  /// [type]/[id] 是否正是用户此刻在看的那个会话。
+  bool _isViewing(ChatSessionType type, int id) =>
+      _viewingType == type && _viewingId == id;
+
+  /// 登记 / 清空「当前正在查看的会话」。
+  ///
+  /// - 传具体会话：登记为正在查看；[autoRead] 为 true 时顺带标记已读。
+  /// - 传 null：表示离开聊天页，此时会把**上一个**会话补标已读。
+  ///
+  /// 为什么需要它：消息到达时只看「谁发的」就累加未读，会出现在聊天页里亲眼看着
+  /// 消息进来、返回列表后却仍亮红点的情况。登记后这类消息不再计入未读；
+  /// 离开时再补一次已读，保证红点一定消掉。
+  void setViewing(ChatSessionType? type, int? id, {bool autoRead = true}) {
+    final prevType = _viewingType;
+    final prevId = _viewingId;
+    _viewingType = type;
+    _viewingId = id;
+    if (type != null && id != null) {
+      if (autoRead) markRead(type, id);
+    } else if (prevType != null && prevId != null && autoRead) {
+      markRead(prevType, prevId);
+    }
   }
 
   // ── 已读/刷新 ─────────────────────────────────────────────────────────

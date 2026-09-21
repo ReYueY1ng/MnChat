@@ -214,6 +214,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     return MaterialApp(
       title: 'MnChat · 迷你世界外部聊天',
       debugShowCheckedModeBanner: false,
+      // 关闭 M3 的「拉伸」过滚指示器（见 [AppScrollBehavior]）。
+      scrollBehavior: const AppScrollBehavior(),
       theme: buildAppTheme(Brightness.light, seedColor: accent),
       darkTheme: buildAppTheme(Brightness.dark, seedColor: accent),
       themeMode: switch (themeMode) {

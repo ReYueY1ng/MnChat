@@ -361,6 +361,77 @@ final myUinProvider = Provider<int>((ref) {
   return auth.auth?.uin ?? 0;
 });
 
+/// 本人头像资料（聊天页给自己的消息显示头像用）。
+class MyAvatarInfo {
+  /// 昵称（登录返回；可能为空）。
+  final String name;
+
+  /// 头像 URL（DIY 自定义头像优先）。
+  final String? avatarUrl;
+
+  /// 头像本体 type/id（1=皮肤 3=坐骑 4=立绘）。
+  final int? headType;
+  final int? headId;
+
+  /// 头像框 id。
+  final int? frameId;
+
+  const MyAvatarInfo({
+    this.name = '',
+    this.avatarUrl,
+    this.headType,
+    this.headId,
+    this.frameId,
+  });
+}
+
+/// 本人头像资料缓存：与资料页同源（DIY 头像 → 资料头像 → 头像本体 type/id）。
+///
+/// 各接口独立 try/catch，任一失败只回退昵称首字占位，不影响聊天页展示。
+/// `FutureProvider` 自带缓存 —— 聊天页逐条消息读取不会重复发起请求。
+final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
+  final auth = ref.watch(authProvider).auth;
+  final name = auth?.name ?? '';
+  if (auth == null) return MyAvatarInfo(name: name);
+  final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+
+  String? avatarUrl;
+  int? frameId;
+  int? headType;
+  int? headId;
+  try {
+    // DIY 自定义头像优先（游戏主界面 / 资料页同源）
+    avatarUrl = (await client.getPersonCenterHeadInfo([auth.uin]))[auth.uin];
+  } catch (_) {
+    // 忽略：DIY 头像拉取失败时回退批量资料头像
+  }
+  try {
+    final profile = await client.getMyProfile();
+    if (profile != null) {
+      avatarUrl ??= profile.avatarUrl;
+      frameId = profile.headFrameId;
+    }
+  } catch (_) {
+    // 忽略：资料拉取失败时仅展示占位头像
+  }
+  try {
+    final head = await client.getMyHeadInfo();
+    if (head != null) {
+      headType = head.type;
+      headId = head.id;
+    }
+  } catch (_) {
+    // 忽略：头像本体拉取失败时仅展示占位头像
+  }
+  return MyAvatarInfo(
+    name: name,
+    avatarUrl: avatarUrl,
+    headType: headType,
+    headId: headId,
+    frameId: frameId,
+  );
+});
+
 // ── 通用设置（显示 / 输入 / 隐私 / 桌面端）────────────────────────────────
 
 /// 安全获取设置存储：测试等环境未注入 databaseProvider 时返回 null，

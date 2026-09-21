@@ -393,7 +393,10 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
       );
     }
 
-    return SizedBox(
+    // 与工具栏一样铺不透明底色：分类栏下方就是好友列表，底色透明时列表内容
+    // 会在下拉 / 过滚时透出来，看上去像「列表穿透到分类栏下面」。
+    return Container(
+      color: theme.scaffoldBackgroundColor,
       // 高度随系统字号缩放，避免大字号下 chip 被裁切。
       height: MediaQuery.textScalerOf(context).scale(52),
       child: ListView(
