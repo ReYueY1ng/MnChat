@@ -12,7 +12,7 @@ void main() {
     });
 
     test('roleIconAsset 生成正确资源路径', () {
-      expect(roleIconAsset(31), 'assets/roleicons/31.png');
+      expect(roleIconAsset(31), 'assets/roleicons/31.webp');
     });
 
     test('headIconAsset 按类型解析资源路径', () {

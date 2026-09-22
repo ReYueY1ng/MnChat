@@ -7,19 +7,19 @@ import '../../state/providers.dart' show animatedFramesProvider;
 /// 游戏头像框资源路径。
 ///
 /// 带骨骼动画的 id（[kAnimatedFrameIds]）返回 `assets/headframes_anim/<id>.webp`
-/// 循环动画；其余返回 `assets/headframes/<id>.png` 静态图（128×128 RGBA，
+/// 循环动画；其余返回 `assets/headframes/<id>.webp` 静态图（128×128 RGBA，
 /// 中心透明，取自客户端 `res/resources/ui/headframes/`）。
 ///
 /// 未收录的 id 由 [Image.errorBuilder] 静默忽略，因此不需要维护 id 白名单。
 String headFrameAsset(int id) => kAnimatedFrameIds.contains(id)
     ? 'assets/headframes_anim/$id.webp'
-    : 'assets/headframes/$id.png';
+    : 'assets/headframes/$id.webp';
 
 /// 该头像框是否使用动画资源。
 bool headFrameIsAnimated(int id) => kAnimatedFrameIds.contains(id);
 
 /// 静态头像框资源路径（关闭动画时使用）。
-String headFrameStaticAsset(int id) => 'assets/headframes/$id.png';
+String headFrameStaticAsset(int id) => 'assets/headframes/$id.webp';
 
 /// 有头像框时，头像本体边长相对头像框盒的缩放比例（官方头像 70 : 框 92）。
 ///

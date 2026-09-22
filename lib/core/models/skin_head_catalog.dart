@@ -2,8 +2,8 @@
 // 仅收录 assets/roleicons/ 中实际打包的图标。
 library;
 
-/// 皮肤头像图标资源路径：`assets/roleicons/<Head>.png`。
-String roleIconAsset(int headId) => 'assets/roleicons/$headId.png';
+/// 皮肤头像图标资源路径：`assets/roleicons/<Head>.webp`（WebP，体积约为原 PNG 的 1/3）。
+String roleIconAsset(int headId) => 'assets/roleicons/$headId.webp';
 
 /// 皮肤 ID → `Head`（头像图标 id）。未收录表示该皮肤无本地图标。
 const Map<int, int> kSkinHeadIcon = {
@@ -595,8 +595,8 @@ const Map<int, int> kSkinHeadIcon = {
   627: 758,
 };
 
-/// 坐骑头像图标资源路径：`assets/rideicons/<id>.png`。
-String rideIconAsset(int id) => 'assets/rideicons/$id.png';
+/// 坐骑头像图标资源路径：`assets/rideicons/<id>.webp`（WebP）。
+String rideIconAsset(int id) => 'assets/rideicons/$id.webp';
 
 /// 按头像本体 (type,id) 解析本地图标资源路径；无对应图标时返回 null。
 ///

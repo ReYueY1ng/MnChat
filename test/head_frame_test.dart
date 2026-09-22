@@ -12,8 +12,8 @@ import 'package:mnchat/ui/widgets/head_frame.dart';
 
 void main() {
   group('headFrameAsset', () {
-    test('静态 id 拼出 png 资源路径', () {
-      expect(headFrameAsset(20201), 'assets/headframes/20201.png');
+    test('静态 id 拼出 webp 资源路径', () {
+      expect(headFrameAsset(20201), 'assets/headframes/20201.webp');
       expect(headFrameIsAnimated(20201), isFalse);
     });
 

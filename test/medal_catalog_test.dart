@@ -10,9 +10,9 @@ void main() {
       for (final e in kMedalIconName.entries) {
         expect(e.key, greaterThan(0));
         expect(
-          File('assets/medals/${e.value}.png').existsSync(),
+          File('assets/medals/${e.value}.webp').existsSync(),
           isTrue,
-          reason: '缺少勋章图标 ${e.value}.png',
+          reason: '缺少勋章图标 ${e.value}.webp',
         );
       }
     });
@@ -20,14 +20,14 @@ void main() {
     test('等级边框 1..5 且文件存在', () {
       expect(kMedalFrameByLevel.length, 5);
       for (final f in kMedalFrameByLevel) {
-        expect(File('assets/medals/$f.png').existsSync(), isTrue, reason: f);
+        expect(File('assets/medals/$f.webp').existsSync(), isTrue, reason: f);
       }
     });
 
     test('medalIconAsset 生成正确路径', () {
       expect(
         medalIconAsset('cj_bosskiller'),
-        'assets/medals/cj_bosskiller.png',
+        'assets/medals/cj_bosskiller.webp',
       );
     });
 
@@ -36,7 +36,7 @@ void main() {
       for (final e in kMedalLevelIcons.entries) {
         expect(e.value.length, 5, reason: '勋章 ${e.key} 应有 5 个等级图标');
         for (final n in e.value) {
-          expect(File('assets/medals/$n.png').existsSync(), isTrue, reason: n);
+          expect(File('assets/medals/$n.webp').existsSync(), isTrue, reason: n);
         }
       }
     });

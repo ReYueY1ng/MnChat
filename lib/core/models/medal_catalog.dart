@@ -2,8 +2,8 @@
 // 图标已由 FGUI 图集 iconsourceachievement 裁剪到 assets/medals/。
 library;
 
-/// 勋章图标资源路径：`assets/medals/<iconName>.png`。
-String medalIconAsset(String iconName) => 'assets/medals/$iconName.png';
+/// 勋章图标资源路径：`assets/medals/<iconName>.webp`（WebP）。
+String medalIconAsset(String iconName) => 'assets/medals/$iconName.webp';
 
 /// 勋章 id → 图标名（AchievementData.icon_Resources）。
 const Map<int, String> kMedalIconName = {

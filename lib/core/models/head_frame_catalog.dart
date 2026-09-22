@@ -2,7 +2,7 @@
 //
 // 头像框行由「图标」列（第 39 列，值形如 `hf<id>`）识别；同一头像框可能有
 // 永久 / 期限（`<id>30天`）等多行，这里只取道具 id 与头像框 id 相同的正式行。
-// id 即 `assets/headframes/<id>.png` 与 `setProfile&head_frame_id=` 使用的头像框 id。
+// id 即 `assets/headframes/<id>.webp` 与 `setProfile&head_frame_id=` 使用的头像框 id。
 // 名称 / 获取途径对应游戏 `ItemDefCsv:get(FrameID).Name` / `.GetWay`
 // （`playercenterv2headeditorview.lua:281-291`）。
 library;
