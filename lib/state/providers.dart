@@ -408,53 +408,45 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
   const tag = 'myAvatarInfo';
 
-  String? avatarUrl;
-  int? headType;
-  int? headId;
-  int? frameId;
+  // ① 人物中心：DIY 自定义头像 + 头像本体 type/id（isSelf 分支会放行审核中的 pre_url）
+  HeadSlot? slot;
   try {
-    final slot = (await client.getPersonCenterHeadInfos([auth.uin]))[auth.uin];
-    if (slot != null) {
-      avatarUrl = slot.diyUrl;
-      headType = slot.type;
-      headId = slot.id;
-    }
+    slot = (await client.getPersonCenterHeadInfos([auth.uin]))[auth.uin];
   } catch (e) {
     log.warn('getPersonCenterHeadInfos 失败: $e', tag: tag);
   }
-  // 头像本体兜底：个别账号该端点不下发 type/id 时用 getMyHeadInfo 补。
-  if (headType == null || headId == null) {
-    try {
-      final head = await client.getMyHeadInfo();
-      if (head != null) {
-        headType ??= head.type;
-        headId ??= head.id;
-      }
-    } catch (e) {
-      log.warn('getMyHeadInfo 失败: $e', tag: tag);
-    }
-  }
+  // ② 批量资料：昵称 / 头像 / 头像框 —— 走的是**好友头像能正常显示**的那条接口
+  PlayerProfile? profile;
   try {
-    final profile = await client.getMyProfile();
-    if (profile != null) {
-      avatarUrl ??= profile.avatarUrl;
-      frameId = profile.headFrameId;
-    }
+    final list = await client.getProfileBatch3([auth.uin]);
+    if (list.isNotEmpty) profile = list.first;
   } catch (e) {
-    log.warn('getMyProfile 失败: $e', tag: tag);
+    log.warn('getProfileBatch3 失败: $e', tag: tag);
   }
+  // 人物中心缺失 / type=2（头套无 2D 资源）时用资料 SkinID/Model 回退角色头像
+  final fallback = PlayerProfile.resolveRoleHeadFallback(
+    headType: slot?.type,
+    headId: slot?.id,
+    skinId: profile?.headSkinId,
+    model: profile?.headModel,
+  );
+  // DIY 自定义头像是显式选择，必须压过角色头像（AvatarView 本体优先于 URL，
+  // 故有 DIY 时把本体清空），规则与好友资料一致（见 _fetchFriendInfos）。
+  final useDiy = slot?.diyUrl != null;
+  final nickname = profile?.nickname ?? '';
+  final info = MyAvatarInfo(
+    name: nickname.isNotEmpty ? nickname : name,
+    avatarUrl: slot?.diyUrl ?? profile?.avatarUrl,
+    headType: useDiy ? null : (fallback?.type ?? slot?.type),
+    headId: useDiy ? null : (fallback?.id ?? slot?.id),
+    frameId: profile?.headFrameId,
+  );
   log.debug(
-    '本人头像资料: head=$headType/$headId frame=$frameId '
-    'avatar=${avatarUrl == null || avatarUrl.isEmpty ? "无" : "有"}',
+    '本人头像资料: name=${info.name} head=${info.headType}/${info.headId} '
+    'frame=${info.frameId} avatar=${(info.avatarUrl ?? '').isEmpty ? "无" : "有"}',
     tag: tag,
   );
-  return MyAvatarInfo(
-    name: name,
-    avatarUrl: avatarUrl,
-    headType: headType,
-    headId: headId,
-    frameId: frameId,
-  );
+  return info;
 });
 
 // ── 通用设置（显示 / 输入 / 隐私 / 桌面端）────────────────────────────────

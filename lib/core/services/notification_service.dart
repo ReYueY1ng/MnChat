@@ -36,12 +36,21 @@ class MessageNotification {
   /// 是否群聊（仅用于通知分组）。
   final bool group;
 
+  /// 通知右侧大图标的网络头像地址（可选）。
+  final String? avatarUrl;
+
+  /// 通知右侧大图标的本地头像图标 —— Flutter asset key
+  /// （如 `assets/heads/skin_1001.png`），优先于 [avatarUrl]。
+  final String? avatarAsset;
+
   const MessageNotification({
     required this.sessionKey,
     required this.title,
     required this.text,
     this.lines = const [],
     this.group = false,
+    this.avatarUrl,
+    this.avatarAsset,
   });
 }
 
@@ -100,6 +109,8 @@ class AndroidNotificationService implements NotificationService {
     text: n.text,
     lines: n.lines,
     group: n.group,
+    avatarUrl: n.avatarUrl,
+    avatarAsset: n.avatarAsset,
   );
 
   @override

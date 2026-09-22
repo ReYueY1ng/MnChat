@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/models/messages.dart';
+import 'core/models/skin_head_catalog.dart' show headIconAsset;
 import 'core/services/app_lock.dart';
 import 'core/services/chat_service.dart' show ChatEvent, ChatService;
 import 'core/services/notification_service.dart';
@@ -241,10 +242,12 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         recent.add(raw.length > 60 ? '${raw.substring(0, 60)}…' : raw);
         if (recent.length > 5) recent.removeRange(0, recent.length - 5);
       }
+      final session = _sessionOf(service, event);
+      final isGroup = event.sessionType == ChatSessionType.group;
       svc.showMessage(
         MessageNotification(
           sessionKey: key,
-          title: hide ? 'MnChat · 新消息' : _sessionNameOf(service, event),
+          title: hide ? 'MnChat · 新消息' : _sessionTitleOf(session, isGroup),
           text: hide
               ? '你有一条新消息'
               : (raw.isEmpty
@@ -253,22 +256,37 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
                           ? '${raw.substring(0, 30)}…'
                           : raw)),
           lines: hide ? const [] : List<String>.from(recent),
-          group: event.sessionType == ChatSessionType.group,
+          group: isGroup,
+          // 通知头像：优先本地头像本体图标（无需联网），其次网络头像
+          avatarUrl: session?.avatar,
+          avatarAsset: _headAssetOf(session),
         ),
       );
     });
   }
 
-  /// 通知标题用的会话名；取不到时退化为「新消息」。
-  String _sessionNameOf(ChatService service, ChatEvent event) {
-    final isGroup = event.sessionType == ChatSessionType.group;
+  /// 事件对应的会话（取通知标题与头像用）；找不到返回 null。
+  ChatSession? _sessionOf(ChatService service, ChatEvent event) {
     for (final s in service.sessions) {
-      if (s.type == event.sessionType && s.id == event.sessionId) {
-        final name = s.name.trim();
-        if (name.isNotEmpty) return isGroup ? '群聊 · $name' : name;
-      }
+      if (s.type == event.sessionType && s.id == event.sessionId) return s;
     }
-    return isGroup ? '群聊新消息' : '新消息';
+    return null;
+  }
+
+  /// 通知标题：会话名（群聊加前缀）；取不到时退化为「新消息」。
+  String _sessionTitleOf(ChatSession? session, bool isGroup) {
+    final name = session?.name.trim() ?? '';
+    if (name.isEmpty) return isGroup ? '群聊新消息' : '新消息';
+    return isGroup ? '群聊 · $name' : name;
+  }
+
+  /// 会话的本地头像图标（头像本体 type/id 有对应资源时）—— 通知大图标优先用它，
+  /// 免得为了一个通知去联网下载；返回 Flutter asset key。
+  String? _headAssetOf(ChatSession? session) {
+    final type = session?.headType;
+    final id = session?.headId;
+    if (type == null || id == null || id <= 0) return null;
+    return headIconAsset(type, id);
   }
 
   /// 自动登录：成功后进入会话页；失败/无凭据回登录页。

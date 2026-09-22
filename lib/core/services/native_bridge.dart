@@ -57,6 +57,8 @@ class NativeBridge {
     required String text,
     List<String> lines = const [],
     bool group = false,
+    String? avatarUrl,
+    String? avatarAsset,
   }) async {
     try {
       return await _channel.invokeMethod<bool>('showMessageNotification', {
@@ -65,6 +67,8 @@ class NativeBridge {
             'text': text,
             'lines': lines,
             'group': group,
+            'avatarUrl': avatarUrl,
+            'avatarAsset': avatarAsset,
           }) ??
           false;
     } catch (_) {

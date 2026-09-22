@@ -51,6 +51,9 @@ class ChatBackgroundService : Service() {
         /** 已弹出的消息通知 id（用于「全部清除」；不含常驻通知）。 */
         private val messageIds = mutableSetOf<Int>()
 
+        /** 通知大图标缓存（asset:xx / url:xx → Bitmap），避免同一好友反复下载。 */
+        private val iconCache = mutableMapOf<String, android.graphics.Bitmap>()
+
         var isRunning = false
             private set
 
@@ -161,7 +164,29 @@ class ChatBackgroundService : Service() {
             title: String,
             text: String,
             lines: List<String>,
-            group: Boolean
+            group: Boolean,
+            avatarUrl: String?,
+            avatarAsset: String?
+        ) {
+            // 先立刻弹出（不等头像下载完成），再在后台线程把大图标补上原地更新。
+            postMessageNotification(context, sessionKey, title, text, lines, group, null)
+            if (avatarAsset.isNullOrEmpty() && avatarUrl.isNullOrEmpty()) return
+            val app = context.applicationContext
+            Thread {
+                val icon = loadLargeIcon(app, avatarAsset, avatarUrl) ?: return@Thread
+                postMessageNotification(app, sessionKey, title, text, lines, group, icon)
+            }.start()
+        }
+
+        /** 真正构建并发出消息通知（[icon] 为空则不带大图标）。 */
+        private fun postMessageNotification(
+            context: Context,
+            sessionKey: String,
+            title: String,
+            text: String,
+            lines: List<String>,
+            group: Boolean,
+            icon: android.graphics.Bitmap?
         ) {
             try {
                 createChannels(context)
@@ -174,6 +199,7 @@ class ChatBackgroundService : Service() {
                     .setContentText(text)
                     .setAutoCancel(true)
                     .setGroup(GROUP_KEY)
+                if (icon != null) nb.setLargeIcon(icon)
                 launchPending(context, sessionKey, id)?.let { nb.setContentIntent(it) }
                 if (lines.size > 1) {
                     val style = Notification.InboxStyle().setBigContentTitle(title)
@@ -193,6 +219,53 @@ class ChatBackgroundService : Service() {
             } catch (e: Exception) {
                 Log.w(TAG, "弹出通知失败: $e")
             }
+        }
+
+        /**
+         * 加载通知大图标：优先 Flutter 资源里的本地头像图标（APK 内路径为
+         * `assets/flutter_assets/<asset>`），其次按 URL 下载。结果进小缓存。
+         */
+        private fun loadLargeIcon(
+            context: Context,
+            asset: String?,
+            url: String?
+        ): android.graphics.Bitmap? {
+            val assetKey = asset?.takeIf { it.isNotEmpty() }
+            val urlText = url?.takeIf { it.isNotEmpty() }
+            val key = when {
+                assetKey != null -> "asset:$assetKey"
+                urlText != null -> "url:$urlText"
+                else -> return null
+            }
+            synchronized(iconCache) { iconCache[key]?.let { return it } }
+            val bitmap: android.graphics.Bitmap? = try {
+                if (assetKey != null) {
+                    context.assets.open("flutter_assets/$assetKey").use {
+                        android.graphics.BitmapFactory.decodeStream(it)
+                    }
+                } else if (urlText != null) {
+                    val conn = java.net.URL(urlText).openConnection()
+                            as java.net.HttpURLConnection
+                    conn.connectTimeout = 4000
+                    conn.readTimeout = 4000
+                    conn.instanceFollowRedirects = true
+                    conn.inputStream.use {
+                        android.graphics.BitmapFactory.decodeStream(it)
+                    }
+                } else {
+                    null
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "加载通知头像失败: $e")
+                null
+            }
+            if (bitmap != null) {
+                synchronized(iconCache) {
+                    if (iconCache.size > 32) iconCache.clear()
+                    iconCache[key] = bitmap
+                }
+            }
+            return bitmap
         }
 
         /** 取消某个会话的通知。 */

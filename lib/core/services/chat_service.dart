@@ -1045,8 +1045,12 @@ class ChatService {
           type: ChatSessionType.friend,
           name: keepName.isNotEmpty ? keepName : '$uin2',
           avatar: _friendAvatar(m) ?? oldSession?.avatar,
-          isOnline: _friendOnline(m),
-          gameStatus: _friendGameStatus(m),
+          // 在线状态的真相来自 chatpush 好友探测（_applyBatchFriendStatus），
+          // 而好友列表接口的 online 字段经常缺失或恒为 0 —— 直接采用会把全部好友
+          // 判成离线（用户反馈：一刷新就全离线）。故保留上一次已知状态，等探测
+          // 结果刷新；首次加载无旧值时先按离线。
+          isOnline: oldSession?.isOnline ?? false,
+          gameStatus: _friendGameStatus(m) ?? oldSession?.gameStatus,
           relation: relation,
           lastMessage: oldSession?.lastMessage,
           unreadCount: oldSession?.unreadCount ?? 0,
@@ -1215,21 +1219,6 @@ class ChatService {
     return null;
   }
 
-  /// 好友是否在线（query_friend_list 的 `online` 字段：1=在线）。
-  static bool _friendOnline(Map<String, Object?> m) {
-    final v = m['online'];
-    if (v is num) return v.toInt() == 1;
-    if (v is String) return v == '1' || v.toLowerCase() == 'true';
-    // 嵌套 baseinfo.online
-    final bi = m['baseinfo'];
-    if (bi is Map) {
-      final b = bi['online'];
-      if (b is num) return b.toInt() == 1;
-      if (b is String) return b == '1' || b.toLowerCase() == 'true';
-    }
-    return false;
-  }
-
   /// 好友游玩状态文本（statusinfo[1]: "ingame"/"inteam"；[3] 为游戏详情）。
   /// 返回如「游戏中」「组队中」，未知返回 null。复用 [_statusKind] 判定。
   static String? _friendGameStatus(Map<String, Object?> m) {
@@ -1269,6 +1258,10 @@ class ChatService {
           skinId: p.headSkinId,
           model: p.headModel,
         );
+        // DIY 自定义头像是玩家显式选择的形象，必须压过角色头像：AvatarView 的规则是
+        // 「头像本体优先于 URL」，所以有 DIY 头像时要把头像本体清空 —— 否则自定义
+        // 头像会被角色头像盖掉（用户反馈：刚进会话能显示，刷新后就变角色头像了）。
+        final useDiy = head?.diyUrl != null;
         _friendSessions[p.uin] = ChatSession(
           id: s.id,
           type: s.type,
@@ -1280,8 +1273,8 @@ class ChatService {
           unreadCount: s.unreadCount,
           lastReadTime: s.lastReadTime,
           relation: s.relation,
-          headType: fallback?.type ?? s.headType,
-          headId: fallback?.id ?? s.headId,
+          headType: useDiy ? null : (fallback?.type ?? s.headType),
+          headId: useDiy ? null : (fallback?.id ?? s.headId),
           headFrameId: p.headFrameId ?? s.headFrameId,
         );
         _updateContactHead(
@@ -1313,6 +1306,8 @@ class ChatService {
     int? fallbackId,
   }) {
     if (head == null && headFrameId == null && fallbackType == null) return;
+    // 同上：有 DIY 头像时清空头像本体，否则角色头像会盖掉自定义头像。
+    final useDiy = head?.diyUrl != null;
     for (var i = 0; i < _contacts.length; i++) {
       final c = _contacts[i];
       if (c.uin != uin) continue;
@@ -1322,8 +1317,8 @@ class ChatService {
         avatar: head?.diyUrl ?? c.avatar,
         relation: c.relation,
         mark: c.mark,
-        headType: fallbackType ?? c.headType,
-        headId: fallbackId ?? c.headId,
+        headType: useDiy ? null : (fallbackType ?? c.headType),
+        headId: useDiy ? null : (fallbackId ?? c.headId),
         headFrameId: headFrameId ?? c.headFrameId,
       );
       return;
@@ -1494,12 +1489,15 @@ class ChatService {
           skinId: p.headSkinId,
           model: p.headModel,
         );
+        final useDiy = head?.diyUrl != null;
         member[p.uin] = PlayerProfile(
           uin: p.uin,
           nickname: p.nickname,
           avatarUrl: head?.diyUrl ?? p.avatarUrl,
-          headType: fallback?.type,
-          headId: fallback?.id,
+          // 有 DIY 头像时清空头像本体（否则自定义头像会被角色头像盖掉，
+          // 规则与好友路径一致，见 _fetchFriendInfos）。
+          headType: useDiy ? null : fallback?.type,
+          headId: useDiy ? null : fallback?.id,
           headFrameId: p.headFrameId,
           headSkinId: p.headSkinId,
           headModel: p.headModel,
