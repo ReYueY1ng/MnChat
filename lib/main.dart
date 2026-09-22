@@ -205,17 +205,11 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         lifecycle == AppLifecycleState.detached;
   }
 
-  /// 前后台切换时同步保活：Android 只在后台启动前台服务（前台通知栏保持干净）。
-  void _syncBackgroundService(AppLifecycleState state) {
-    final svc = _notifications;
-    if (svc == null) return;
-    final background =
-        state == AppLifecycleState.paused ||
-        state == AppLifecycleState.hidden ||
-        state == AppLifecycleState.detached;
-    svc.setBackgroundMode(background && ref.read(keepAliveProvider));
-  }
-
+  /// 前后台切换时**不**动前台服务。
+  ///
+  /// Android 12+ 只允许前台应用启动前台服务，所以保活服务由 `MainShell` 按
+  /// `keepAlive` 设置在前台时启动并常驻；在这里按生命周期 stop/start 会导致
+  /// 服务起不来、后台收不到消息（见 `_applyKeepAlive` 的说明）。
   /// 订阅 ChatService 事件流：仅**后台**弹系统通知，且按会话聚合。
   void _subscribeNotifications(NotificationService svc) {
     final service = ref.read(chatServiceProvider);
@@ -314,8 +308,6 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // 前后台切换同步保活：只在后台挂前台服务，回到前台立刻摘掉常驻通知
-    _syncBackgroundService(state);
     // 回前台：若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
     if (state == AppLifecycleState.resumed) {
       ref.read(chatServiceProvider).ensureConnection();
