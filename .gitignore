@@ -30,3 +30,6 @@ logcat
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+
+# 头像诊断产物（临时排查用，含账号数据）
+avatar-debug.txt

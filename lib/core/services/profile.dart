@@ -575,6 +575,11 @@ class ProfileClient {
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
+    // 临时诊断：人物中心到底返回了什么 —— 实测该端点经常整体为空，
+    // 需要看原始响应才能判断（见 core/utils/avatar_debug.dart）。
+    avatarDebug(
+      'headInfos resp=${text.length > 400 ? '${text.substring(0, 400)}…' : text}',
+    );
     final decoded = decodeHttpResponse(text);
     final data = decoded is Map ? decoded['data'] : null;
     if (data is! Map) return out;
@@ -583,8 +588,6 @@ class ProfileClient {
       final u = int.tryParse('${e.key}');
       if (u == null || e.value is! Map) continue;
       final info = (e.value as Map).cast<String, Object?>();
-      // 临时诊断：看服务端对每个 uin 到底下发了什么（尤其 use_diy / diy 相关字段）
-      avatarDebug('headInfo uin=$u raw=$info');
       String? diy;
       if (info['use_diy'] == 1) {
         // 同 getPersonCenterHeadInfo：pre_url（审核中）仅本人可见。

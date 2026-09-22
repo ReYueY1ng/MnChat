@@ -85,8 +85,16 @@ class AvatarView extends StatelessWidget {
             ),
     );
 
-    // 头像本体（type=1 皮肤 / 3 坐骑 / 4 立绘）有本地图标时优先展示。
-    final localHead = (headType != null && headId != null && headId! > 0)
+    // 头像来源优先级：**网络头像优先，本地角色头像仅作兜底**。
+    //
+    // 原实现相反（角色头像本体优先于 URL）。实测真机数据：人物中心
+    // （getPersonCenterHeadInfos）经常整体不返回（所有人 type/id 都是 null），
+    // 于是 headType/headId 只能由 SkinID/Model 推导 —— 结果是**用推导出来的
+    // 角色头像盖掉了服务端给的网络头像**（自定义头像用户尤其明显：刚进会话时
+    // 还没有推导值所以显示自定义头像，资料一回来就被角色头像覆盖）。
+    // 好友几乎都有 per-user 的网络头像 URL，优先用它才符合服务端事实。
+    final hasUrl = urlText != null && urlText.isNotEmpty;
+    final localHead = (!hasUrl && headType != null && headId != null && headId! > 0)
         ? headIconAsset(headType!, headId!)
         : null;
 

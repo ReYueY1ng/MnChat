@@ -314,6 +314,10 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
   @override
   Widget build(BuildContext context) {
     final auth = ref.watch(authProvider);
+    // 本人头像与聊天页同源（DIY 头像 / 头像本体 / 头像框）—— 这个位置原先只传
+    // 昵称，所以永远只显示首字母，也没有头像框。
+    final me = ref.watch(myAvatarInfoProvider).asData?.value;
+    final ownName = me?.name ?? '';
     return Tooltip(
       message: widget.showSelfInfo ? '我的资料' : '账号',
       child: InkWell(
@@ -323,8 +327,12 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
           key: _anchorKey,
           padding: const EdgeInsets.all(AppSpacing.xs),
           child: AvatarView(
-            name: auth.auth?.name ?? '',
+            name: ownName.isNotEmpty ? ownName : (auth.auth?.name ?? ''),
+            avatarUrl: me?.avatarUrl,
             radius: 18,
+            headType: me?.headType,
+            headId: me?.headId,
+            frameId: me?.frameId,
           ),
         ),
       ),

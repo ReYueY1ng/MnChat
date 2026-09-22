@@ -447,6 +447,18 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
       log.warn('getMyHeadInfo 失败: $e', tag: tag);
     }
   }
+  // ③ 头像 URL：本人资料里的 avatarUrl 可能是空的，而 `getProfileBatch3`
+  //    （好友头像正是靠它）会给到 per-user 的网络头像 —— 实测好友都有值。
+  //    两条都试，取到为止。
+  var avatarUrl = slot?.diyUrl ?? profile?.avatarUrl;
+  if (avatarUrl == null || avatarUrl.isEmpty) {
+    try {
+      final list = await client.getProfileBatch3([auth.uin]);
+      if (list.isNotEmpty) avatarUrl = list.first.avatarUrl;
+    } catch (e) {
+      log.warn('getProfileBatch3(本人头像) 失败: $e', tag: tag);
+    }
+  }
   // 人物中心缺失 / type=2（头套无 2D 资源）时用资料 SkinID/Model 回退角色头像
   final fallback = PlayerProfile.resolveRoleHeadFallback(
     headType: headType,
@@ -460,7 +472,7 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   final nickname = profile?.nickname ?? '';
   final info = MyAvatarInfo(
     name: nickname.isNotEmpty ? nickname : name,
-    avatarUrl: slot?.diyUrl ?? profile?.avatarUrl,
+    avatarUrl: avatarUrl,
     headType: useDiy ? null : (fallback?.type ?? headType),
     headId: useDiy ? null : (fallback?.id ?? headId),
     frameId: profile?.headFrameId,
