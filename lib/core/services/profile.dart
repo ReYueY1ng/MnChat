@@ -13,6 +13,7 @@ import '../crypto/md5_sign.dart' show httpGetParamMd5, httpGetS1Map;
 import '../net/config.dart' show backendShequ, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../utils/avatar_debug.dart';
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
@@ -582,6 +583,8 @@ class ProfileClient {
       final u = int.tryParse('${e.key}');
       if (u == null || e.value is! Map) continue;
       final info = (e.value as Map).cast<String, Object?>();
+      // 临时诊断：看服务端对每个 uin 到底下发了什么（尤其 use_diy / diy 相关字段）
+      avatarDebug('headInfo uin=$u raw=$info');
       String? diy;
       if (info['use_diy'] == 1) {
         // 同 getPersonCenterHeadInfo：pre_url（审核中）仅本人可见。

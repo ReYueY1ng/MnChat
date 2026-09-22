@@ -19,6 +19,7 @@ import '../core/services/partner.dart';
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
+import '../core/utils/avatar_debug.dart';
 import '../core/utils/log.dart';
 
 /// ChatService 单例（注入本地 SQLite 用于持久化；main() 中 override databaseProvider）。
@@ -415,18 +416,41 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   } catch (e) {
     log.warn('getPersonCenterHeadInfos 失败: $e', tag: tag);
   }
-  // ② 批量资料：昵称 / 头像 / 头像框 —— 走的是**好友头像能正常显示**的那条接口
+  // ① 本人资料：`getMyProfile` 是对「本人」最可靠的端点 —— 资料页的头像框就是它
+  //    给的（用户实测资料页有框），说明这条通。`getProfileBatch3` 对部分账号**不
+  //    返回自己**，只作兜底。
   PlayerProfile? profile;
   try {
-    final list = await client.getProfileBatch3([auth.uin]);
-    if (list.isNotEmpty) profile = list.first;
+    profile = await client.getMyProfile();
   } catch (e) {
-    log.warn('getProfileBatch3 失败: $e', tag: tag);
+    log.warn('getMyProfile 失败: $e', tag: tag);
+  }
+  if (profile == null) {
+    try {
+      final list = await client.getProfileBatch3([auth.uin]);
+      if (list.isNotEmpty) profile = list.first;
+    } catch (e) {
+      log.warn('getProfileBatch3 失败: $e', tag: tag);
+    }
+  }
+  // ② 头像本体：`getMyHeadInfo` 是本人专用端点；人物中心那个作兜底（还带 DIY）
+  int? headType = slot?.type;
+  int? headId = slot?.id;
+  if (headType == null || headId == null) {
+    try {
+      final head = await client.getMyHeadInfo();
+      if (head != null) {
+        headType ??= head.type;
+        headId ??= head.id;
+      }
+    } catch (e) {
+      log.warn('getMyHeadInfo 失败: $e', tag: tag);
+    }
   }
   // 人物中心缺失 / type=2（头套无 2D 资源）时用资料 SkinID/Model 回退角色头像
   final fallback = PlayerProfile.resolveRoleHeadFallback(
-    headType: slot?.type,
-    headId: slot?.id,
+    headType: headType,
+    headId: headId,
     skinId: profile?.headSkinId,
     model: profile?.headModel,
   );
@@ -437,9 +461,20 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   final info = MyAvatarInfo(
     name: nickname.isNotEmpty ? nickname : name,
     avatarUrl: slot?.diyUrl ?? profile?.avatarUrl,
-    headType: useDiy ? null : (fallback?.type ?? slot?.type),
-    headId: useDiy ? null : (fallback?.id ?? slot?.id),
+    headType: useDiy ? null : (fallback?.type ?? headType),
+    headId: useDiy ? null : (fallback?.id ?? headId),
     frameId: profile?.headFrameId,
+  );
+  // 临时诊断（见 core/utils/avatar_debug.dart）
+  avatarDebug(
+    'self slot(diy=${slot?.diyUrl}, type=${slot?.type}, id=${slot?.id}) '
+    'profile(name=${profile?.nickname}, avatar=${profile?.avatarUrl}, '
+    'frame=${profile?.headFrameId}, head=${profile?.headType}/${profile?.headId}, '
+    'skin=${profile?.headSkinId}, model=${profile?.headModel})',
+  );
+  avatarDebug(
+    'self resolved name=${info.name} avatar=${(info.avatarUrl ?? "").isEmpty ? "无" : info.avatarUrl} '
+    'head=${info.headType}/${info.headId} frame=${info.frameId}',
   );
   log.debug(
     '本人头像资料: name=${info.name} head=${info.headType}/${info.headId} '

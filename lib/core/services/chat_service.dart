@@ -20,6 +20,7 @@ import 'profile.dart';
 import 'social_sign.dart';
 import 'title_config.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../utils/avatar_debug.dart';
 import '../utils/log.dart';
 
 /// 本模块日志标签。
@@ -1262,6 +1263,12 @@ class ChatService {
         // 「头像本体优先于 URL」，所以有 DIY 头像时要把头像本体清空 —— 否则自定义
         // 头像会被角色头像盖掉（用户反馈：刚进会话能显示，刷新后就变角色头像了）。
         final useDiy = head?.diyUrl != null;
+        // 临时诊断（见 core/utils/avatar_debug.dart）
+        avatarDebug(
+          'friend uin=${p.uin} slot(diy=${head?.diyUrl}, type=${head?.type}, '
+          'id=${head?.id}) pAvatar=${p.avatarUrl} useDiy=$useDiy '
+          'skin=${p.headSkinId} model=${p.headModel}',
+        );
         _friendSessions[p.uin] = ChatSession(
           id: s.id,
           type: s.type,
