@@ -99,7 +99,7 @@ flutter:
   uses-material-design: true
 
   assets:
-    - assets/emoticon/emoticon.png
+    - assets/emoticon/emoticon.webp
     - assets/headframes/
     - assets/headframes_anim/
     - assets/tray_icon.png

@@ -8,7 +8,7 @@ import 'chat_emoji.dart' show emojiRepr;
 /// 游戏 emoji 贴图（TexturePacker 图集 emoticon.png + emoticon.xml 坐标）。
 /// 把 `#A1xx` 代码渲染成游戏真实图标：code → sprite 名 → 贴图矩形。
 
-const String kEmoticonAsset = 'assets/emoticon/emoticon.png';
+const String kEmoticonAsset = 'assets/emoticon/emoticon.webp';
 
 /// code → sprite 名（对齐 chatconfig.lua + emoticon.xml）。
 const Map<String, String> kCodeToSprite = {
