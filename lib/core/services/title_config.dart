@@ -30,6 +30,7 @@ import '../net/config.dart'
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import 'config_text_cache.dart';
 
 /// 本模块日志标签。
 const String _logTag = 'Title';
@@ -186,9 +187,14 @@ class TitleConfigClient {
       : baseUrl;
 
   Future<String> _getText(String url) async {
+    // 同 PartnerClient：配置名带 md5 → 可永久缓存；先本地、未命中才请求并回写。
+    final cached = await ConfigTextCache.instance.get(url);
+    if (cached != null) return cached;
     final resp = await _dio.get(url);
     final d = resp.data;
-    return d is String ? d : '$d';
+    final text = d is String ? d : '$d';
+    await ConfigTextCache.instance.put(url, text);
+    return text;
   }
 
   /// 拉取并解析目录（缓存）。失败返回空目录（不缓存失败结果）。

@@ -28,6 +28,7 @@ import '../net/config.dart'
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import 'config_text_cache.dart';
 import 'title_config.dart' show parseConfigIndex;
 
 /// 本模块日志标签。
@@ -373,9 +374,15 @@ class PartnerClient {
       : baseUrl;
 
   Future<String> _getText(String url) async {
+    // 配置文件名带 md5（内容变了文件名就变）→ 可永久缓存：先读本地，命中即用
+    // （离线也能画出亲密度进度条），未命中才发请求并回写。
+    final cached = await ConfigTextCache.instance.get(url);
+    if (cached != null) return cached;
     final resp = await _dio.get(url);
     final d = resp.data;
-    return d is String ? d : '$d';
+    final text = d is String ? d : '$d';
+    await ConfigTextCache.instance.put(url, text);
+    return text;
   }
 
   /// 进程内缓存：关系等级阈值（`FriendSystem.levelIntimacy.partnerLevel_list`）。
