@@ -13,7 +13,6 @@ import '../crypto/md5_sign.dart' show httpGetParamMd5, httpGetS1Map;
 import '../net/config.dart' show backendShequ, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
-import '../utils/avatar_debug.dart';
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
@@ -575,11 +574,6 @@ class ProfileClient {
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
-    // 临时诊断：人物中心到底返回了什么 —— 实测该端点经常整体为空，
-    // 需要看原始响应才能判断（见 core/utils/avatar_debug.dart）。
-    avatarDebug(
-      'headInfos resp=${text.length > 400 ? '${text.substring(0, 400)}…' : text}',
-    );
     final decoded = decodeHttpResponse(text);
     final data = decoded is Map ? decoded['data'] : null;
     if (data is! Map) return out;

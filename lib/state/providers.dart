@@ -19,7 +19,6 @@ import '../core/services/partner.dart';
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
-import '../core/utils/avatar_debug.dart';
 import '../core/utils/log.dart';
 
 /// ChatService 单例（注入本地 SQLite 用于持久化；main() 中 override databaseProvider）。
@@ -476,17 +475,6 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
     headType: useDiy ? null : (fallback?.type ?? headType),
     headId: useDiy ? null : (fallback?.id ?? headId),
     frameId: profile?.headFrameId,
-  );
-  // 临时诊断（见 core/utils/avatar_debug.dart）
-  avatarDebug(
-    'self slot(diy=${slot?.diyUrl}, type=${slot?.type}, id=${slot?.id}) '
-    'profile(name=${profile?.nickname}, avatar=${profile?.avatarUrl}, '
-    'frame=${profile?.headFrameId}, head=${profile?.headType}/${profile?.headId}, '
-    'skin=${profile?.headSkinId}, model=${profile?.headModel})',
-  );
-  avatarDebug(
-    'self resolved name=${info.name} avatar=${(info.avatarUrl ?? "").isEmpty ? "无" : info.avatarUrl} '
-    'head=${info.headType}/${info.headId} frame=${info.frameId}',
   );
   log.debug(
     '本人头像资料: name=${info.name} head=${info.headType}/${info.headId} '
