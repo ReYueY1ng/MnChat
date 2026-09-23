@@ -114,7 +114,12 @@ class AvatarView extends StatelessWidget {
         errorBuilder: (_, _, _) => const SizedBox.shrink(),
       );
     } else if (urlText != null && urlText.isNotEmpty) {
-      imageLayer = Image(image: CachedNetworkImageProvider(urlText),
+      imageLayer = Image(
+        image: CachedNetworkImageProvider(
+          urlText,
+          // 头像走独立配额，不会被动态/大图挤出缓存
+          kind: ImageCacheKind.avatar,
+        ),
         fit: BoxFit.cover,
         // 加载中：先不显示半透明图像层，避免闪烁/半透明
         frameBuilder: (context, child, frame, wasSync) {
