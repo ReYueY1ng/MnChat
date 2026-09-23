@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../core/services/image_disk_cache.dart';
 
 /// 打开全屏图片查看器（左右翻页，点按关闭，双指缩放）。
 void openImageViewer(BuildContext context, List<String> urls, int initialIndex) {
@@ -54,7 +55,7 @@ class _ImageViewerPageState extends State<ImageViewerPage> {
           onTap: () => Navigator.of(context).pop(),
           child: InteractiveViewer(
             child: Center(
-              child: Image.network(widget.urls[i], fit: BoxFit.contain,
+              child: Image(image: CachedNetworkImageProvider(widget.urls[i]), fit: BoxFit.contain,
                   errorBuilder: (_, _, _) => Icon(Icons.broken_image, color: cs.onSurface, size: 48),
                   loadingBuilder: (c, w, p) => p == null ? w : const Center(child: CircularProgressIndicator())),
             ),

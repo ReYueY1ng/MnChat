@@ -6,6 +6,7 @@ import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart' show buildRichSpans, RichTextView;
 import 'widgets/image_viewer.dart' show openImageViewer;
+import '../core/services/image_disk_cache.dart';
 
 /// 动态详情页 —— 左侧动态全文，右侧评论区；窄屏上下堆叠。
 class DynamicsDetailPage extends ConsumerStatefulWidget {
@@ -438,8 +439,7 @@ class _PostPanel extends StatelessWidget {
                       aspectRatio: p.aspect > 0
                           ? p.aspect.clamp(0.5, 2.5)
                           : 1.5,
-                      child: Image.network(
-                        p.url,
+                      child: Image(image: CachedNetworkImageProvider(p.url),
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) => const SizedBox.shrink(),
                         loadingBuilder: (c, w, l) =>

@@ -61,6 +61,7 @@ import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'head_frame.dart' show HeadFrameOverlay, headFrameSlotSize;
 import 'rich_text_view.dart';
+import '../../core/services/image_disk_cache.dart';
 
 /// 左侧页签栏的测试定位 Key。
 const Key avatarEditNavKey = Key('avatarEditNav');
@@ -1196,8 +1197,7 @@ class _AvatarEditDialogState extends ConsumerState<AvatarEditDialog> {
             padding: const EdgeInsets.all(AppSpacing.xs),
             child: ClipRRect(
               borderRadius: AppRadius.inputR,
-              child: Image.network(
-                url,
+              child: Image(image: CachedNetworkImageProvider(url),
                 fit: BoxFit.cover,
                 errorBuilder: (_, _, _) => Icon(
                   Icons.image_not_supported_outlined,

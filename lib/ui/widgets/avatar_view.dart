@@ -4,6 +4,7 @@ import '../../core/models/messages.dart';
 import '../../core/models/nickname.dart' show plainNickname;
 import '../../core/models/skin_head_catalog.dart' show headIconAsset;
 import 'head_frame.dart';
+import '../../core/services/image_disk_cache.dart';
 
 /// 头像本体盒子（始终为 `radius * 2`，有框/无框一致）的测试定位 Key。
 const Key avatarViewAvatarBoxKey = Key('avatarViewAvatarBox');
@@ -113,8 +114,7 @@ class AvatarView extends StatelessWidget {
         errorBuilder: (_, _, _) => const SizedBox.shrink(),
       );
     } else if (urlText != null && urlText.isNotEmpty) {
-      imageLayer = Image.network(
-        urlText,
+      imageLayer = Image(image: CachedNetworkImageProvider(urlText),
         fit: BoxFit.cover,
         // 加载中：先不显示半透明图像层，避免闪烁/半透明
         frameBuilder: (context, child, frame, wasSync) {

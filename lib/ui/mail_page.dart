@@ -27,6 +27,7 @@ import 'dynamics_detail_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart' show headFrameSlotSize, kAvatarListTileDensity;
+import '../core/services/image_disk_cache.dart';
 
 /// 宽窄分界：内容宽 ≥760 双栏（对齐 home_shell 会话双栏阈值）。
 const double kMailCentreWideWidth = 760;
@@ -929,8 +930,7 @@ class _MailPageState extends ConsumerState<MailPage> {
                     padding: const EdgeInsets.only(right: AppSpacing.sm),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(AppRadius.chip),
-                      child: Image.network(
-                        m.picUrl,
+                      child: Image(image: CachedNetworkImageProvider(m.picUrl),
                         width: 44,
                         height: 44,
                         fit: BoxFit.cover,
@@ -1209,8 +1209,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                 padding: const EdgeInsets.only(bottom: AppSpacing.sm),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(AppRadius.chip),
-                  child: Image.network(
-                    url,
+                  child: Image(image: CachedNetworkImageProvider(url),
                     width: double.infinity,
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => Container(

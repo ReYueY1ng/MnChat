@@ -20,6 +20,7 @@ import 'group_detail_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
+import '../core/services/image_disk_cache.dart';
 
 /// 相邻两条消息间隔超过该值时，在两条消息之间插入居中的时间分隔条。
 ///
@@ -984,8 +985,7 @@ class _RichMediaBubble extends StatelessWidget {
                 padding: const EdgeInsets.only(bottom: 6),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(8),
-                  child: Image.network(
-                    media.picList.first,
+                  child: Image(image: CachedNetworkImageProvider(media.picList.first),
                     width: 120,
                     height: 90,
                     fit: BoxFit.cover,

@@ -12,6 +12,7 @@ import 'avatar_view.dart';
 import 'head_frame.dart';
 import 'image_viewer.dart';
 import 'rich_text_view.dart';
+import '../../core/services/image_disk_cache.dart';
 
 /// 动态卡片 —— 左上头像+徽标+昵称 / 相对时间·IP属地 / 内容(查看全文) / 图片 / 附加信息 / 右下操作区。
 class DynamicsCard extends ConsumerWidget {
@@ -258,8 +259,7 @@ class _Images extends StatelessWidget {
                 borderRadius: BorderRadius.circular(6),
                 child: AspectRatio(
                   aspectRatio: 1,
-                  child: Image.network(
-                    pics[i].url,
+                  child: Image(image: CachedNetworkImageProvider(pics[i].url),
                     fit: BoxFit.cover,
                     errorBuilder: (_, _, _) => const SizedBox.shrink(),
                     loadingBuilder: (c, w, p) =>
@@ -303,7 +303,7 @@ class _SingleImageState extends State<_SingleImage> {
 
   Future<void> _resolve() async {
     try {
-      final provider = NetworkImage(widget.url);
+      final provider = CachedNetworkImageProvider(widget.url);
       final completer = Completer<ImageInfo>();
       final stream = provider.resolve(ImageConfiguration.empty);
       late final ImageStreamListener listener;
@@ -341,8 +341,7 @@ class _SingleImageState extends State<_SingleImage> {
         child: SizedBox(
           width: width,
           height: tileH,
-          child: Image.network(
-            widget.url,
+          child: Image(image: CachedNetworkImageProvider(widget.url),
             fit: BoxFit.cover,
             errorBuilder: (_, _, _) => const SizedBox.shrink(),
             loadingBuilder: (c, w, p) =>
