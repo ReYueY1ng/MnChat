@@ -40,19 +40,24 @@ class _MainShellState extends ConsumerState<MainShell> {
     ref.listenManual(keepAliveProvider, (_, next) => _applyKeepAlive(next));
   }
 
-  /// 后台保活设置变化：开关即启停前台服务。
+  /// 后台保活设置变化：这里只负责「关掉时立刻停」。
   ///
-  /// **必须在前台时启动**：Android 12+ 禁止应用在后台启动前台服务
-  /// （`ForegroundServiceStartNotAllowedException`）。之前一版改成「退到后台才
-  /// 启动」，结果服务起不来 → 进程不被钉住 → 后台长连接被系统回收 →
-  /// **收不到消息，自然也就没有通知**（用户反馈「通知发不出去了」）。
-  ///
-  /// 代价是常驻通知。已尽量做轻：走 `mnchat_service`（IMPORTANCE_MIN）渠道，
-  /// 无声、无角标、文案中性，且消息通知走独立渠道互不影响。不想要常驻就把
-  /// 「后台保持连接」关掉 —— 那也意味着退到后台后收不到消息（二者不可兼得，
-  /// 这是 Android 的硬性约束）。
+  /// 前台服务**不再在这里启动** —— 应用在前台时通知栏必须是干净的（旧实现一进
+  /// 主界面就挂常驻通知「MnChat 运行中」，用户明确不接受）。启动时机交给
+  /// `MnChatApp` 的生命周期回调：退到后台才 start、回到前台就 stop。
   void _applyKeepAlive(bool enabled) {
-    ref.read(notificationServiceProvider).setBackgroundMode(enabled);
+    final svc = ref.read(notificationServiceProvider);
+    if (!enabled) {
+      svc.setBackgroundMode(false);
+      return;
+    }
+    // 设置页在前台打开，正常不会命中；稳妥起见按当前生命周期判断一次。
+    final lifecycle = WidgetsBinding.instance.lifecycleState;
+    final background =
+        lifecycle == AppLifecycleState.paused ||
+        lifecycle == AppLifecycleState.hidden ||
+        lifecycle == AppLifecycleState.detached;
+    svc.setBackgroundMode(background);
   }
 
   void _switchTab(int index) {
