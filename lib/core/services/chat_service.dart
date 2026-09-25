@@ -15,6 +15,7 @@ import 'auth.dart';
 import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
 import 'chat/group_name_cache.dart';
+import 'chat/message_store.dart';
 import 'chat/profile_cache.dart';
 import 'chat/push_dispatcher.dart';
 import 'chatpush.dart';
@@ -109,6 +110,9 @@ class ChatService {
   /// 资料缓存（好友/群成员昵称头像 + 群详情解析）。
   late final ProfileCache _profiles;
 
+  /// 消息/会话本地持久化。
+  late final MessageStore _store;
+
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
@@ -196,6 +200,12 @@ class ChatService {
       groupMemberProfiles: _groupMemberProfiles,
       emitSessionSnapshot: _emitSessionSnapshot,
       saveFriendCache: _saveFriendCache,
+    );
+    _store = MessageStore(
+      getDb: () => _db,
+      getMyUin: () => myUin,
+      friendSessions: _friendSessions,
+      groupSessions: _groupSessions,
     );
   }
 
@@ -1094,7 +1104,7 @@ class ChatService {
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
-    _persistMessage(ChatSessionType.friend, uin2, m);
+    _store.persistMessage(ChatSessionType.friend, uin2, m);
     _emitSessionSnapshot();
   }
 
@@ -1124,46 +1134,8 @@ class ChatService {
       );
     }
     _eventCtrl.add(ChatEvent(ChatSessionType.group, groupId, m));
-    _persistMessage(ChatSessionType.group, groupId, m);
+    _store.persistMessage(ChatSessionType.group, groupId, m);
     _emitSessionSnapshot();
-  }
-
-  /// 持久化一条消息 + 更新会话行。写库失败仅记录日志，不阻断消息链路。
-  void _persistMessage(ChatSessionType type, int id, ChatMessage m) {
-    final db = _db;
-    if (db == null || myUin == 0) return;
-    final key = _sessionKey(type, id);
-    final owner = myUin;
-    unawaited(() async {
-      try {
-        await db.insertMessage(
-          chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner),
-        );
-      } catch (e) {
-        log.error('persist message failed: $e', tag: _logTag);
-      }
-    }());
-    _persistSession(type, id);
-  }
-
-  /// 持久化会话行（未读/最后消息，按账号隔离）。
-  void _persistSession(ChatSessionType type, int id) {
-    final db = _db;
-    if (db == null || myUin == 0) return;
-    final s = type == ChatSessionType.friend
-        ? _friendSessions[id]
-        : _groupSessions[id];
-    if (s == null) return;
-    unawaited(() async {
-      try {
-        await db.upsertSession(chatSessionToCompanion(s, ownerUin: myUin));
-      } catch (e) {
-        // 写会话行失败必须留痕：历史上这里没有 try/catch，schema 与 drift 生成的
-        // ON CONFLICT 不匹配时抛的是「未捕获的异步异常」，只在 logcat 里刷
-        // Unhandled Exception，应用侧完全无感 —— 表现就是重启后会话丢失。
-        log.error('persist session failed: $e', tag: _logTag);
-      }
-    }());
   }
 
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
@@ -1172,7 +1144,7 @@ class ChatService {
     // 缓存以 time 升序为规范（离线/网络历史乱序到达时归位）。
     final sorted = sortMessagesAscending(msgs);
     _messagesCache[key] = sorted;
-    _persistHistory(type, id, sorted);
+    _store.persistHistory(type, id, sorted);
     // 回填会话摘要（最后一条消息）：否则网络历史拉回后会话列表
     // 不显示最近消息，也无法区分"已聊过"与"纯好友"。
     final map = type == ChatSessionType.friend
@@ -1181,40 +1153,12 @@ class ChatService {
     final existing = map[id];
     if (existing != null) {
       map[id] = existing.copyWith(lastMessage: sorted.last);
-      _persistSession(type, id);
+      _store.persistSession(type, id);
     }
     _emitSessionSnapshot();
     // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配，
     // 收到后重新 yield historyOf）
     _eventCtrl.add(ChatEvent(type, id, sorted.last));
-  }
-
-  /// 持久化整段历史（先清空该会话旧消息再批量写入，避免重复）。
-  void _persistHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
-    final db = _db;
-    if (db == null) return;
-    final key = _sessionKey(type, id);
-    unawaited(_replaceHistoryInDb(db, key, msgs));
-  }
-
-  Future<void> _replaceHistoryInDb(
-    AppDatabase db,
-    String key,
-    List<ChatMessage> msgs,
-  ) async {
-    // 原子替换：清空 + 批量写入在一个事务内完成，中途失败不留半写状态。
-    final owner = myUin;
-    if (owner == 0) return;
-    await db.replaceMessages(
-      owner,
-      key,
-      msgs
-          .map(
-            (m) =>
-                chatMessageToCompanion(m, key, myUin: owner, ownerUin: owner),
-          )
-          .toList(),
-    );
   }
 
   void _emitSessionSnapshot() {
@@ -1266,7 +1210,7 @@ class ChatService {
         lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
       );
     }
-    _persistSession(type, id);
+    _store.persistSession(type, id);
     _emitSessionSnapshot();
   }
 
