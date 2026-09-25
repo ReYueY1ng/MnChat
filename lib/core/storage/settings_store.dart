@@ -1,8 +1,7 @@
 /// 应用设置持久化 —— 基于 Drift `settings` 表的 key-value 存储。
 ///
-/// 用 Drift 表替代原 path_provider JSON 文件：Drift 在 Web 走 WASM/IndexedDB、
-/// 原生走 SQLite，同一套代码跨平台统一（原文件方案在 Web 上不可用，
-/// 会因 `getApplicationSupportDirectory()`/`File` 抛错）。
+/// 用 Drift 表替代原 path_provider JSON 文件：走原生 SQLite，避免
+/// `getApplicationSupportDirectory()`/`File` 的可用性问题。
 library;
 
 import 'dart:convert';

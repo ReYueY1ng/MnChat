@@ -20,11 +20,10 @@
 library;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../net/config.dart'
-    show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
+    show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
@@ -318,10 +317,7 @@ class PartnerClient {
     String? baseUrl,
   }) : _dio = dio ?? createDio(),
        baseUrl =
-           baseUrl ??
-           (kIsWeb
-               ? backendShequ()
-               : (kDefaultUrls['HttpCommon'] ?? kDefaultBase));
+           baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
 
   /// 通用签名 URL（可指定相对路径）。与 [PlayerHomeClient] 同源。
   String _url(

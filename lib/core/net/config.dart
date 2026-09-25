@@ -2,8 +2,6 @@
 /// 移植自 MNClient `net/urlresolver.py` DEFAULT_URLS。
 library;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
-
 const String kDefaultBase = 'https://shequ.mini1.cn:8081/';
 const int kCltVersion = 80384;
 const String kApiId = '110';
@@ -45,26 +43,18 @@ const Map<String, String> kDefaultUrls = {
   'HttpGetToken': kDefaultBase,
 };
 
-// ── 平台感知后端地址 ──────────────────────────────────────────────────────────
-// 原生：真实 mini1 host 直连。Web：同源代理前缀（本地 tool/web_proxy.dart
-// 把 /mw/<backend>/* 转发到对应后端），从而规避浏览器 CORS。
-// Uri.base.origin = 当前页面 origin（如 http://localhost:8080）。
+// ── 后端地址 ──────────────────────────────────────────────────────────────────
+// 真实 mini1 host 直连（仅 Linux / Android 原生平台）。
 
-/// 登录服务器（login_v3。原生用端口随机池；Web 由代理固定转发到 14100）。
-String backendLogin() => kIsWeb
-    ? '${Uri.base.origin}/mw/login'
-    : 'https://$kLoginHost:14100';
+/// 登录服务器（login_v3，调用方叠加端口随机池）。
+String backendLogin() => 'https://$kLoginHost:14100';
 
 /// WS 配置端点 base（调用方拼 `/update/?...`）。
-String backendWsConfig() => kIsWeb
-    ? '${Uri.base.origin}/mw/wsconfig'
-    : 'http://wskacchm.mini1.cn:4000';
+String backendWsConfig() => 'http://wskacchm.mini1.cn:4000';
 
 /// 主 HTTP 网关（shequ，friend/group/profile/rpc 等）。
-String backendShequ() =>
-    kIsWeb ? '${Uri.base.origin}/mw/shequ' : kDefaultBase.replaceAll(RegExp(r'/$'), '');
+String backendShequ() => kDefaultBase.replaceAll(RegExp(r'/$'), '');
 
 /// ChatPush 负载均衡（minilb/alloc、minilb/rpc）。
-String backendChatpush(int env) => kIsWeb
-    ? '${Uri.base.origin}/mw/chatpush'
-    : (kChatpushLbUrls[env] ?? 'https://chatpush.mini1.cn:19602');
+String backendChatpush(int env) =>
+    kChatpushLbUrls[env] ?? 'https://chatpush.mini1.cn:19602';

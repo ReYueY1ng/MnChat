@@ -45,7 +45,7 @@ final databaseProvider = Provider<AppDatabase>(
   (ref) => throw UnimplementedError('AppDatabase must be created in main()'),
 );
 
-/// 应用设置存储（自动登录凭据等）单例 —— 基于 Drift 设置表（Web/原生统一）。
+/// 应用设置存储（自动登录凭据等）单例 —— 基于 Drift 设置表。
 final settingsProvider = Provider<SettingsStore>(
   (ref) => SettingsStore(ref.read(databaseProvider)),
 );

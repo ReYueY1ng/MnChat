@@ -8,7 +8,7 @@
 /// 构建全部输出，release 构建只保留 warn 及以上。
 ///
 /// 本设施只依赖 `package:flutter/foundation.dart` 的 `debugPrint`，不碰
-/// `dart:io`，因此 android / linux / windows / web 全平台可用。
+/// `dart:io`，因此 android / linux / windows 全平台可用。
 ///
 /// 用法：
 /// ```dart

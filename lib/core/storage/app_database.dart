@@ -73,7 +73,7 @@ class Friends extends Table {
 }
 
 /// 应用设置 key-value 存储（自动登录凭据、开关、服务器地址、排序模式等）。
-/// 用 Drift 表替代 path_provider JSON 文件：Web(WASM/IndexedDB) 与原生(SQLite) 统一。
+/// 用 Drift 表替代 path_provider JSON 文件（原生 SQLite）。
 @DataClassName('SettingRecord')
 class SettingsTable extends Table {
   TextColumn get key => text()();

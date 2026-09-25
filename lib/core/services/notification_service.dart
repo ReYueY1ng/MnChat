@@ -7,7 +7,7 @@
 /// - **Linux 桌面**：走系统 `org.freedesktop.Notifications`（复用项目已有的
 ///   `dbus` 依赖，不新增包）。点击动作（ActionInvoked）会反查 sessionKey 抛到
 ///   [NotificationService.taps]。
-/// - **其他平台**（Windows / macOS / Web / 单元测试）：[NoopNotificationService]，
+/// - **其他平台**（Windows / macOS / 单元测试）：[NoopNotificationService]，
 ///   任何调用都不抛异常。
 library;
 
@@ -308,7 +308,6 @@ class NoopNotificationService implements NotificationService {
 
 /// 按当前平台创建通知服务。
 NotificationService createNotificationService() {
-  if (kIsWeb) return NoopNotificationService();
   switch (defaultTargetPlatform) {
     case TargetPlatform.android:
       return AndroidNotificationService();

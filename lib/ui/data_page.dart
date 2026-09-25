@@ -8,7 +8,6 @@ import 'dart:typed_data';
 
 import 'package:drift/drift.dart' show countAll;
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -97,8 +96,8 @@ class _DataPageState extends ConsumerState<DataPage> {
     try {
       final service = BackupService(ref.read(databaseProvider));
       final bytes = await service.exportJson(owner);
-      // file_picker 12.x 的 saveFile 会自行写入字节：桌面端写盘并返回 Uri，
-      // Web 端直接触发下载（返回 null），因此无需 dart:io，也不影响 Web 构建。
+      // file_picker 12.x 的 saveFile 会自行写入字节：桌面端写盘并返回 Uri。
+      // 取消（未选择路径）时返回 null。
       final uri = await FilePicker.saveFile(
         dialogTitle: '导出聊天记录',
         fileName: 'mnchat_backup_${owner}_${_timestamp()}.json',
@@ -111,8 +110,6 @@ class _DataPageState extends ConsumerState<DataPage> {
       if (uri != null) {
         final path = uri.scheme == 'file' ? uri.toFilePath() : uri.toString();
         _snack('已导出到 $path');
-      } else if (kIsWeb) {
-        _snack('已开始下载备份文件');
       } else {
         _snack('已取消');
       }

@@ -17,11 +17,10 @@ library;
 import 'dart:convert' show jsonDecode;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../net/config.dart'
-    show backendShequ, kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
+    show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
@@ -445,8 +444,8 @@ class MsgBoxClient {
     Dio? dio,
     String? baseUrl,
   })  : _dio = dio ?? createDio(),
-        baseUrl = baseUrl ??
-            (kIsWeb ? backendShequ() : (kDefaultUrls['HttpCommon'] ?? kDefaultBase));
+        baseUrl =
+            baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
 
   String _url(String act, [Map<String, String> params = const {}]) {
     final base = baseUrl.replaceAll(RegExp(r'/$'), '');

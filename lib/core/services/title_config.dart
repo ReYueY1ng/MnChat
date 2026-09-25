@@ -17,12 +17,10 @@
 library;
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../net/config.dart'
     show
-        backendShequ,
         kApiId,
         kClientVersionStr,
         kDefaultBase,
@@ -177,7 +175,7 @@ class TitleConfigClient {
 
   TitleConfigClient({Dio? dio, String? baseUrl})
     : _dio = dio ?? createDio(),
-      baseUrl = baseUrl ?? (kIsWeb ? backendShequ() : kDefaultBase);
+      baseUrl = baseUrl ?? kDefaultBase;
 
   /// 进程内缓存目录。
   static TitleCatalog? _cache;
@@ -352,8 +350,7 @@ class TitleClient {
     String? baseUrl,
   }) : _dio = dio ?? createDio(),
        baseUrl =
-           baseUrl ??
-           (kIsWeb ? backendShequ() : (kDefaultUrls['HttpCommon'] ?? kDefaultBase));
+           baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
 
   String _url(String act, [Map<String, String> params = const {}]) {
     final base = baseUrl.replaceAll(RegExp(r'/$'), '');

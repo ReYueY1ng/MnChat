@@ -8,7 +8,7 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show VoidCallback, kIsWeb;
+import 'package:flutter/foundation.dart' show VoidCallback;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../crypto/chatpush_cipher.dart' show chatpushDecrypt, chatpushEncrypt;
@@ -58,9 +58,7 @@ class ChatPushClient {
   static const String kProdLb = 'https://chatpush.mini1.cn:19602';
 
   ChatPushClient({int env = 0, String? lbUrl, Dio? dio})
-    : _lbUrl =
-          lbUrl ??
-          (kIsWeb ? backendChatpush(env) : (kChatpushLbUrls[env] ?? kProdLb)),
+    : _lbUrl = lbUrl ?? (kChatpushLbUrls[env] ?? kProdLb),
       _dio = dio ?? createDio();
 
   // ── alloc ─────────────────────────────────────────────────────────────

@@ -2,11 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart'
-    show
-        TargetPlatform,
-        defaultTargetPlatform,
-        kIsWeb,
-        visibleForTesting;
+    show TargetPlatform, defaultTargetPlatform, visibleForTesting;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:tray_manager/tray_manager.dart' as tm;
 import 'package:window_manager/window_manager.dart';
@@ -28,7 +24,7 @@ const String _logTag = 'TrayService';
 ///   `dart_libayatana_appindicator` 又是 GPL-3.0，不能用于本项目，故自研。
 ///   自研实现支持**左键双击 / 中键开窗口**，以及菜单项。
 ///
-/// 非桌面平台（android / web）全部为空操作，避免调用未注册的平台通道。
+/// 非桌面平台（android）全部为空操作，避免调用未注册的平台通道。
 class TrayService {
   TrayService._();
 
@@ -42,11 +38,9 @@ class TrayService {
   static _TrayClickListener? _trayListener;
   static sni.SniTray? _sni;
 
-  static bool get _isLinux =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.linux;
+  static bool get _isLinux => defaultTargetPlatform == TargetPlatform.linux;
 
-  static bool get _isWindows =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
+  static bool get _isWindows => defaultTargetPlatform == TargetPlatform.windows;
 
   static bool get _isDesktop => _isLinux || _isWindows;
 

@@ -8,7 +8,7 @@ import '../state/providers.dart';
 
 /// 应用锁解锁页：全屏居中，无 AppBar/返回键。
 ///
-/// 使用自绘数字键盘（不依赖系统输入法），可同时用于桌面、移动与 Web。
+/// 使用自绘数字键盘（不依赖系统输入法），可同时用于桌面与移动端。
 /// 输入位数达到最小长度后即可自动校验；正确则回调 [onUnlocked]，
 /// 错误则震动提示"密码错误"并清空输入。
 class LockPage extends ConsumerStatefulWidget {

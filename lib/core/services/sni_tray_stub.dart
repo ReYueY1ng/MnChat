@@ -2,7 +2,7 @@ import 'dart:typed_data';
 
 import 'sni_menu_item.dart';
 
-/// 非 `dart:io` 平台（Web）的空实现：Linux 托盘只在桌面端可用。
+/// 无 `dart:io` 平台（非原生宿主）的空实现：Linux 托盘只在桌面端可用。
 class SniTray {
   SniTray({
     required this.title,

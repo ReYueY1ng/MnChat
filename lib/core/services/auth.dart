@@ -7,7 +7,6 @@ import 'dart:convert';
 import 'dart:math';
 
 import 'package:dio/dio.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../crypto/encoding.dart' show urlsafeB64Urlencode;
@@ -122,19 +121,12 @@ class LoginClient {
 
     final msg = _encode(payload);
     final sign = md5Sign(['msg=', msg, '&key=', loginAuthKey]);
-    // Web：走同源代理（tool/web_proxy.dart），跳过端口随机池（代理固定 14100）；
-    // 原生：保留端口池随机负载均衡。
-    final Uri url;
-    if (kIsWeb) {
-      url = Uri.parse('${backendLogin()}$kLoginPath')
-          .replace(queryParameters: {'msg': msg, 'sign': sign});
-    } else {
-      final port = kLoginPorts[Random().nextInt(kLoginPorts.length)];
-      url = Uri.https(kLoginHost, kLoginPath, {
-        'msg': msg,
-        'sign': sign,
-      }).replace(port: port);
-    }
+    // 端口池随机负载均衡。
+    final port = kLoginPorts[Random().nextInt(kLoginPorts.length)];
+    final url = Uri.https(kLoginHost, kLoginPath, {
+      'msg': msg,
+      'sign': sign,
+    }).replace(port: port);
 
     final resp = await _dio.getUri(url);
     final text = resp.data is String
