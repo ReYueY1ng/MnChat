@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// 设计 token —— 间距 / 圆角 / 语义色 / 尺寸 的唯一来源。
 ///

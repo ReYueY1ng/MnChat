@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/models/messages.dart';
 import '../../core/models/nickname.dart' show plainNickname;

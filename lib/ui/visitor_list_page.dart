@@ -7,7 +7,7 @@
 ///   3. 按服务端返回顺序逐行渲染（不排序、不分页）。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/player_home.dart';

@@ -1,6 +1,6 @@
 // Widget 层验证：ChatPage 使用 flutter_chat_ui Chat 组件后，
 // addLocalMessage 的消息通过桥接层自动上屏。
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';

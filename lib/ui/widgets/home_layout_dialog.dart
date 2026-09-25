@@ -6,7 +6,7 @@
 /// 不改动任何字段**，保存时原样回传，因此无需（也不应）臆造布局 schema。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/models/homepage_modules.dart' show kHomeModuleNames;
 import '../theme/app_tokens.dart';

@@ -44,11 +44,12 @@ dependencies:
   drift_flutter: ^0.3.1
   path_provider: ^2.1.6
   path: ^1.9.1
-  # 固定在 2.11.x/2.9.x：2.12.0/2.9.1 起上游迁移到 material_ui 包，
-  # 其 ChatTheme.fromThemeData 要求 material_ui 的 ThemeData，与
-  # Flutter 的 Theme.of(context) 类型冲突，导致编译失败。
-  flutter_chat_ui: 2.11.1
-  flutter_chat_core: 2.9.0
+  # 2.12.0/2.9.1 起上游改用 material_ui（Flutter 官方从框架中拆分出的
+  # Material 库）承载 ThemeData / Material widgets，因此本项目同步迁移到
+  # material_ui（见 lib/ 内 import）。
+  flutter_chat_ui: 2.12.0
+  flutter_chat_core: 2.9.1
+  material_ui: ^1.4.0
   flutter_staggered_grid_view: ^0.7.0
   archive: ^4.2.0
   encrypt: ^5.0.3

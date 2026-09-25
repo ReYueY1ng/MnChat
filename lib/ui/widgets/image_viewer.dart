@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import '../../core/services/image_disk_cache.dart';
 
 /// 打开全屏图片查看器（左右翻页，点按关闭，双指缩放）。

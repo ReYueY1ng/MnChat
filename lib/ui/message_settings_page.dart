@@ -4,7 +4,7 @@
 /// 可新增/删除。会话级"免打扰/置顶"在会话列表长按菜单中设置。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';

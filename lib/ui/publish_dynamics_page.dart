@@ -6,7 +6,7 @@
 /// - 发布投票动态：先 create_vote 拿 vote_id，再 add_posting 带 vote_id。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/dynamics.dart';

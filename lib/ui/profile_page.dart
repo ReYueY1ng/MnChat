@@ -40,7 +40,7 @@
 ///   - `动态` 正文（本卡只展示条数，正文请在动态页查看）。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 

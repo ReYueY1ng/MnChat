@@ -4,7 +4,7 @@
 /// 但好友页会过滤掉）。此处列出全部黑名单好友，支持移出/清空/添加。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';

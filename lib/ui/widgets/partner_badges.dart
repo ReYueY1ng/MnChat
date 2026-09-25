@@ -6,7 +6,7 @@
 /// 近似绘制。真实美术仍需从图集拆分后再替换。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 import '../../core/services/partner.dart';
 import '../theme/app_tokens.dart';

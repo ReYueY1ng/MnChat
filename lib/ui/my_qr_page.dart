@@ -4,7 +4,7 @@
 /// 对方可用好友页"按迷你号添加"直接加我。
 library;
 
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
