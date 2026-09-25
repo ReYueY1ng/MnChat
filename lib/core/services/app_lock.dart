@@ -16,6 +16,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:isolate';
 import 'dart:math';
 
 import 'package:crypto/crypto.dart' show sha256;
@@ -156,18 +157,21 @@ class AppLockService {
   }
 
   /// PBKDF2-HMAC-SHA256 派生 256 位密钥。
-  Future<List<int>> _derive(String pin, List<int> salt, int iterations) async {
-    final pbkdf2 = Pbkdf2(
-      macAlgorithm: Hmac.sha256(),
-      iterations: iterations,
-      bits: 256,
-    );
-    final key = await pbkdf2.deriveKey(
-      secretKey: SecretKey(utf8.encode(pin)),
-      nonce: salt,
-    );
-    return key.extractBytes();
-  }
+  /// 在独立 isolate 中派生密钥：PBKDF2 @100k 在 AOT 下约需 600ms，
+  /// 放到后台 isolate 可避免阻塞 UI 线程（解锁页在派发期间仍可响应触摸）。
+  Future<List<int>> _derive(String pin, List<int> salt, int iterations) =>
+      Isolate.run(() async {
+        final pbkdf2 = Pbkdf2(
+          macAlgorithm: Hmac.sha256(),
+          iterations: iterations,
+          bits: 256,
+        );
+        final key = await pbkdf2.deriveKey(
+          secretKey: SecretKey(utf8.encode(pin)),
+          nonce: salt,
+        );
+        return key.extractBytes();
+      });
 
   /// 设置阶段：必须为 6–8 位纯数字。
   bool _isValidNewPin(String pin) =>

@@ -48,7 +48,9 @@ class _LockPageState extends ConsumerState<LockPage>
 
   /// 点击数字键。
   void _onDigit(String digit) {
-    if (_verifying || _pin.length >= AppLockService.maxPinLength) return;
+    // 不因 _verifying 丢弃按键：校验在后台 isolate 中进行，期间到达的数字
+    // 需累积，否则用户在 600ms 校验窗口内快速输完最后几位会丢键。
+    if (_pin.length >= AppLockService.maxPinLength) return;
     setState(() {
       _pin += digit;
       _error = null;
@@ -85,10 +87,8 @@ class _LockPageState extends ConsumerState<LockPage>
       widget.onUnlocked();
       return;
     }
-    // 校验期间有新输入 → 可能是更长的 PIN 尚未输完，用最新输入重试
-    if (!isConfirm &&
-        _pin.length < AppLockService.maxPinLength &&
-        _pin != attempt) {
+    // 校验期间有新输入 → 用最新输入重试（不再限制长度：最后一位也可能在校验中补上）
+    if (!isConfirm && _pin != attempt) {
       setState(() => _verifying = false);
       await _submit(isConfirm: false);
       return;
