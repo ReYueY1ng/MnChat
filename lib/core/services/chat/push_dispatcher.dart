@@ -13,7 +13,6 @@ import 'dart:convert';
 
 import '../../models/messages.dart';
 import '../chatpush.dart';
-import '../profile.dart';
 import '../../protocol/lua_table.dart' show decodeHttpResponse;
 import '../../utils/log.dart';
 
