@@ -2359,6 +2359,22 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ChatSessionsTable chatSessions = $ChatSessionsTable(this);
   late final $FriendsTable friends = $FriendsTable(this);
   late final $SettingsTableTable settingsTable = $SettingsTableTable(this);
+  late final Index idxChatMessagesOwnerSessionTime = Index(
+    'idx_chat_messages_owner_session_time',
+    'CREATE INDEX idx_chat_messages_owner_session_time ON chat_messages (owner_uin, session_key, time)',
+  );
+  late final Index idxChatMessagesOwnerTime = Index(
+    'idx_chat_messages_owner_time',
+    'CREATE INDEX idx_chat_messages_owner_time ON chat_messages (owner_uin, time)',
+  );
+  late final Index idxChatSessionsOwnerUin = Index(
+    'idx_chat_sessions_owner_uin',
+    'CREATE INDEX idx_chat_sessions_owner_uin ON chat_sessions (owner_uin)',
+  );
+  late final Index idxFriendsOwnerUin = Index(
+    'idx_friends_owner_uin',
+    'CREATE INDEX idx_friends_owner_uin ON friends (owner_uin)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2368,6 +2384,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     chatSessions,
     friends,
     settingsTable,
+    idxChatMessagesOwnerSessionTime,
+    idxChatMessagesOwnerTime,
+    idxChatSessionsOwnerUin,
+    idxFriendsOwnerUin,
   ];
 }
 

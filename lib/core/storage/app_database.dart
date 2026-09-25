@@ -2,6 +2,14 @@ import 'package:drift/drift.dart';
 
 part 'app_database.g.dart';
 
+/// 热点查询：`messagesOf`/`replaceMessages`/`allMessages` 都按
+/// (owner_uin, session_key) 过滤并按 time 排序。
+@TableIndex(
+  name: 'idx_chat_messages_owner_session_time',
+  columns: {#ownerUin, #sessionKey, #time},
+)
+/// 单账号全量消息按 time 排序（启动恢复）。
+@TableIndex(name: 'idx_chat_messages_owner_time', columns: {#ownerUin, #time})
 @DataClassName('ChatMessageRecord')
 class ChatMessages extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -24,6 +32,8 @@ class ChatMessages extends Table {
   IntColumn get ownerUin => integer().withDefault(const Constant(0))();
 }
 
+/// 热点查询：`allSessions` 按 owner_uin 过滤。
+@TableIndex(name: 'idx_chat_sessions_owner_uin', columns: {#ownerUin})
 @DataClassName('ChatSessionRecord')
 class ChatSessions extends Table {
   TextColumn get sessionKey => text()();
@@ -43,6 +53,8 @@ class ChatSessions extends Table {
 }
 
 /// 好友信息缓存：启动时先显示本地快照，再网络刷新（query_friend_list）。
+/// 热点查询：`allFriends` 按 owner_uin 过滤。
+@TableIndex(name: 'idx_friends_owner_uin', columns: {#ownerUin})
 @DataClassName('FriendRecord')
 class Friends extends Table {
   IntColumn get uin => integer()();
@@ -76,7 +88,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
 
   @override
-  int get schemaVersion => 8;
+  int get schemaVersion => 9;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -132,6 +144,15 @@ class AppDatabase extends _$AppDatabase {
         // columnTransformer 重建，按列名原样搬迁，保留已有 owner_uin 值。
         await m.alterTable(TableMigration(chatSessions));
         await m.alterTable(TableMigration(friends));
+      }
+      if (from < 9) {
+        // v8→v9: 为热点查询补索引（不改表结构）。索引定义见各表上的
+        // @TableIndex；这里用 Migrator 复用同一份生成 SQL，保证升级库与全新库
+        // 建出的索引名/列完全一致。
+        await m.createIndex(idxChatMessagesOwnerSessionTime);
+        await m.createIndex(idxChatMessagesOwnerTime);
+        await m.createIndex(idxChatSessionsOwnerUin);
+        await m.createIndex(idxFriendsOwnerUin);
       }
     },
   );
