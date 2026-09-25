@@ -11,6 +11,9 @@ import 'package:mnchat/ui/widgets/avatar_view.dart';
 import 'package:mnchat/ui/widgets/head_frame.dart';
 
 void main() {
+  // 解码静态头像框需要引擎绑定（plain test 里也会调用 instantiateImageCodec）。
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('headFrameAsset', () {
     test('静态 id 拼出 webp 资源路径', () {
       expect(headFrameAsset(20201), 'assets/headframes/20201.webp');
@@ -42,21 +45,19 @@ void main() {
       }
     });
 
-    test('每个动画 id 均有对应静态 PNG（128x128、非空）', () {
+    test('每个动画 id 均有对应静态头像框（WebP 128x128、非空）', () async {
       for (final id in kAnimatedFrameIds) {
         final file = File(headFrameStaticAsset(id));
         expect(file.existsSync(), isTrue, reason: '缺少静态头像框 $id');
         final bytes = file.readAsBytesSync();
-        // PNG 签名 + IHDR 尺寸（大端，偏移 16/20）。
-        expect(bytes.length, greaterThan(24), reason: '静态头像框 $id 过小');
         expect(bytes.length, greaterThan(1000), reason: '静态头像框 $id 疑似空白');
-        int be32(int o) =>
-            (bytes[o] << 24) |
-            (bytes[o + 1] << 16) |
-            (bytes[o + 2] << 8) |
-            bytes[o + 3];
-        expect(be32(16), 128, reason: '静态头像框 $id 宽度非 128');
-        expect(be32(20), 128, reason: '静态头像框 $id 高度非 128');
+        // 真实解码后再断言尺寸，不依赖容器格式（资源已由 PNG 迁移为 WebP）。
+        final codec = await ui.instantiateImageCodec(bytes);
+        final image = (await codec.getNextFrame()).image;
+        expect(image.width, 128, reason: '静态头像框 $id 宽度非 128');
+        expect(image.height, 128, reason: '静态头像框 $id 高度非 128');
+        image.dispose();
+        codec.dispose();
       }
     });
 

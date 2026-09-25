@@ -91,16 +91,25 @@ void main() {
       reason: '圆角卡片左右仍需内缩 AppSpacing.sm',
     );
 
-    // 内容超出视口才滚得到底部；用真实拖拽滚到底（clamping 物理在末端精确
-    // 停住，jumpTo(maxScrollExtent) 可能落在 SliverList 的估算 extent 上）。
+    // 内容超出视口才滚得到底部。SliverList 懒构建：单次拖拽会停在当时估算的
+    // maxScrollExtent 上，末行随后被构建、真实 extent 变大，于是差一截。
+    // 反复拖拽直到真正到达末端，底边留白断言才有意义。
     final position = tester
         .state<ScrollableState>(
           find.descendant(of: listFinder, matching: find.byType(Scrollable)),
         )
         .position;
     expect(position.maxScrollExtent, greaterThan(0));
-    await tester.drag(find.byType(ListTile).first, const Offset(0, -4000));
-    await tester.pumpAndSettle();
+    for (var i = 0; i < 10; i++) {
+      await tester.drag(listFinder, const Offset(0, -2000));
+      await tester.pumpAndSettle();
+      if (position.pixels >= position.maxScrollExtent) break;
+    }
+    expect(
+      position.pixels,
+      position.maxScrollExtent,
+      reason: '未能滚动到列表末端，底边留白断言无效',
+    );
 
     expect(
       tester.getRect(find.byType(ListTile).last).bottom,
