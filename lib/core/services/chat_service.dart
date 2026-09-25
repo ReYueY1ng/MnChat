@@ -389,7 +389,7 @@ class ChatService {
       final session = _friendSessions[uin];
       if (session == null) continue;
       final online = info['online'] == true || info['online'] == 1;
-      final status = _friendStatusText(info);
+      final status = ChatPushDispatcher.friendStatusText(info);
       if (session.isOnline != online || session.gameStatus != status) {
         _friendSessions[uin] = session.copyWith(
           isOnline: online,
@@ -399,53 +399,6 @@ class ChatService {
       }
     }
     if (updated) _emitSessionSnapshot();
-  }
-
-  /// 从 baseinfo.statusinfo 生成游玩状态文本（游戏中/组队中/在线）。
-  /// statusinfo 结构 [ingame, roomID, 房数据] —— 房数据可能是 Map 或**序列化字符串**。
-  static String? _friendStatusText(Map<String, Object?> info) {
-    final si = info['statusinfo'];
-    final kind = _statusKind(si);
-    if (kind == 'ingame') {
-      final room = si is List && si.length >= 3 ? _statusRoomData(si[2]) : null;
-      final map = room?['mapname']?.toString() ?? '';
-      final cur = room?['curPlayerNum'];
-      final max = room?['maxPlayerNum'];
-      final playerText = (cur is num && max is num)
-          ? '(${cur.toInt()}/${max.toInt()})'
-          : '';
-      return '游戏中${map.isNotEmpty ? ' $map' : ''}$playerText';
-    }
-    if (kind == 'inteam') return '组队中';
-    return null; // outgame / 未知 → 在线但无游玩状态
-  }
-
-  /// 从 statusinfo 提取状态类别（ingame/inteam/其余返回 null）。
-  /// statusinfo 可能是 List（[kind, ...]）或序列化字符串（含 ingame/inteam 字样）。
-  static String? _statusKind(Object? si) {
-    if (si is List && si.isNotEmpty) return si[0]?.toString();
-    if (si is String) {
-      final lower = si.toLowerCase();
-      if (lower.contains('ingame')) return 'ingame';
-      if (lower.contains('inteam')) return 'inteam';
-    }
-    return null;
-  }
-
-  /// statusinfo 第 3 项可能是 Map 或序列化字符串（LuaTable/JSON）。
-  static Map<String, Object?>? _statusRoomData(dynamic v) {
-    if (v is Map) return v.cast<String, Object?>();
-    if (v is String && v.isNotEmpty) {
-      try {
-        final d = jsonDecode(v);
-        if (d is Map) return d.cast<String, Object?>();
-      } catch (_) {}
-      try {
-        final d = decodeHttpResponse(v);
-        if (d is Map) return d.cast<String, Object?>();
-      } catch (_) {}
-    }
-    return null;
   }
 
   /// 确保长连接存活：若已断开/无连接则立即重连；连接活跃则强制发一次心跳。
@@ -816,7 +769,7 @@ class ChatService {
       final seen = <int>{};
 
       for (final m in items) {
-        final uin2 = _friendUin(m);
+        final uin2 = ChatPushDispatcher.friendUin(m);
         if (uin2 == 0) continue;
         if (uin2 == myUin || uin2 == 1000) continue;
         final relation = _friendRelation(m);
@@ -831,8 +784,8 @@ class ChatService {
             _dispatcher.rawFriendRequests.add(
               FriendRequest(
                 uin: uin2,
-                name: _friendNickname(m).isNotEmpty
-                    ? _friendNickname(m)
+                name: ChatPushDispatcher.friendNickname(m).isNotEmpty
+                    ? ChatPushDispatcher.friendNickname(m)
                     : '$uin2',
                 time: ChatPushDispatcher.toNum(m['beapply_time']) != 0
                     ? ChatPushDispatcher.toNum(m['beapply_time'])
@@ -844,7 +797,7 @@ class ChatService {
         }
         final oldSession = oldSessions[uin2];
         final oldContact = oldContacts[uin2];
-        final nickname = _friendNickname(m);
+        final nickname = ChatPushDispatcher.friendNickname(m);
         // 昵称/头像优先保留旧值（离线缓存/资料拉取已有），新列表给的可覆盖
         final keepName = nickname.isNotEmpty
             ? nickname
@@ -854,13 +807,13 @@ class ChatService {
           id: uin2,
           type: ChatSessionType.friend,
           name: keepName.isNotEmpty ? keepName : '$uin2',
-          avatar: _friendAvatar(m) ?? oldSession?.avatar,
+          avatar: ChatPushDispatcher.friendAvatar(m) ?? oldSession?.avatar,
           // 在线状态的真相来自 chatpush 好友探测（_applyBatchFriendStatus），
           // 而好友列表接口的 online 字段经常缺失或恒为 0 —— 直接采用会把全部好友
           // 判成离线（用户反馈：一刷新就全离线）。故保留上一次已知状态，等探测
           // 结果刷新；首次加载无旧值时先按离线。
           isOnline: oldSession?.isOnline ?? false,
-          gameStatus: _friendGameStatus(m) ?? oldSession?.gameStatus,
+          gameStatus: ChatPushDispatcher.friendGameStatus(m) ?? oldSession?.gameStatus,
           relation: relation,
           lastMessage: oldSession?.lastMessage,
           unreadCount: oldSession?.unreadCount ?? 0,
@@ -980,55 +933,6 @@ class ChatService {
     return int.tryParse('$v') ?? 0;
   }
 
-  /// 从好友记录提取 uin（兼容嵌套 baseinfo 结构）。
-  static int _friendUin(Map<String, Object?> m) {
-    final outer = m['Uin'] ?? m['uin'];
-    if (outer is num) return outer.toInt();
-    final bi = m['baseinfo'];
-    if (bi is Map) {
-      final u = bi['Uin'] ?? bi['uin'];
-      if (u is num) return u.toInt();
-    }
-    return 0;
-  }
-
-  /// 从好友记录提取昵称（嵌套 baseinfo.RoleInfo.NickName）。
-  static String _friendNickname(Map<String, Object?> m) {
-    final direct = m['NickName'] ?? m['nickname'] ?? m['Name'];
-    if (direct != null && direct.toString().isNotEmpty) {
-      return direct.toString();
-    }
-    final bi = m['baseinfo'];
-    if (bi is Map) {
-      final ri = bi['RoleInfo'];
-      if (ri is Map) {
-        final n = ri['NickName'] ?? ri['nickname'];
-        if (n != null && n.toString().isNotEmpty) return n.toString();
-      }
-    }
-    return '';
-  }
-
-  /// 从好友记录提取头像 URL（嵌套 profile.header3/header2/header.url）。
-  static String? _friendAvatar(Map<String, Object?> m) {
-    final direct = m['IconUrl'] ?? m['HeadIconUrl'] ?? m['headurl'];
-    final profile = m['profile'];
-    if (profile is Map) {
-      // 优先级：header3 → header2 → header
-      for (final key in ['header3', 'header2', 'header']) {
-        final header = profile[key];
-        if (header is Map) {
-          final url = header['url'] ?? header['Url'];
-          if (url != null && url.toString().isNotEmpty) return url.toString();
-        }
-      }
-    }
-    if (direct != null && direct.toString().isNotEmpty) {
-      return direct.toString();
-    }
-    return null;
-  }
-
   /// 群名缓存键（settings 表里的一行 JSON）。
   ///
   /// 为什么不用 drift 新表：加表要跑 build_runner 重新生成 `.g.dart`，而本机
@@ -1090,21 +994,6 @@ class ChatService {
     }
   }
 
-  /// 好友游玩状态文本（statusinfo[1]: "ingame"/"inteam"；[3] 为游戏详情）。
-  /// 返回如「游戏中」「组队中」，未知返回 null。复用 [_statusKind] 判定。
-  static String? _friendGameStatus(Map<String, Object?> m) {
-    Object? si = m['statusinfo'];
-    if (si == null) {
-      final bi = m['baseinfo'];
-      if (bi is Map) si = bi['statusinfo'];
-    }
-    return switch (_statusKind(si)) {
-      'ingame' => '游戏中',
-      'inteam' => '组队中',
-      _ => null,
-    };
-  }
-
   /// 批量拉取好友昵称/头像（/miniw/profile getProfileBatch3）。
   /// friend_list 仅含 {mark, uin, relation}；昵称头像由此 HTTP 接口获取
   /// （batch_friend_info 走游戏 cluster 连接，独立客户端无法使用）。
@@ -1113,7 +1002,7 @@ class ChatService {
   ///   DIY 自定义头像 getPersonCenterHeadInfo(diy_header.pass/pre_url)
   ///   → getProfileBatch3 的 header3 → header2 → header → 首字母占位。
   Future<void> _fetchFriendInfos(List<Map<String, Object?>> items) async {
-    final uins = items.map(_friendUin).where((u) => u != 0).toList();
+    final uins = items.map(ChatPushDispatcher.friendUin).where((u) => u != 0).toList();
     if (uins.isEmpty) return;
     var updated = false;
     await _fetchProfiles(
