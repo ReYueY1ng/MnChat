@@ -10,6 +10,7 @@ import '../models/messages.dart';
 import '../storage/app_database.dart';
 import '../storage/chat_mapper.dart';
 import 'auth.dart';
+import 'chat/reconnect_policy.dart';
 import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
@@ -74,6 +75,8 @@ class ChatService {
   // ── 连接 ───────────────────────────────────────────────────────────────
   ChatPushConnection? _conn;
   Timer? _reconnectTimer;
+  // 重连退避策略：指数增长 + 全抖动（1s base / ×2 / 30s cap）。
+  final ReconnectPolicy _reconnectPolicy = ReconnectPolicy();
   bool _shouldReconnect = false;
   // 首次连过之后置 true；重连时用于拼 URL 的 &reconnect=1（对齐原版）。
   bool _hasConnectedOnce = false;
@@ -266,6 +269,7 @@ class ChatService {
       await old?.close();
       _hasConnectedOnce = true;
       _shouldReconnect = true;
+      _reconnectPolicy.reset(); // 连接成功 → 退避回到 attempt 0
       _setState(ChatServiceState.connected);
       // 重连成功 → 刷新本地数据：掉线期间的会话/好友/未读离线了，
       // 主动重新拉取一遍，避免"断线重连后收不到之前消息"。
@@ -405,7 +409,7 @@ class ChatService {
 
   void _scheduleReconnect() {
     if (!_shouldReconnect || _reconnectTimer?.isActive == true) return;
-    _reconnectTimer = Timer(const Duration(seconds: 10), () {
+    _reconnectTimer = Timer(_reconnectPolicy.next(), () {
       if (_shouldReconnect) unawaited(_connectChatPush());
     });
   }
