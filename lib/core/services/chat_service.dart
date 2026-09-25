@@ -14,6 +14,7 @@ import '../storage/chat_mapper.dart';
 import 'auth.dart';
 import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
+import 'chat/group_name_cache.dart';
 import 'chat/push_dispatcher.dart';
 import 'chatpush.dart';
 import 'friend.dart';
@@ -102,6 +103,9 @@ class ChatService {
   /// 推送分发器（好友申请/在线状态/消息推送）。
   late final ChatPushDispatcher _dispatcher;
 
+  /// 群名磁盘缓存（重启后立刻显示真实群名，不必等网络）。
+  late final GroupNameCache _groupNames;
+
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
@@ -175,6 +179,11 @@ class ChatService {
       onReconnected: _refreshAfterReconnect,
       onError: (e) => _lastError = e,
       onConnectionChanged: (c) => _commands.conn = c,
+    );
+    _groupNames = GroupNameCache(
+      getDb: () => _db,
+      getMyUin: () => myUin,
+      groupSessions: _groupSessions,
     );
   }
 
@@ -704,7 +713,7 @@ class ChatService {
         }
       }
       // 群名缓存恢复：重启后群聊立刻用真实群名（否则会先闪「群 123456」）
-      await _loadGroupNamesCache(owner);
+      await _groupNames.load();
       // 兜底一：库里有消息、却没有对应会话行时，用消息把会话补出来。
       // messages 才是真正的事实来源 —— 历史上出现过「消息写得进、会话行写不进」
       // 的 bug（见 app_database 的迁移说明），这类会话原先在列表里完全看不到。
@@ -933,67 +942,6 @@ class ChatService {
     return int.tryParse('$v') ?? 0;
   }
 
-  /// 群名缓存键（settings 表里的一行 JSON）。
-  ///
-  /// 为什么不用 drift 新表：加表要跑 build_runner 重新生成 `.g.dart`，而本机
-  /// （Termux/arm64）跑 build_runner 15 分钟都没产出 —— 群名只是「id → 名字」的
-  /// 小映射，用 settings 表一行 JSON 即可，零建表零迁移零代码生成。
-  /// 带 `.v1` 后缀：格式若有变不会误解析。
-  static const String _groupNamesKey = 'cache.groupNames.v1';
-
-  /// 群名缓存最多保留多少条（防无界增长；正常账号远小于此）。
-  static const int _groupNamesMax = 1000;
-
-  /// 落盘群名。写库失败只记日志，不阻断群列表加载。
-  void _persistGroupNames() {
-    final db = _db;
-    if (db == null || myUin == 0) return;
-    final map = <String, String>{};
-    for (final s in _groupSessions.values) {
-      final name = s.name.trim();
-      if (s.type != ChatSessionType.group || name.isEmpty) continue;
-      map['${s.id}'] = name;
-      if (map.length >= _groupNamesMax) break;
-    }
-    if (map.isEmpty) return;
-    final text = jsonEncode(map);
-    unawaited(() async {
-      try {
-        await db.setSetting(_groupNamesKey, text);
-      } catch (e) {
-        log.error('persist group names failed: $e', tag: _logTag);
-      }
-    }());
-  }
-
-  /// 恢复群名缓存：重启后群聊**立刻**显示真实群名，不必等 `query_user_groups`。
-  ///
-  /// 只为「本地还没有的群」补建会话；随后 [loadSessions] 会用网络结果覆盖/合并，
-  /// 不在群列表里且无聊天记录的会被既有逻辑清掉，不会留下幽灵群。
-  Future<void> _loadGroupNamesCache(int owner) async {
-    final db = _db;
-    if (db == null) return;
-    try {
-      final raw = await db.getSetting(_groupNamesKey);
-      if (raw == null || raw.isEmpty) return;
-      final decoded = jsonDecode(raw);
-      if (decoded is! Map) return;
-      for (final e in decoded.entries) {
-        final gid = int.tryParse('${e.key}');
-        final name = '${e.value}'.trim();
-        if (gid == null || gid == 0 || name.isEmpty) continue;
-        if (_groupSessions.containsKey(gid)) continue;
-        _groupSessions[gid] = ChatSession(
-          id: gid,
-          type: ChatSessionType.group,
-          name: name,
-        );
-      }
-    } catch (e) {
-      log.warn('恢复群名缓存失败: $e', tag: _logTag);
-    }
-  }
-
   /// 批量拉取好友昵称/头像（/miniw/profile getProfileBatch3）。
   /// friend_list 仅含 {mark, uin, relation}；昵称头像由此 HTTP 接口获取
   /// （batch_friend_info 走游戏 cluster 连接，独立客户端无法使用）。
@@ -1193,7 +1141,7 @@ class ChatService {
         _groupInfos
           ..clear()
           ..addAll(newInfos);
-        _persistGroupNames();
+        _groupNames.persist();
       }
     } catch (e) {
       log.warn('query_user_groups failed: $e', tag: _logTag);
