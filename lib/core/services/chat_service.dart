@@ -226,7 +226,7 @@ class ChatService {
       getMyUin: () => myUin,
       isViewing: _isViewing,
       emitEvent: (type, id, m) => _eventCtrl.add(ChatEvent(type, id, m)),
-      persistMessage: (type, id, m) => _store.persistMessage(type, id, m),
+      store: _store,
       emitSessionSnapshot: _emitSessionSnapshot,
     );
     _offlineCache = OfflineCache(
@@ -661,7 +661,7 @@ class ChatService {
     for (final item in msglist) {
       if (item is List) msgs.add(ChatMessage.fromChatQueryTriple(item));
     }
-    _replaceHistory(ChatSessionType.friend, uin2, msgs);
+    _upserter.replaceHistory(ChatSessionType.friend, uin2, msgs);
   }
 
   /// 拉取群聊历史（send_cache_msg）。
@@ -673,7 +673,7 @@ class ChatService {
       final msgs = list
           .map((m) => ChatMessage.fromGroupNotify(m, groupId: groupId))
           .toList();
-      _replaceHistory(ChatSessionType.group, groupId, msgs);
+      _upserter.replaceHistory(ChatSessionType.group, groupId, msgs);
     } catch (e) {
       log.warn('send_cache_msg failed for $groupId: $e', tag: _logTag);
     }
@@ -700,29 +700,6 @@ class ChatService {
     } else {
       _upserter.upsertGroup(sessionId, m);
     }
-  }
-
-  void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
-    if (msgs.isEmpty) return;
-    final key = _sessionKey(type, id);
-    // 缓存以 time 升序为规范（离线/网络历史乱序到达时归位）。
-    final sorted = sortMessagesAscending(msgs);
-    _messagesCache[key] = sorted;
-    _store.persistHistory(type, id, sorted);
-    // 回填会话摘要（最后一条消息）：否则网络历史拉回后会话列表
-    // 不显示最近消息，也无法区分"已聊过"与"纯好友"。
-    final map = type == ChatSessionType.friend
-        ? _friendSessions
-        : _groupSessions;
-    final existing = map[id];
-    if (existing != null) {
-      map[id] = existing.copyWith(lastMessage: sorted.last);
-      _store.persistSession(type, id);
-    }
-    _emitSessionSnapshot();
-    // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配，
-    // 收到后重新 yield historyOf）
-    _eventCtrl.add(ChatEvent(type, id, sorted.last));
   }
 
   void _emitSessionSnapshot() {

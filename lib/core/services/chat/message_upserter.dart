@@ -13,8 +13,7 @@ class MessageUpserter {
     required int Function() getMyUin,
     required bool Function(ChatSessionType type, int id) isViewing,
     required void Function(ChatSessionType type, int id, ChatMessage m) emitEvent,
-    required void Function(ChatSessionType type, int id, ChatMessage m)
-    persistMessage,
+    required MessageStore store,
     required void Function() emitSessionSnapshot,
   }) : _messagesCache = messagesCache,
        _friendSessions = friendSessions,
@@ -22,7 +21,7 @@ class MessageUpserter {
        _getMyUin = getMyUin,
        _isViewing = isViewing,
        _emitEvent = emitEvent,
-       _persistMessage = persistMessage,
+       _store = store,
        _emitSessionSnapshot = emitSessionSnapshot;
 
   final Map<String, List<ChatMessage>> _messagesCache;
@@ -31,7 +30,7 @@ class MessageUpserter {
   final int Function() _getMyUin;
   final bool Function(ChatSessionType type, int id) _isViewing;
   final void Function(ChatSessionType type, int id, ChatMessage m) _emitEvent;
-  final void Function(ChatSessionType type, int id, ChatMessage m) _persistMessage;
+  final MessageStore _store;
   final void Function() _emitSessionSnapshot;
 
   /// 内存里每个会话保留的消息条数上限（好友/群）。
@@ -76,7 +75,7 @@ class MessageUpserter {
       );
     }
     _emitEvent(ChatSessionType.friend, uin2, m);
-    _persistMessage(ChatSessionType.friend, uin2, m);
+    _store.persistMessage(ChatSessionType.friend, uin2, m);
     _emitSessionSnapshot();
   }
 
@@ -107,7 +106,28 @@ class MessageUpserter {
       );
     }
     _emitEvent(ChatSessionType.group, groupId, m);
-    _persistMessage(ChatSessionType.group, groupId, m);
+    _store.persistMessage(ChatSessionType.group, groupId, m);
     _emitSessionSnapshot();
+  }
+
+  /// 整段替换某会话的历史（网络/离线历史拉回时）：升序归位 → 落盘 →
+  /// 回填会话摘要 → 发快照 → 通知已打开的聊天窗口刷新。
+  void replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
+    if (msgs.isEmpty) return;
+    final key = MessageStore.sessionKey(type, id);
+    final sorted = sortMessagesAscending(msgs);
+    _messagesCache[key] = sorted;
+    _store.persistHistory(type, id, sorted);
+    final map = type == ChatSessionType.friend
+        ? _friendSessions
+        : _groupSessions;
+    final existing = map[id];
+    if (existing != null) {
+      map[id] = existing.copyWith(lastMessage: sorted.last);
+      _store.persistSession(type, id);
+    }
+    _emitSessionSnapshot();
+    // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配）。
+    _emitEvent(type, id, sorted.last);
   }
 }
