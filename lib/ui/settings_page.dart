@@ -161,7 +161,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   // ── 隐私 ──────────────────────────────────────────────────────────────
 
   /// 输入 PIN（返回 null 表示取消）。
-  Future<String?> _askPin(String title) async {
+  ///
+  /// [hint] 默认按新 PIN 规则提示 6-8 位；校验旧 PIN 时可放宽为 4-8 位
+  /// 以兼容历史数据（见 [AppLockService.legacyMinPinLength]）。
+  Future<String?> _askPin(String title, {String hint = '6-8 位数字'}) async {
     final ctrl = TextEditingController();
     final result = await showDialog<String>(
       context: context,
@@ -173,8 +176,8 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
           obscureText: true,
           keyboardType: TextInputType.number,
           maxLength: 8,
-          decoration: const InputDecoration(
-            hintText: '4-8 位数字',
+          decoration: InputDecoration(
+            hintText: hint,
             counterText: '',
           ),
           onSubmitted: (v) => Navigator.pop(ctx, v),
@@ -196,12 +199,12 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
     return pin.isEmpty ? null : pin;
   }
 
-  /// 设置新 PIN（两次输入一致，且为 4-8 位数字）。
+  /// 设置新 PIN（两次输入一致，且为 6-8 位数字）。
   Future<String?> _askNewPin() async {
     final a = await _askPin('设置应用锁密码');
     if (a == null) return null;
-    if (!RegExp(r'^\d{4,8}$').hasMatch(a)) {
-      _toast('密码需为 4-8 位数字');
+    if (!RegExp(r'^\d{6,8}$').hasMatch(a)) {
+      _toast('密码需为 6-8 位数字');
       return null;
     }
     final b = await _askPin('再次输入密码');
@@ -214,7 +217,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   }
 
   Future<bool> _verifyExistingPin(AppLockService service) async {
-    final pin = await _askPin('输入应用锁密码');
+    final pin = await _askPin('输入应用锁密码', hint: '4-8 位数字');
     if (pin == null) return false;
     if (!await service.verifyPin(pin)) {
       _toast('密码错误');

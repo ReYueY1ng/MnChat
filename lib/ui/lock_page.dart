@@ -153,7 +153,7 @@ class _LockPageState extends ConsumerState<LockPage>
     );
   }
 
-  /// 圆点指示器：已输入位数；为空时显示 4 个占位圆点。
+  /// 圆点指示器：已输入位数；为空时显示 [AppLockService.minPinLength] 个占位圆点。
   Widget _buildDots(ColorScheme scheme) {
     final count = _pin.isEmpty ? AppLockService.minPinLength : _pin.length;
     return AnimatedBuilder(

@@ -42,8 +42,10 @@ class SettingsKeys {
 
   // ── 隐私 ────────────────────────────────────────────────────────────
   static const String lockEnabled = 'app_lock_enabled'; // 应用锁 '1'/'0'
-  static const String lockPinHash = 'app_lock_pin_hash'; // PIN 的 SHA-256
+  static const String lockPinHash = 'app_lock_pin_hash'; // PIN 哈希（v2 或旧版 sha256）
   static const String lockPinSalt = 'app_lock_pin_salt'; // PIN 盐
+  static const String lockAttempts = 'app_lock_pin_attempts'; // 连续失败次数
+  static const String lockLockedUntil = 'app_lock_pin_locked_until'; // 锁定截止 epoch 毫秒
   static const String leaveVisitTrace = 'leave_visit_trace'; // 访问主页留下踪迹 '1'/'0'
 
   // ── 桌面端 ──────────────────────────────────────────────────────────

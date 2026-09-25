@@ -36,6 +36,8 @@ dependencies:
   dio: ^5.11.0
   web_socket_channel: ^3.0.3
   crypto: ^3.0.7
+  # 纯 Dart 的 PBKDF2-HMAC-SHA256，用于应用锁 PIN 的慢哈希（见 app_lock.dart）。
+  cryptography: ^2.7.0
   drift: ^2.34.3
   drift_flutter: ^0.3.1
   path_provider: ^2.1.6
