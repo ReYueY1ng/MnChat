@@ -16,6 +16,7 @@ import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
 import 'chat/group_name_cache.dart';
 import 'chat/message_store.dart';
+import 'chat/message_upserter.dart';
 import 'chat/profile_cache.dart';
 import 'chat/push_dispatcher.dart';
 import 'chatpush.dart';
@@ -113,6 +114,9 @@ class ChatService {
   /// 消息/会话本地持久化。
   late final MessageStore _store;
 
+  /// 新消息写入（内存 upsert + 去重 + 未读计数 + 通知）。
+  late final MessageUpserter _upserter;
+
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
@@ -172,8 +176,8 @@ class ChatService {
     _playerHome = playerHomeClient;
     _dispatcher = ChatPushDispatcher(
       getMyUin: () => myUin,
-      upsertFriendMessage: _upsertFriendMessage,
-      upsertGroupMessage: _upsertGroupMessage,
+      upsertFriendMessage: (uin, m) => _upserter.upsertFriend(uin, m),
+      upsertGroupMessage: (gid, m) => _upserter.upsertGroup(gid, m),
       loadSessions: loadSessions,
       emitSessionSnapshot: _emitSessionSnapshot,
       getConn: () => _connection.conn,
@@ -206,6 +210,16 @@ class ChatService {
       getMyUin: () => myUin,
       friendSessions: _friendSessions,
       groupSessions: _groupSessions,
+    );
+    _upserter = MessageUpserter(
+      messagesCache: _messagesCache,
+      friendSessions: _friendSessions,
+      groupSessions: _groupSessions,
+      getMyUin: () => myUin,
+      isViewing: _isViewing,
+      emitEvent: (type, id, m) => _eventCtrl.add(ChatEvent(type, id, m)),
+      persistMessage: (type, id, m) => _store.persistMessage(type, id, m),
+      emitSessionSnapshot: _emitSessionSnapshot,
     );
   }
 
@@ -1060,82 +1074,10 @@ class ChatService {
       groupId: type == ChatSessionType.group ? sessionId : null,
     );
     if (type == ChatSessionType.friend) {
-      _upsertFriendMessage(sessionId, m);
+      _upserter.upsertFriend(sessionId, m);
     } else {
-      _upsertGroupMessage(sessionId, m);
+      _upserter.upsertGroup(sessionId, m);
     }
-  }
-
-  /// 同一逻辑消息判定：与 [message_adapter] 的确定性消息 id 一致，
-  /// (uin, time, text) 三元组唯一决定一条消息。
-  static bool _sameMessage(ChatMessage a, ChatMessage b) =>
-      a.uin == b.uin && a.time == b.time && a.text == b.text;
-
-  void _upsertFriendMessage(int uin2, ChatMessage m) {
-    final key = _sessionKey(ChatSessionType.friend, uin2);
-    final list = _messagesCache.putIfAbsent(key, () => []);
-    // 去重：乐观本地回显与服务器确认推送是同一逻辑消息（共享
-    // uin/time/text → 同一 id），已存在则跳过，避免同 id 重复记录
-    //（flutter_chat_core 控制器在 debug 下断言 id 唯一）。
-    if (list.any((e) => _sameMessage(e, m))) return;
-    list.add(m);
-    if (list.length > 50) list.removeRange(0, list.length - 50);
-
-    final existing = _friendSessions[uin2];
-    // 自己发的、或正在查看该会话 → 不计未读（消息就在眼前，亮红点没有意义）。
-    final muted = m.uin == myUin || _isViewing(ChatSessionType.friend, uin2);
-    if (existing != null) {
-      _friendSessions[uin2] = existing.copyWith(
-        lastMessage: m,
-        unreadCount: muted ? existing.unreadCount : existing.unreadCount + 1,
-      );
-    } else {
-      // 会话不存在时补建（与 [_upsertGroupMessage] 的群路径一致）：从好友列表
-      // 直接进聊天时可能还没有会话对象，若不补建，消息虽然照常落库却没有
-      // `chat_sessions` 行（[_persistSession] 以会话已存在为前提）—— 于是重启后
-      // 该会话根本不会出现在列表里，表现为「聊天记录/会话丢失」。
-      // 昵称先用迷你号兜底，登录时 `_loadFriendSessions` / 好友缓存会补成真昵称。
-      _friendSessions[uin2] = ChatSession(
-        id: uin2,
-        type: ChatSessionType.friend,
-        name: '$uin2',
-        lastMessage: m,
-        unreadCount: muted ? 0 : 1,
-      );
-    }
-    _eventCtrl.add(ChatEvent(ChatSessionType.friend, uin2, m));
-    _store.persistMessage(ChatSessionType.friend, uin2, m);
-    _emitSessionSnapshot();
-  }
-
-  void _upsertGroupMessage(int groupId, ChatMessage m) {
-    final key = _sessionKey(ChatSessionType.group, groupId);
-    final list = _messagesCache.putIfAbsent(key, () => []);
-    // 去重逻辑同 _upsertFriendMessage。
-    if (list.any((e) => _sameMessage(e, m))) return;
-    list.add(m);
-    if (list.length > 100) list.removeRange(0, list.length - 100);
-
-    final existing = _groupSessions[groupId];
-    // 同好友路径：自己发的 / 正在查看该会话 → 不计未读。
-    final muted = m.uin == myUin || _isViewing(ChatSessionType.group, groupId);
-    if (existing != null) {
-      _groupSessions[groupId] = existing.copyWith(
-        lastMessage: m,
-        unreadCount: muted ? existing.unreadCount : existing.unreadCount + 1,
-      );
-    } else if (!muted) {
-      _groupSessions[groupId] = ChatSession(
-        id: groupId,
-        type: ChatSessionType.group,
-        name: '群 $groupId',
-        lastMessage: m,
-        unreadCount: 1,
-      );
-    }
-    _eventCtrl.add(ChatEvent(ChatSessionType.group, groupId, m));
-    _store.persistMessage(ChatSessionType.group, groupId, m);
-    _emitSessionSnapshot();
   }
 
   void _replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
