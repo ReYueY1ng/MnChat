@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# 同一分支的新推送取消上一次未跑完的运行。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Flutter 版本以仓库根的 .fvmrc 为唯一来源，避免 CI 与本地 FVM 漂移。
+      - name: Read Flutter version from .fvmrc
+        id: fvm
+        run: echo "version=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+          cache: true
+
+      # pubspec 的 hooks.user_defines 让 sqlite3 在构建时从本地源码编译
+      # （tool/sqlite3/sqlite3.c），因此 CI 需要 C 工具链；miss 掉会在
+      # `flutter test` 阶段直接失败。
+      - name: Install native toolchain (sqlite3 native assets)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang ninja-build libclang-dev
+
+      - name: Versions
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 基线为 0 error / 0 warning；仓库里 tool/*.dart 有既有的 avoid_print
+      # info，用 --no-fatal-infos 容忍 info，但 error/warning 仍会让 CI 失败。
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos
+
+      - name: Test
+        run: flutter test
