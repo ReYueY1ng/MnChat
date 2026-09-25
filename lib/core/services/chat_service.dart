@@ -19,6 +19,7 @@ import 'chat/message_store.dart';
 import 'chat/message_upserter.dart';
 import 'chat/offline_cache.dart';
 import 'chat/profile_cache.dart';
+import 'chat/session_loader.dart';
 import 'chat/push_dispatcher.dart';
 import 'chatpush.dart';
 import 'friend.dart';
@@ -121,6 +122,9 @@ class ChatService {
   /// 离线缓存加载（启动时从 SQLite 恢复会话/消息/好友）。
   late final OfflineCache _offlineCache;
 
+  /// 会话加载（好友/群列表合并 + 写回好友缓存）。
+  late final SessionLoader _sessionLoader;
+
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
@@ -207,7 +211,7 @@ class ChatService {
       contacts: _contacts,
       groupMemberProfiles: _groupMemberProfiles,
       emitSessionSnapshot: _emitSessionSnapshot,
-      saveFriendCache: _saveFriendCache,
+      saveFriendCache: () => _sessionLoader.saveFriendCache(),
     );
     _store = MessageStore(
       getDb: () => _db,
@@ -234,6 +238,25 @@ class ChatService {
       messagesCache: _messagesCache,
       loadGroupNames: () => _groupNames.load(),
       emitSessionSnapshot: _emitSessionSnapshot,
+    );
+    _sessionLoader = SessionLoader(
+      getFriend: () => _friend,
+      getGroup: () => _group,
+      getDb: () => _db,
+      getMyUin: () => myUin,
+      contacts: _contacts,
+      friendSessions: _friendSessions,
+      groupSessions: _groupSessions,
+      groupInfos: _groupInfos,
+      messagesCache: _messagesCache,
+      rawFriendRequests: () => _dispatcher.rawFriendRequests,
+      emitFriendRequests: _dispatcher.emitFriendRequests,
+      fetchFriendInfos: _profiles.fetchFriendInfos,
+      groupInfoFrom: _profiles.groupInfoFrom,
+      emitSessionSnapshot: _emitSessionSnapshot,
+      persistGroupNames: _groupNames.persist,
+      offlineLoad: _offlineCache.load,
+      requestFriendHistory: requestFriendHistory,
     );
   }
 
@@ -264,7 +287,7 @@ class ChatService {
   ///
   /// [_sessionCtrl] 是 broadcast 流、没有回放缓冲；而 UI 侧 `MainShell` 要等
   /// 登录状态变化后才挂载（见 `main.dart` 的 `loggedIn`），`login()` 里的
-  /// `_bootstrapSessions()` 很可能在订阅建立之前就已 emit 完毕 —— 那样订阅者
+  /// `_sessionLoader.bootstrap()` 很可能在订阅建立之前就已 emit 完毕 —— 那样订阅者
   /// 只能干等下一个事件，重启后表现就是「会话列表空 / 会话丢失」。
   /// 先回放当前状态可彻底消除这个竞态。
   Stream<SessionSnapshot> get sessionStream async* {
@@ -372,7 +395,7 @@ class ChatService {
       _syncCommandClient();
       _setState(ChatServiceState.connected);
       await _connectChatPush();
-      await _bootstrapSessions();
+      await _sessionLoader.bootstrap();
       final uins = _contacts.map((c) => c.uin).toList();
       unawaited(
         _probeBuddyMain(uins),
@@ -659,293 +682,7 @@ class ChatService {
   // ── 会话加载 ───────────────────────────────────────────────────────────
 
   /// 加载好友 + 群列表，构建会话。
-  Future<void> loadSessions() async {
-    await _loadFriendSessions();
-    await _loadGroupSessions();
-    _emitSessionSnapshot();
-  }
-
-  Future<void> _bootstrapSessions() async {
-    // 先加载本地离线缓存（SQLite），让 UI 立即有内容
-    await _offlineCache.load();
-    await loadSessions();
-    // 拉取每个好友的历史（后台；分批并发，每批最多 5 个，避免
-    // 大量好友时同时发起上百个 HTTP 请求压垮服务端/客户端）
-    const batchSize = 5;
-    for (var i = 0; i < _contacts.length; i += batchSize) {
-      final end = (i + batchSize).clamp(0, _contacts.length);
-      await Future.wait(
-        _contacts.sublist(i, end).map((c) => requestFriendHistory(c.uin)),
-      );
-    }
-  }
-
-  Future<void> _loadFriendSessions() async {
-    final friend = _friend;
-    if (friend == null) return;
-    try {
-      final resp = await friend.queryFriendList();
-      // 真实响应: {friend_list: {...}, result: 0} —— friend_list 是顶层 key，
-      // 可能是 Map(uin→info) 或 List。
-      final data = resp['friend_list'] ?? resp['data'] ?? resp;
-      final items = _asFriendItems(data);
-      // 已聊过的好友会话不因刷新而消失：合并而不是全量清空重建。
-      // 之前每次刷新 clear 后重建（无 lastMessage），会话列表短暂消失，
-      // 直到历史请求逐个回填才恢复 —— 表现为"聊过的人闪现后消失"。
-      final oldContacts = <int, Contact>{for (final c in _contacts) c.uin: c};
-      final oldSessions = <int, ChatSession>{..._friendSessions};
-      final newContacts = <Contact>[];
-      final newSessions = <int, ChatSession>{};
-      final seen = <int>{};
-
-      for (final m in items) {
-        final uin2 = ChatPushDispatcher.friendUin(m);
-        if (uin2 == 0) continue;
-        if (uin2 == myUin || uin2 == 1000) continue;
-        final relation = _friendRelation(m);
-        final mark = _friendMark(m);
-        seen.add(uin2);
-        // relation & 2 = 对方申请我（待处理好友申请）→ 归入申请列表，不建普通会话
-        if ((relation & 2) != 0) {
-          final exists = _dispatcher.rawFriendRequests.any(
-            (r) => r.uin == uin2 && r.status == FriendRequestStatus.pending,
-          );
-          if (!exists) {
-            _dispatcher.rawFriendRequests.add(
-              FriendRequest(
-                uin: uin2,
-                name: ChatPushDispatcher.friendNickname(m).isNotEmpty
-                    ? ChatPushDispatcher.friendNickname(m)
-                    : '$uin2',
-                time: ChatPushDispatcher.toNum(m['beapply_time']) != 0
-                    ? ChatPushDispatcher.toNum(m['beapply_time'])
-                    : mark,
-              ),
-            );
-          }
-          continue;
-        }
-        final oldSession = oldSessions[uin2];
-        final oldContact = oldContacts[uin2];
-        final nickname = ChatPushDispatcher.friendNickname(m);
-        // 昵称/头像优先保留旧值（离线缓存/资料拉取已有），新列表给的可覆盖
-        final keepName = nickname.isNotEmpty
-            ? nickname
-            : (oldSession?.name ?? '$uin2');
-        // 保留聊天状态（最后消息/未读/已读时间），不清零
-        final merged = ChatSession(
-          id: uin2,
-          type: ChatSessionType.friend,
-          name: keepName.isNotEmpty ? keepName : '$uin2',
-          avatar: ChatPushDispatcher.friendAvatar(m) ?? oldSession?.avatar,
-          // 在线状态的真相来自 chatpush 好友探测（_applyBatchFriendStatus），
-          // 而好友列表接口的 online 字段经常缺失或恒为 0 —— 直接采用会把全部好友
-          // 判成离线（用户反馈：一刷新就全离线）。故保留上一次已知状态，等探测
-          // 结果刷新；首次加载无旧值时先按离线。
-          isOnline: oldSession?.isOnline ?? false,
-          gameStatus: ChatPushDispatcher.friendGameStatus(m) ?? oldSession?.gameStatus,
-          relation: relation,
-          lastMessage: oldSession?.lastMessage,
-          unreadCount: oldSession?.unreadCount ?? 0,
-          lastReadTime: oldSession?.lastReadTime ?? 0,
-          // 头像本体/头像框只在资料拉取时才有，必须透传旧值，
-          // 否则每次好友列表刷新都会把它们清掉（表现为"头像框不显示"）。
-          headType: oldSession?.headType,
-          headId: oldSession?.headId,
-          headFrameId: oldSession?.headFrameId,
-        );
-        newSessions[uin2] = merged;
-        // 昵称以会话名为准（getProfileBatch3 回填到 session.name）
-        final contactName = oldContact?.nickname.isNotEmpty == true
-            ? oldContact!.nickname
-            : (keepName != '$uin2' ? keepName : '');
-        newContacts.add(
-          Contact(
-            uin: uin2,
-            nickname: contactName,
-            avatar: oldContact?.avatar ?? merged.avatar,
-            relation: relation,
-            mark: mark,
-            headType: oldContact?.headType,
-            headId: oldContact?.headId,
-            headFrameId: oldContact?.headFrameId,
-          ),
-        );
-      }
-
-      // 移除不再出现在好友列表中的占位会话：仅清理从未聊过天、
-      // 也无消息历史的（不丢已保存的聊天记录）；有历史的保留，
-      // 避免误删离线缓存恢复的会话。
-      oldSessions.forEach((uin2, s) {
-        if (seen.contains(uin2)) return;
-        if (s.lastMessage == null &&
-            (_messagesCache[_sessionKey(ChatSessionType.friend, uin2)]
-                    ?.isEmpty ??
-                true)) {
-          _friendSessions.remove(uin2);
-        } else {
-          // 保留已聊天但已不在列表的好友（黑名单/被删仍可看历史）
-          newSessions.putIfAbsent(uin2, () => s);
-          if (!newContacts.any((c) => c.uin == uin2)) {
-            newContacts.add(
-              oldContacts[uin2] ??
-                  Contact(uin: uin2, nickname: s.name, relation: s.relation),
-            );
-          }
-        }
-      });
-
-      _contacts
-        ..clear()
-        ..addAll(newContacts);
-      _friendSessions
-        ..clear()
-        ..addAll(newSessions);
-      // 批量拉取昵称/头像（buddysvr batch_friend_info，走 WS；HTTP chatpush 不支持）
-      unawaited(_profiles.fetchFriendInfos(items));
-      _dispatcher.emitFriendRequests();
-      _emitSessionSnapshot();
-      // 保存好友信息缓存（下次启动免等待网络拉取）
-      await _saveFriendCache();
-    } catch (e) {
-      log.warn('query_friend_list failed: $e', tag: _logTag);
-    }
-  }
-
-  /// 把内存好友信息写入 SQLite（昵称/头像/在线/游玩状态，按账号隔离）。
-  /// 昵称以好友会话名为准（getProfileBatch3 已回填），保证缓存有名字。
-  Future<void> _saveFriendCache() async {
-    final db = _db;
-    if (db == null || (_contacts.isEmpty && _friendSessions.isEmpty)) return;
-    try {
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      final owner = myUin;
-      if (owner == 0) return;
-      // 以 contacts 为主键集合，昵称/头像从 friendSessions 同步（资料更全）
-      final uins = <int>{..._contacts.map((c) => c.uin)};
-      final records = uins.map((uin) {
-        final c = _contacts.where((x) => x.uin == uin).firstOrNull;
-        final s = _friendSessions[uin];
-        final nick = c?.nickname.isNotEmpty == true
-            ? c!.nickname
-            : ((s != null && s.name != '$uin') ? s.name : '');
-        return friendToRecord(
-          Contact(
-            uin: uin,
-            nickname: nick,
-            avatar: c?.avatar ?? s?.avatar,
-            relation: c?.relation ?? s?.relation ?? 0,
-            mark: c?.mark ?? 0,
-          ),
-          updatedAt: now,
-          isOnline: s?.isOnline ?? false,
-          gameStatus: s?.gameStatus,
-          ownerUin: owner,
-        );
-      }).toList();
-      await db.replaceFriends(owner, records);
-    } catch (e) {
-      log.warn('save friend cache failed: $e', tag: _logTag);
-    }
-  }
-
-  /// 好友关系位掩码（query_friend_list 的 relation 字段）。
-  static int _friendRelation(Map<String, Object?> m) {
-    final v = m['relation'];
-    if (v is num) return v.toInt();
-    return int.tryParse('$v') ?? 0;
-  }
-
-  /// 好友时间戳（mark；成为好友/最近互动时间，不足为 0）。
-  static int _friendMark(Map<String, Object?> m) {
-    final v = m['mark'];
-    if (v is num) return v.toInt();
-    return int.tryParse('$v') ?? 0;
-  }
-
-  /// 把 friend_list 各种可能结构归一化成 List<Map>。
-  static List<Map<String, Object?>> _asFriendItems(Object? data) {
-    if (data is List) {
-      return data
-          .whereType<Map>()
-          .map((m) => m.cast<String, Object?>())
-          .toList();
-    }
-    if (data is Map) {
-      final out = <Map<String, Object?>>[];
-      // 若 Map 本身就是一条好友记录（含 Uin/uin key）
-      if (data.containsKey('Uin') || data.containsKey('uin')) {
-        out.add(data.cast<String, Object?>());
-        return out;
-      }
-      // 否则视为 uin→info 的映射
-      for (final v in data.values) {
-        if (v is Map) out.add(v.cast<String, Object?>());
-      }
-      return out;
-    }
-    return const [];
-  }
-
-  Future<void> _loadGroupSessions() async {
-    final group = _group;
-    if (group == null) return;
-    try {
-      final resp = await group.queryUserGroups();
-      // 响应结构可能是 {data: {groups: [...]}} 或 {groups: [...]}
-      Map<String, Object?> data;
-      if (resp['data'] is Map) {
-        data = (resp['data'] as Map).cast<String, Object?>();
-      } else {
-        data = resp;
-      }
-      final list = data['groups'] ?? data['groupList'] ?? data['list'];
-      if (list is List) {
-        // 与 [_loadFriendSessions] 一样做「新旧合并」而不是直接 clear：网络列表
-        // 可能不包含本地已有聊天记录的群（已退群、或本次返回不完整），直接清空
-        // 会把整段群会话从列表里抹掉 —— 重启后就是「会话丢失」。
-        final oldSessions = <int, ChatSession>{..._groupSessions};
-        final oldInfos = <int, GroupInfo>{..._groupInfos};
-        final newSessions = <int, ChatSession>{};
-        final newInfos = <int, GroupInfo>{};
-        final seen = <int>{};
-        for (final item in list) {
-          if (item is! Map) continue;
-          final m = item.cast<String, Object?>();
-          final gid = (m['group_id'] ?? m['groupId'] ?? m['GroupId'] ?? 0);
-          if (gid is! num) continue;
-          final g = gid.toInt();
-          final gname = (m['group_name'] ?? m['groupName'] ?? '群 $g')
-              .toString();
-          final old = oldSessions[g];
-          seen.add(g);
-          // 沿用本地已有的最后消息 / 未读数等，仅把群名刷新为服务端值。
-          newSessions[g] = old != null
-              ? old.copyWith(name: gname)
-              : ChatSession(id: g, type: ChatSessionType.group, name: gname);
-          newInfos[g] = _profiles.groupInfoFrom(m, g, gname);
-        }
-        // 网络列表里没有、但本地有历史的群会话继续保留（判据同好友路径）。
-        oldSessions.forEach((g, s) {
-          if (seen.contains(g)) return;
-          final cached = _messagesCache[_sessionKey(ChatSessionType.group, g)];
-          if (s.lastMessage != null || (cached?.isNotEmpty ?? false)) {
-            newSessions[g] = s;
-          }
-        });
-        oldInfos.forEach((g, i) => newInfos.putIfAbsent(g, () => i));
-        _groupSessions
-          ..clear()
-          ..addAll(newSessions);
-        _groupInfos
-          ..clear()
-          ..addAll(newInfos);
-        _groupNames.persist();
-      }
-    } catch (e) {
-      log.warn('query_user_groups failed: $e', tag: _logTag);
-    }
-  }
+  Future<void> loadSessions() => _sessionLoader.loadAll();
 
   // ── 内部消息维护 ───────────────────────────────────────────────────────
 
@@ -1099,7 +836,7 @@ class ChatService {
       _friendSessions.remove(uin);
       _contacts.removeWhere((c) => c.uin == uin);
       _emitSessionSnapshot();
-      await _saveFriendCache();
+      await _sessionLoader.saveFriendCache();
     }
     return code == 0;
   }
