@@ -17,10 +17,21 @@ import '../../core/models/messages.dart';
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
+import 'friend_tag_dialog.dart' show showFriendTagDialog;
 import '../theme/app_tokens.dart';
 
 /// 会话菜单操作项。
-enum _SessionMenuAction { notify, pin, mute, note, home, remove, deleteFriend }
+enum _SessionMenuAction {
+  notify,
+  pin,
+  mute,
+  pat,
+  tag,
+  note,
+  home,
+  remove,
+  deleteFriend,
+}
 
 /// 在 [globalPosition]（长按 / 右键的指针全局坐标）弹出会话浮动菜单。
 ///
@@ -85,11 +96,17 @@ Future<void> showSessionMenu(
       // 以下仅好友会话
       if (isFriend) ...[
         const PopupMenuDivider(),
+        _menuItem(_SessionMenuAction.pat, Icons.touch_app_outlined, '拍一拍'),
+        _menuItem(_SessionMenuAction.tag, Icons.label_outline, '标签'),
         _menuItem(_SessionMenuAction.note, Icons.edit_note, '备注'),
         _menuItem(_SessionMenuAction.home, Icons.home_outlined, '家园'),
       ],
-      const PopupMenuDivider(),
-      _menuItem(_SessionMenuAction.remove, Icons.delete_outline, '移除会话'),
+      // 「移除会话」只在宿主能真的把它从列表里撤掉时才有意义
+      //（好友页是按好友维度列人，不是会话列表 → 不传 onRemoved）。
+      if (onRemoved != null) ...[
+        const PopupMenuDivider(),
+        _menuItem(_SessionMenuAction.remove, Icons.delete_outline, '移除会话'),
+      ],
       if (isFriend)
         _menuItem(
           _SessionMenuAction.deleteFriend,
@@ -117,6 +134,18 @@ Future<void> showSessionMenu(
       if (context.mounted) {
         _toast(context, muted ? '已取消免打扰' : '已开启免打扰');
       }
+    case _SessionMenuAction.pat:
+      var ok = false;
+      try {
+        final resp = await ref.read(chatServiceProvider).patFriend(uin);
+        final code = resp['result'] ?? resp['ret'];
+        ok = code is num && code == 0;
+      } catch (_) {
+        ok = false;
+      }
+      if (context.mounted) _toast(context, ok ? '已拍一拍' : '拍一拍失败');
+    case _SessionMenuAction.tag:
+      await showFriendTagDialog(context, ref, uins: [uin]);
     case _SessionMenuAction.note:
       await _editFriendNote(context, ref, uin);
     case _SessionMenuAction.home:

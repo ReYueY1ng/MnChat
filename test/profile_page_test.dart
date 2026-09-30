@@ -21,7 +21,7 @@ void main() {
   /// 以「未登录」态 pump 个人主页：此时不会发起任何网络请求。
   ///
   /// 视口调高，保证整页（ListView 懒构建）的版块全部参与断言。
-  Future<void> pumpProfilePage(WidgetTester tester) async {
+  Future<void> pumpProfilePage(WidgetTester tester, {int? targetUin}) async {
     tester.view.physicalSize = const Size(1000, 4000);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
@@ -36,7 +36,7 @@ void main() {
         ],
         child: MaterialApp(
           theme: buildAppTheme(Brightness.light),
-          home: const ProfilePage(),
+          home: ProfilePage(targetUin: targetUin),
         ),
       ),
     );
@@ -86,6 +86,45 @@ void main() {
     expect(find.textContaining('IP属地'), findsOneWidget);
     // 无拍档数据时降级为文案，而不是空卡片。
     expect(find.text('暂无最佳拍档'), findsOneWidget);
+  });
+
+  // 回归：`ProfilePage(targetUin:)` 里曾有几处写死登录账号（uin / auth.name /
+  // 我的装扮），点进他人主页会显示"我自己的"资料。
+  testWidgets('他人主页显示对方的迷你号，且不出现"我的"专属入口', (tester) async {
+    await pumpProfilePage(tester, targetUin: 12345);
+    expect(tester.takeException(), isNull);
+
+    // 迷你号是对方的（未登录态下不是 0、也不是账号 uin）
+    expect(find.text('迷你号 12345'), findsOneWidget);
+
+    // 编辑类入口全部收起
+    for (final label in <String>['最近访客', '编辑布局', '修改昵称', '家园']) {
+      expect(find.text(label), findsNothing, reason: '他人主页不该有：$label');
+    }
+    // 换成关注 / 拉黑（"关注"也是统计项标签，所以用 findsWidgets）
+    expect(find.text('关注'), findsWidgets);
+    expect(find.text('拉黑'), findsOneWidget);
+
+    // 卡片套件与自己的主页一致（抽查几个）
+    for (final label in <String>[
+      '个性装扮',
+      '头像框',
+      '魅力值',
+      '称号',
+      '动态',
+      '最佳拍档',
+      '勋章',
+      '交友宣言',
+    ]) {
+      expect(find.text(label), findsWidgets, reason: '缺少版块：$label');
+    }
+  });
+
+  testWidgets('自己的主页没有关注 / 拉黑，且迷你号取账号', (tester) async {
+    await pumpProfilePage(tester);
+    expect(find.text('拉黑'), findsNothing);
+    // 未登录：自己的主页 uin 回落 0
+    expect(find.text('迷你号 0'), findsOneWidget);
   });
 
   testWidgets('最佳拍档条目渲染头像 + 昵称 + 等级 / 默契度 / VIP 徽标', (tester) async {

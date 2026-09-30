@@ -98,6 +98,9 @@ flutter:
 
   assets:
     - assets/emoticon/emoticon.webp
+    # spine 不能商用：动态表情（骰子/猜拳、Type=2 表情包）的动画在外部转成
+    # webp 动图后放这里，命名见 assets/emoticon/anim/README.md。
+    - assets/emoticon/anim/
     - assets/headframes/
     - assets/headframes_anim/
     - assets/tray_icon.png

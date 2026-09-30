@@ -580,6 +580,7 @@ class DynamicsClient {
     String from = 'null',
     int ct = 0,
     int? tag,
+    int? opUin,
   }) async {
     final act = tag != null ? 'get_posting_by_tag' : type.act;
     final params = <String, String>{};
@@ -593,7 +594,8 @@ class DynamicsClient {
         case DynamicsFeedType.recommend:
         case DynamicsFeedType.mine:
           params['from'] = from;
-          params['op_uin'] = '$uin';
+          // 默认查自己的；传 opUin 可查指定玩家（他人主页的动态列表）。
+          params['op_uin'] = '${opUin ?? uin}';
           if (ct > 0) params['ct'] = '$ct';
         case DynamicsFeedType.hot:
           if (ct > 0) params['ct'] = '$ct';

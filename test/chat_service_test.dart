@@ -3,8 +3,12 @@
 // 这些测试钉住当前可观察行为，作为后续解耦重构的**安全网**——
 // 它们必须先在重构前对现状通过（证明是"表征"而非"定义"行为）。
 // 用 ChatService.forTest 注入假客户端，避免真实网络。
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/models/emoji_catalog.dart'
+    show kImfcEmojis, imfcMessageText;
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/auth.dart';
 import 'package:mnchat/core/services/chat_service.dart';
@@ -62,6 +66,34 @@ class _FakeGroupClient extends GroupClient {
   _FakeGroupClient() : super(uin: 1, s2: 'x', s2t: 'y');
   @override
   Future<Map<String, Object?>> queryUserGroups() async => {};
+}
+
+/// 记录发出的聊天消息（校验互动表情的 payload 组装）。
+class _CapturingFriendClient extends FriendClient {
+  _CapturingFriendClient() : super(uin: 1, s2: 'x', s2t: 'y');
+
+  final List<({int desUin, String msg, Object? extend})> sent = [];
+
+  @override
+  Future<Map<String, Object?>> queryFriendList({String? relation}) async => {};
+
+  @override
+  Future<Map<String, Object?>> sendChatMsg({
+    required Object desUin,
+    required String msg,
+    int showType = 1,
+    int msgtype = 1,
+    int issys = 0,
+    Object? extendData,
+    Object? uinOverride,
+  }) async {
+    sent.add((
+      desUin: int.tryParse('$desUin') ?? 0,
+      msg: msg,
+      extend: extendData,
+    ));
+    return {'result': 0};
+  }
 }
 
 /// 构造一个"已登录"的 ChatService：注入假客户端 + 假心跳（跳过真实 WS 换 s2）。
@@ -241,6 +273,51 @@ void main() {
       expect(service.sessions, isEmpty);
       expect(service.contacts, isEmpty);
       expect(service.historyOf(ChatSessionType.friend, 123), isEmpty);
+      await service.dispose();
+    });
+  });
+
+  group('互动表情 sendImfcEmoji（骰子 / 猜拳）', () {
+    test('骰子：结果 1..6，文本为 JSON 信封，extend_data 内嵌 interCode', () async {
+      final friend = _CapturingFriendClient();
+      final service = _loggedInService(friend: friend);
+      await service.login(uin: 1, password: 'p');
+
+      final dice = kImfcEmojis.firstWhere((e) => e.index == 1);
+      final result = await service.sendImfcEmoji(100, dice);
+
+      expect(result, inInclusiveRange(1, 6));
+      expect(friend.sent.length, 1);
+      final sent = friend.sent.single;
+      expect(sent.desUin, 100);
+
+      final interCode = '@IMFC&1_$result';
+      // 消息文本 = JSON{content: 低版本占位文案, extend_data: interCode}
+      expect(sent.msg, imfcMessageText(1, result));
+      // extend_data = url_encode(base64(JSON{nickname, shareType, bubble, interCode}))
+      final json = utf8.decode(
+        base64Decode(Uri.decodeComponent(sent.extend! as String)),
+      );
+      expect(jsonDecode(json)['interCode'], interCode);
+
+      // 本地乐观回显（气泡据此渲染结果帧）
+      final hist = service.historyOf(ChatSessionType.friend, 100);
+      expect(hist.any((m) => m.interCode == interCode), isTrue);
+      await service.dispose();
+    });
+
+    test('猜拳：结果 1..3', () async {
+      final friend = _CapturingFriendClient();
+      final service = _loggedInService(friend: friend);
+      await service.login(uin: 1, password: 'p');
+
+      final rps = kImfcEmojis.firstWhere((e) => e.index == 2);
+      for (var i = 0; i < 20; i++) {
+        final result = await service.sendImfcEmoji(200, rps);
+        expect(result, inInclusiveRange(1, 3));
+      }
+      expect(friend.sent.length, 20);
+      expect(friend.sent.every((s) => s.msg.contains('@IMFC&2_')), isTrue);
       await service.dispose();
     });
   });

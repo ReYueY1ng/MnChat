@@ -4,6 +4,9 @@ library;
 
 import 'dart:convert';
 
+import '../crypto/encoding.dart' show lenientBase64Decode;
+import 'emoji_catalog.dart' show parseEmojiCodeRefs, parseImfc;
+
 /// 消息类型。
 enum ChatMsgType { text, share, custom, system }
 
@@ -28,6 +31,68 @@ ChatMsgType chatMsgTypeFrom(Object? v) {
 
 /// 会话类型。
 enum ChatSessionType { friend, group, system }
+
+/// 宽松的百分号解码：遇到非法 `%XX` 就把 `%` 当普通字符，不抛异常。
+///
+/// `Uri.decodeComponent` 碰到畸形转义会抛，而游戏侧 `url_encode` 的输出偶尔会带
+/// 裸 `%`；直接抛会让整条消息退化成提示文案（表情就没了）。
+String lenientPercentDecode(String s) {
+  try {
+    return Uri.decodeComponent(s);
+  } catch (_) {
+    final out = StringBuffer();
+    for (var i = 0; i < s.length; i++) {
+      final c = s[i];
+      if (c == '%' && i + 2 < s.length) {
+        final v = int.tryParse(s.substring(i + 1, i + 3), radix: 16);
+        if (v != null) {
+          out.writeCharCode(v);
+          i += 2;
+          continue;
+        }
+      }
+      out.write(c);
+    }
+    return out.toString();
+  }
+}
+
+/// 解码聊天 `extend_data`：`url_decode(base64(JSON))` → Map；失败返回 null。
+///
+/// 群消息（`group_chat_notify`）与好友消息（`chat_notify` 的 extend_data）用同一套
+/// 编码：`url_encode(base64(JSON{nickname, shareType, bubble, interCode, ...}))`。
+Map<String, Object?>? decodeChatExtendData(String? raw) {
+  if (raw == null || raw.isEmpty) return null;
+  try {
+    final urldecoded = lenientPercentDecode(
+      raw.replaceAll('%3D', '=').replaceAll('%2F', '/').replaceAll('%2B', '+'),
+    );
+    // base64 有几种变体（`_` 既可能是 `/` 也可能是填充），交给宽松解码器。
+    final bytes = lenientBase64Decode(urldecoded);
+    if (bytes == null) return null;
+    final decoded = jsonDecode(utf8.decode(bytes));
+    if (decoded is! Map) return null;
+    return decoded.cast<String, Object?>();
+  } catch (_) {
+    return null;
+  }
+}
+
+/// 从消息里取出「应当整条渲染成表情」的代码；不是表情消息则返回 null。
+///
+/// 背景：收到**动态表情**时，游戏把低版本文案放在消息 `text`
+/// （`【您收到一条动态表情，请升级到最新版本查看】`），真正的表情代码放在
+/// `extend_data` 的 `interCode`（`[mdemo]<Type>&<包ID>&<图ID>` 或 `@IMFC&<序号>_<结果>`）。
+/// 直接渲染 `text` 就会看到那句提示文案而不是表情。
+String? emojiCodeForMessage({String? text, String? interCode}) {
+  // 文本本身就是互动表情的 JSON 信封 / 裸代码
+  if (parseImfc(text) != null) return text;
+  final code = interCode?.trim() ?? '';
+  if (code.isEmpty) return null;
+  if (parseImfc(code) != null) return code; // 骰子 / 猜拳
+  if (parseEmojiCodeRefs(code).isNotEmpty) return code; // [mdemo] / #A1xx
+  return null;
+}
 
 /// 单条聊天消息（好友+群聊归一化）。
 class ChatMessage {
@@ -58,6 +123,12 @@ class ChatMessage {
   /// 系统消息标志（chat_query 中 who==1000）。
   final bool isSystemMsg;
 
+  /// 是否「本进程运行期间到的」消息（新收到 / 自己刚发）。
+  ///
+  /// **不入库**：只有它才播互动表情的动画；从库里读出来的历史消息直接显示结果帧
+  /// （骰子/猜拳是即时反馈，翻旧记录不该一遍遍重播）。
+  final bool isLive;
+
   /// 是否时间分隔条。
   final bool isTime;
 
@@ -77,6 +148,7 @@ class ChatMessage {
     this.interCode,
     this.groupId,
     this.isSystemMsg = false,
+    this.isLive = false,
     this.isTime = false,
     this.type = ChatMsgType.text,
   });
@@ -118,12 +190,46 @@ class ChatMessage {
   }
 
   /// 从 chat_notify 推送构造（friendservice.lua chat_notify 字段）。
-  factory ChatMessage.fromChatNotify(Map<String, Object?> m) => ChatMessage(
-        uin: (m['src_uin'] as num? ?? 0).toInt(),
-        text: m['chat_msg']?.toString() ?? '',
-        time: (m['send_time'] as num?)?.toInt() ?? 0,
-        extendData: m['extend_data']?.toString(),
-        type: chatMsgTypeFrom(m['msg_type'] ?? m['type']),
+  ///
+  /// extend_data 里可能带 `interCode`（动态表情 / 互动表情的真身）—— 推送的
+  /// `chat_msg` 往往只是低版本提示文案，所以这里把它解出来挂到 [interCode]。
+  factory ChatMessage.fromChatNotify(Map<String, Object?> m) {
+    final ext = m['extend_data']?.toString();
+    final interCode =
+        m['inter_code']?.toString() ??
+        decodeChatExtendData(ext)?['interCode']?.toString();
+    return ChatMessage(
+      uin: (m['src_uin'] as num? ?? 0).toInt(),
+      text: m['chat_msg']?.toString() ?? '',
+      time: (m['send_time'] as num?)?.toInt() ?? 0,
+      extendData: ext,
+      interCode: interCode,
+      type: chatMsgTypeFrom(m['msg_type'] ?? m['type']),
+    );
+  }
+
+  /// 复制并覆盖部分字段（只用于「补回丢失字段」，传 null 表示保持原值）。
+  ChatMessage copyWith({
+    String? extendData,
+    String? interCode,
+    String? bubble,
+    int? notTime,
+    int? groupId,
+  }) => ChatMessage(
+        uin: uin,
+        text: text,
+        time: time,
+        extendData: extendData ?? this.extendData,
+        isSuccess: isSuccess,
+        notTime: notTime ?? this.notTime,
+        srcUserVersion: srcUserVersion,
+        bubble: bubble ?? this.bubble,
+        interCode: interCode ?? this.interCode,
+        groupId: groupId ?? this.groupId,
+        isSystemMsg: isSystemMsg,
+        isTime: isTime,
+        type: type,
+        isLive: isLive,
       );
 
   Map<String, Object?> toJson() => {
@@ -194,6 +300,12 @@ class ChatSession {
   /// 好友是否在线（query_friend_list 的 `online` 字段，仅好友会话有效）。
   final bool isOnline;
 
+  /// 上次登录时间（`baseinfo.LastLoginTime`，epoch 秒；0 = 未知）。
+  ///
+  /// 好友列表的「登录从近到远 / 从远到近」两种排序用它 —— 游戏里也是这个字段
+  /// （`newfriendmgr.lua:904-939` 的 `SortFriendOnLinTime`）。
+  final int lastLoginTime;
+
   /// 游玩状态文本（如「游戏中」「组队中」，来自 statusinfo；无则 null）。
   final String? gameStatus;
 
@@ -222,6 +334,7 @@ class ChatSession {
     required this.name,
     this.avatar,
     this.isOnline = false,
+    this.lastLoginTime = 0,
     this.gameStatus,
     this.lastMessage,
     this.unreadCount = 0,
@@ -425,13 +538,8 @@ class GroupNotify {
   /// 从 group_chat_notify extend_data 解码 (url_decode → base64 → JSON)。
   static GroupNotify? fromExtendData(String raw) {
     try {
-      final urldecoded = Uri.decodeComponent(raw.replaceAll('%3D', '=').replaceAll('%2F', '/').replaceAll('%2B', '+'));
-      final normalized = urldecoded.replaceAll('-', '+').replaceAll('_', '/');
-      final pad = normalized.length % 4 == 0 ? '' : '=' * (4 - normalized.length % 4);
-      final bytes = base64Decode(normalized + pad);
-      final decoded = jsonDecode(utf8.decode(bytes));
-      if (decoded is! Map) return null;
-      final m = decoded.cast<String, Object?>();
+      final m = decodeChatExtendData(raw);
+      if (m == null) return null;
       final timeMs = (m['send_time'] as num?) ?? (m['time'] as num?) ?? 0;
       return GroupNotify(
         type: m['Type']?.toString() ?? 'SendMsg',

@@ -7,7 +7,8 @@ plugins {
 android {
     namespace = "me.yuey1ng.mnchat"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // [临时·验证用] 本机只装了 NDK 30 且 /opt/android-sdk 只读无法装 28；构建后还原
+    ndkVersion = "30.0.16248370"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

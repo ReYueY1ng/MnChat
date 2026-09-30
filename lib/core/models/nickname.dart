@@ -26,6 +26,13 @@ final RegExp _topicRe = RegExp(r'#\{([^}&]*)(?:&[^}]*)?\}');
 /// 游戏颜色码 `#cRRGGBB`（stringdef.csv 中安全提示用 `#cFF0000`）。
 final RegExp _colorCodeRe = RegExp(r'#[cC][0-9a-fA-F]{6}');
 
+/// 表情码：旧表情 `#A<包ID><图ID>`（如 `#A106`）、动态表情
+/// `[mdemo]<Type>&<包ID>&<图ID>[/mdemo]`，以及互动表情 `@IMFC&<序号>_<结果>`。
+///
+/// 动态表情里的 `[mdemo]` 已被 [_markupRe] 覆盖；这里补上 `#A1xx` 与 `@IMFC`，
+/// 否则「只含这类代码」的文本会被判为无标记而原样显示代码。
+final RegExp _emojiCodeRe = RegExp(r'#A\d{3}|\[mdemo\]|@IMFC&\d+_\d+');
+
 /// 去掉富文本标记，返回可直接显示的纯文本。
 ///
 /// 若清洗后为空（例如昵称只由标记组成），返回空字符串 —— 调用方应回退到
@@ -47,6 +54,7 @@ bool hasRichMarkup(String? raw) {
   return _markupRe.hasMatch(raw) ||
       _topicRe.hasMatch(raw) ||
       _colorCodeRe.hasMatch(raw) ||
+      _emojiCodeRe.hasMatch(raw) ||
       raw.contains('#n');
 }
 

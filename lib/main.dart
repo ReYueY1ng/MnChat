@@ -7,7 +7,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/models/messages.dart';
 import 'core/models/skin_head_catalog.dart' show headIconAsset;
 import 'core/services/app_lock.dart';
-import 'core/services/chat_service.dart' show ChatEvent, ChatService;
+import 'core/services/chat/online_notify.dart'
+    show newlyOnlineFriends, onlineFriendUins;
+import 'core/services/chat_service.dart'
+    show ChatService, ChatEvent, SessionSnapshot;
 import 'core/services/notification_service.dart';
 import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
@@ -74,8 +77,12 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 当前是否处于锁定态（启动 / 从后台回前台时置位）。
   bool _locked = false;
 
-  /// 上一次的生命周期状态，用于判断"是否真的进过后台"。
-  AppLifecycleState? _lastLifecycle;
+  /// 是否**真的**进过后台（paused / hidden）。
+  ///
+  /// 桌面端「窗口失焦」只会上报 `inactive`，不算后台；只有最小化 / 隐藏窗口
+  /// 才会上报 `hidden`。用这个粘性标记（而非"上一次状态"）判断，可避免
+  /// `hidden → inactive → resumed` 这类多步恢复序列被漏判。
+  bool _wasBackground = false;
 
   /// 后台通知订阅（dispose 时必须取消，否则泄漏）。
   StreamSubscription<ChatEvent>? _notifySub;
@@ -209,9 +216,75 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   }
 
   /// 订阅 ChatService 事件流：仅**后台**弹系统通知，且按会话聚合。
+  /// 上一次看到的"在线好友"集合 —— 用来识别「离线 → 在线」的跳变。
+  final Set<int> _onlineSeen = <int>{};
+  ProviderSubscription<AsyncValue<SessionSnapshot>>? _onlineSub;
+
+  /// 好友上线通知：对齐反编译 `friendservice.lua:7618-7624` 的
+  /// `DoFriendOnlineNotify` —— 只有**离线→在线**且开了「上线通知」才提醒。
+  void _subscribeOnlineNotify(NotificationService svc) {
+    _onlineSub?.close();
+    _onlineSub = ref.listenManual<AsyncValue<SessionSnapshot>>(
+      sessionListProvider,
+      (prev, next) {
+        final snap = next.asData?.value;
+        if (snap == null) return;
+        final online = onlineFriendUins(snap.sessions);
+        // 首次只记录基线，不提醒（刚启动时人人都是"新上线"）。
+        final baseline = _onlineSeen.isEmpty && prev?.asData?.value == null;
+        final fresh = newlyOnlineFriends(_onlineSeen, online);
+        _onlineSeen
+          ..clear()
+          ..addAll(online);
+        if (baseline || !_isBackground) return;
+        for (final uin in fresh) {
+          unawaited(_notifyOnline(svc, snap, uin));
+        }
+      },
+    );
+  }
+
+  Future<void> _notifyOnline(
+    NotificationService svc,
+    SessionSnapshot snap,
+    int uin,
+  ) async {
+    try {
+      if (!ref.read(notifyEnabledProvider)) return;
+      if (ref.read(dndEnabledProvider) &&
+          ref.read(dndWindowProvider).contains(DateTime.now())) {
+        return;
+      }
+      final store = ref.read(settingsProvider);
+      if (!await store.friendOnlineNotify(uin)) return;
+      ChatSession? session;
+      for (final s in snap.sessions) {
+        if (s.type == ChatSessionType.friend && s.id == uin) {
+          session = s;
+          break;
+        }
+      }
+      final name = session?.name ?? '$uin';
+      svc.showMessage(
+        MessageNotification(
+          // 用独立 key：不要顶掉这个好友的新消息通知。
+          sessionKey: 'online_$uin',
+          title: '好友上线',
+          text: '你的好友「$name」上线了',
+          group: false,
+          avatarUrl: session?.avatar,
+          avatarAsset: _headAssetOf(session),
+        ),
+      );
+    } catch (_) {
+      // 通知失败不影响其它流程
+    }
+  }
+
   void _subscribeNotifications(NotificationService svc) {
     final service = ref.read(chatServiceProvider);
     _notifySub?.cancel();
+    _subscribeOnlineNotify(svc);
     _notifySub = service.eventStream.listen((event) {
       // 通知开关即时生效
       if (!ref.read(notifyEnabledProvider)) return;
@@ -308,18 +381,21 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     // 前后台切换同步保活：只在后台挂前台服务，回到前台立刻摘掉常驻通知
     _syncBackgroundService(state);
-    // 回前台：若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
-    if (state == AppLifecycleState.resumed) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _wasBackground = true;
+    }
+    // 回前台动作（重连 / 重新上锁）只在**确实进过后台**时执行。
+    // 桌面端窗口聚焦也会上报 resumed（失焦是 inactive），若不加这个门闩，
+    // 每次点回窗口都会被当成"回前台"而重连、刷新一遍会话。
+    if (state == AppLifecycleState.resumed && _wasBackground) {
+      _wasBackground = false;
+      // 若 WS 断开则重连；活跃则强制心跳（防止账号在游戏端被标记离线）。
       ref.read(chatServiceProvider).ensureConnection();
-      // 仅当确实进过后台（paused/hidden）才重新上锁；inactive 只是失焦。
-      final wasBackground =
-          _lastLifecycle == AppLifecycleState.paused ||
-          _lastLifecycle == AppLifecycleState.hidden;
-      if (wasBackground && _lockEnabled && !_locked && mounted) {
+      if (_lockEnabled && !_locked && mounted) {
         setState(() => _locked = true);
       }
     }
-    _lastLifecycle = state;
   }
 
   @override

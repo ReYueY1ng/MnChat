@@ -302,8 +302,9 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
           uin: uin,
           name: ref.read(authProvider).auth?.name ?? '',
           anchor: anchor,
-          // 本人信息卡只展示资料，不带好友操作（备注 / 删除好友等对本人无意义）。
-          showActions: false,
+          // 本人卡片的动作行只剩「个人主页」（见 session_player_info_popup：
+          // 自己的卡不带置顶 / 赠送 / 更多这些好友操作）—— 没有它，侧边栏
+          // 「我的资料」点进来就没有通往个人主页的入口。
         );
         return;
       }

@@ -21,6 +21,9 @@ class GroupDetailPage extends ConsumerStatefulWidget {
 class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
   bool _busy = false;
 
+  /// 本地乐观记录的群置顶状态（服务端无查询接口，仅作按钮文案切换）。
+  bool _groupTop = false;
+
   @override
   void initState() {
     super.initState();
@@ -84,6 +87,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                 headFrameId: profile?.headFrameId,
                 isOwner: uin == creatorUin,
                 isSelf: uin == myUin,
+                onTap: uin == myUin
+                    ? null
+                    : () => _showMemberActions(uin, isOwner: isOwner),
               );
             }),
 
@@ -117,7 +123,19 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             label: const Text('邀请好友入群'),
           ),
           const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : _toggleGroupTop,
+            icon: Icon(_groupTop ? Icons.push_pin : Icons.push_pin_outlined),
+            label: Text(_groupTop ? '取消群置顶' : '群置顶'),
+          ),
+          const SizedBox(height: 8),
           if (isOwner) ...[
+            FilledButton.tonalIcon(
+              onPressed: _busy ? null : _rejectAllGroupApplies,
+              icon: const Icon(Icons.clear_all),
+              label: const Text('一键拒绝入群申请'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.icon(
               onPressed: _busy
                   ? null
@@ -351,6 +369,101 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     }
   }
 
+  /// 群置顶开关（服务端 act=set_group_top，本地乐观记录文案）。
+  Future<void> _toggleGroupTop() async {
+    final target = !_groupTop;
+    setState(() => _busy = true);
+    try {
+      await ref.read(chatServiceProvider).setGroupTop(
+            widget.groupId,
+            top: target,
+          );
+      if (mounted) setState(() => _groupTop = target);
+      _toast(target ? '已置顶群' : '已取消置顶');
+    } catch (e) {
+      _toast('置顶失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 一键拒绝全部入群申请（act=reject_group_apply_all，仅群主）。
+  Future<void> _rejectAllGroupApplies() async {
+    final ok = await _confirm('一键拒绝', '拒绝本群全部待处理的入群申请？');
+    if (!ok || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(chatServiceProvider).rejectAllGroupApplies(widget.groupId);
+      _toast('已全部拒绝');
+    } catch (e) {
+      _toast('操作失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 成员操作：禁言（仅群主）/ 屏蔽消息 / 举报。
+  Future<void> _showMemberActions(int uin, {required bool isOwner}) async {
+    final name = _displayName(uin, ref.read(chatServiceProvider));
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(title: Text(name), dense: true, enabled: false),
+            const Divider(height: 1),
+            if (isOwner)
+              ListTile(
+                leading: const Icon(Icons.volume_off_outlined),
+                title: const Text('禁言该成员'),
+                onTap: () => Navigator.pop(ctx, 'silent'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.visibility_off_outlined),
+              title: const Text('屏蔽该成员消息'),
+              onTap: () => Navigator.pop(ctx, 'ban'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.flag_outlined),
+              title: const Text('举报该成员'),
+              onTap: () => Navigator.pop(ctx, 'report'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == null) return;
+
+    final svc = ref.read(chatServiceProvider);
+    setState(() => _busy = true);
+    try {
+      switch (action) {
+        case 'silent':
+          await svc.setGroupMemberSilent(
+            widget.groupId,
+            opUin: uin,
+            silent: true,
+          );
+          _toast('已禁言');
+        case 'ban':
+          await svc.setGroupMemberBanned(
+            widget.groupId,
+            opUin: uin,
+            ban: true,
+          );
+          _toast('已屏蔽该成员消息');
+        case 'report':
+          await svc.reportGroupMember(widget.groupId, opUin: uin);
+          _toast('已提交举报');
+      }
+    } catch (e) {
+      _toast('操作失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   Future<bool> _confirm(String title, String message) async {
     final r = await showDialog<bool>(
       context: context,
@@ -412,6 +525,9 @@ class _MemberTile extends StatelessWidget {
   final bool isOwner;
   final bool isSelf;
 
+  /// 点击成员行（自己为 null，不弹操作）。
+  final VoidCallback? onTap;
+
   const _MemberTile({
     required this.uin,
     required this.name,
@@ -421,11 +537,13 @@ class _MemberTile extends StatelessWidget {
     this.headFrameId,
     required this.isOwner,
     required this.isSelf,
+    this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      onTap: onTap,
       // 单行 ListTile 的 leading 上限与行高都受密度钳制（桌面紧凑密度下仅 48），
       // 装不下框盒（radius * 2 / 0.76 ≈ 63.2）：抬高纵向密度把上限提到 68，
       // 并用 minTileHeight 兜住行高，所有成员行高度一致（见 [kAvatarListTileDensity]）。

@@ -192,6 +192,10 @@ class SessionLoader {
           // 在线状态真相来自 chatpush 好友探测；好友列表的 online 常缺失/恒 0，
           // 直接采用会把全部好友判成离线，故保留上一次已知状态。
           isOnline: oldSession?.isOnline ?? false,
+          lastLoginTime:
+              ChatPushDispatcher.friendLastLoginTime(m) ??
+              oldSession?.lastLoginTime ??
+              0,
           gameStatus:
               ChatPushDispatcher.friendGameStatus(m) ?? oldSession?.gameStatus,
           relation: relation,

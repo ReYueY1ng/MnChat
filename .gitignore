@@ -33,3 +33,10 @@ logcat
 
 # 头像诊断产物（临时排查用，含账号数据）
 avatar-debug.txt
+
+# Agent 本地状态（不入库）
+.commandcode/
+
+# 素材备份 / 归档（不入库）
+assets/emoticon_bak/
+*.zst

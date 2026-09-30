@@ -40,6 +40,8 @@
 ///   - `动态` 正文（本卡只展示条数，正文请在动态页查看）。
 library;
 
+import 'dart:async' show unawaited;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -53,15 +55,16 @@ import '../core/services/player_home.dart'
     show PlayerHomeClient, PlayerHomeModule, SetTopFlagResult;
 import '../core/services/profile.dart'
     show PlayerProfile, PortraitItem, ProfileClient;
-import '../core/services/social_sign.dart' show SocialDeclaration;
+import '../core/services/social_sign.dart'
+    show DeclarationCatalog, SocialDeclaration;
 import '../core/utils/log.dart';
 import '../state/providers.dart';
-import 'dynamics_page.dart';
 import 'player_home_page.dart';
 import 'social_sign_page.dart';
 import 'theme/app_tokens.dart';
 import 'visitor_list_page.dart';
 import 'widgets/avatar_edit_dialog.dart';
+import 'widgets/dynamics_overlay.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/home_layout_dialog.dart';
@@ -81,15 +84,59 @@ const String kHomeUnknownValue = '—';
 String _statText(int? v) => v == null ? kHomeUnknownValue : '$v';
 
 /// 个人主页：展示头像 / 昵称 / 迷你号，以及头像框、皮肤、称号、勋章、
-/// 最佳拍档等版块，并提供修改昵称与交友标签入口。
+/// 最佳拍档等版块。
+///
+/// [targetUin] 为空 = 我自己的主页（多出编辑入口：头像、昵称、布局、装扮）；
+/// 非空 = 看别人的主页 —— **同一套卡片**，只是把编辑相关的入口收起来，
+/// 并额外提供关注 / 拉黑。
 class ProfilePage extends ConsumerStatefulWidget {
-  const ProfilePage({super.key});
+  final int? targetUin;
+
+  const ProfilePage({super.key, this.targetUin});
 
   @override
   ConsumerState<ProfilePage> createState() => _ProfilePageState();
 }
 
 class _ProfilePageState extends ConsumerState<ProfilePage> {
+  /// 是否在看自己的主页（决定要不要露出编辑入口）。
+  bool get _isSelf => widget.targetUin == null;
+
+  /// 主页主人的昵称。
+  ///
+  /// 自己 → 账号昵称；别人 → `get_user_homepage` 的
+  /// `role_info.data.profile.RoleInfo.NickName`，其次批量资料，最后回退迷你号。
+  /// **绝不能拿 `auth.name`**（那是登录账号 = 我自己）。
+  String get _displayName {
+    if (_isSelf) return ref.watch(authProvider).auth?.name ?? '';
+    final roleInfo = _home?['role_info'];
+    if (roleInfo is Map) {
+      final rd = roleInfo['data'];
+      if (rd is Map) {
+        final profile = rd['profile'];
+        if (profile is Map) {
+          final ri = (profile.cast<String, Object?>())['RoleInfo'];
+          if (ri is Map) {
+            final n = (ri.cast<String, Object?>())['NickName']?.toString();
+            if (n != null && n.isNotEmpty) return n;
+          }
+        }
+      }
+    }
+    final cached = _nickname;
+    if (cached != null && cached.isNotEmpty) return cached;
+    return '$_target';
+  }
+
+  /// 主页主人。自己的话就是登录账号。
+  int get _target =>
+      widget.targetUin ?? (ref.read(authProvider).auth?.uin ?? 0);
+
+  /// 关注 / 拉黑状态（仅他人主页有意义）。
+  bool _following = false;
+  bool _blacklisted = false;
+  bool _relationBusy = false;
+
   /// DIY 自定义头像（优先）或批量资料头像；为空时回退首字占位。
   String? _avatarUrl;
 
@@ -118,6 +165,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   /// IP 属地（`miniw/user_ext?act=get_user_addr`）；null = 尚未取到。
   String? _ipAddr;
 
+  /// 批量资料里拿到的昵称（他人主页的兜底显示名）。
+  String? _nickname;
+
   /// 动态卡：已置顶 / 最新动态的 pid（`posting.data.top_pid` / `last_pid`）；
   /// 0 = 无（依据 `playercenterv2dynamicctrl.lua:13-27` 的排序键）。
   int _pinnedPid = 0;
@@ -144,6 +194,131 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     _loadProfile();
     _loadHomeModules();
     _loadExtraCounts();
+    if (!_isSelf) {
+      _syncRelation();
+      // 看别人主页时记一次访问（受「留下踪迹」开关与 24h 去重约束，失败忽略）。
+      unawaited(_recordVisitIfNeeded());
+    }
+  }
+
+  /// 从 `role_info.data.profile.relation` 读关注 / 拉黑状态。
+  void _syncRelation() {
+    final roleInfo = _home?['role_info'];
+    if (roleInfo is! Map) return;
+    final rd = roleInfo['data'];
+    if (rd is! Map) return;
+    final profile = rd['profile'];
+    if (profile is! Map) return;
+    final p = profile.cast<String, Object?>();
+    final rel = p['relation'];
+    if (rel is! Map) return;
+    final r = rel.cast<String, Object?>();
+    int bit(String k) {
+      final v = r[k];
+      if (v is num) return v.toInt();
+      return int.tryParse('$v') ?? 0;
+    }
+
+    if (!mounted) return;
+    setState(() {
+      _following = bit('friend_attention') == 1;
+      _blacklisted = bit('friend_black') == 1;
+    });
+  }
+
+  /// 记一次访问记录（对齐官方 `add_visit_record`）。
+  ///
+  /// 必须直接读**持久化**的开关值：`leaveVisitTraceProvider` 的 build() 会先
+  /// 同步返回默认 true，冷启动后先去别人主页时会把「已关闭」当成开启。
+  Future<void> _recordVisitIfNeeded() async {
+    try {
+      final store = ref.read(settingsProvider);
+      final leaveTrace = await PlayerHomeClient.leaveTraceEnabled(store);
+      if (!leaveTrace) return;
+      final target = _target;
+      final lastSentAt = await store.visitSentAt(target);
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      if (!PlayerHomeClient.shouldRecordVisit(
+        leaveTrace: leaveTrace,
+        lastSentAt: lastSentAt,
+        now: now,
+      )) {
+        return;
+      }
+      final auth = ref.read(authProvider).auth;
+      if (auth == null) return;
+      final ok = await PlayerHomeClient(
+        uin: auth.uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+      ).addVisitRecord(target);
+      if (ok) await store.setVisitSentAt(target, now);
+    } catch (_) {
+      // 失败忽略
+    }
+  }
+
+  Future<void> _toggleFollow() async {
+    if (_relationBusy) return;
+    setState(() => _relationBusy = true);
+    try {
+      await ref
+          .read(chatServiceProvider)
+          .followPlayer(_target, follow: !_following);
+      if (!mounted) return;
+      setState(() => _following = !_following);
+      _toast(_following ? '已关注' : '已取消关注');
+    } catch (e) {
+      _toast('操作失败: $e');
+    } finally {
+      if (mounted) setState(() => _relationBusy = false);
+    }
+  }
+
+  Future<void> _toggleBlacklist() async {
+    if (_relationBusy) return;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(_blacklisted ? '移出黑名单' : '加入黑名单'),
+        content: Text(
+          _blacklisted ? '确定将 TA 移出黑名单吗？' : '拉黑后将无法看到 TA 的动态与消息，确定？',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text('确定'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() => _relationBusy = true);
+    try {
+      final service = ref.read(chatServiceProvider);
+      if (_blacklisted) {
+        await service.removeBlacklist(_target);
+      } else {
+        await service.addBlacklist(_target);
+      }
+      if (!mounted) return;
+      setState(() => _blacklisted = !_blacklisted);
+      _toast(_blacklisted ? '已加入黑名单' : '已移出黑名单');
+    } catch (e) {
+      _toast('操作失败: $e');
+    } finally {
+      if (mounted) setState(() => _relationBusy = false);
+    }
+  }
+
+  void _toast(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   /// 拉取当前账号的头像、头像框与头像本体（皮肤 / 立绘）。
@@ -151,6 +326,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Future<void> _loadProfile() async {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return;
+    final target = _target;
     final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 
     String? avatarUrl;
@@ -158,57 +334,85 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     try {
       // DIY 自定义头像优先（游戏主界面同源）
-      final diy = await client.getPersonCenterHeadInfo([auth.uin]);
-      avatarUrl = diy[auth.uin];
+      final diy = await client.getPersonCenterHeadInfo([target]);
+      avatarUrl = diy[target];
     } catch (_) {
       // 忽略：DIY 头像拉取失败时回退到批量资料头像
     }
 
     Set<int> ownedFrames = {};
-    try {
-      final profile = await client.getMyProfile();
-      if (profile != null) {
-        avatarUrl ??= profile.avatarUrl;
-        frameId = profile.headFrameId;
-        ownedFrames = {...profile.ownedHeadFrameIds};
-      }
-    } catch (e) {
-      // 忽略：资料拉取失败时展示首字占位头像
-      log.warn('getMyProfile 失败: $e', tag: _logTag);
-    }
-
-    // 兜底：单个资料接口有时不下发 head_frames（表现：选择器只剩默认框 1）。
-    // 再用批量资料接口取一次并集，并打印数量便于定位问题。
-    if (ownedFrames.length <= 1) {
-      try {
-        final list = await client.getProfileBatch3([auth.uin]);
-        if (list.isNotEmpty) {
-          frameId ??= list.first.headFrameId;
-          ownedFrames.addAll(list.first.ownedHeadFrameIds);
-        }
-      } catch (e) {
-        log.warn('getProfileBatch3 补头像框失败: $e', tag: _logTag);
-      }
-    }
-    log.debug('已拥有头像框 ${ownedFrames.length} 个', tag: _logTag);
-
     int? headType;
     int? headId;
-    try {
-      final head = await client.getMyHeadInfo();
-      if (head != null) {
-        headType = head.type;
-        headId = head.id;
+
+    if (_isSelf) {
+      // 本人：走"我的"资料接口，能拿到已拥有的头像框 / 立绘（要用于选择器）
+      try {
+        final profile = await client.getMyProfile();
+        if (profile != null) {
+          avatarUrl ??= profile.avatarUrl;
+          frameId = profile.headFrameId;
+          ownedFrames = {...profile.ownedHeadFrameIds};
+        }
+      } catch (e) {
+        // 忽略：资料拉取失败时展示首字占位头像
+        log.warn('getMyProfile 失败: $e', tag: _logTag);
       }
-    } catch (_) {
-      // 忽略：头像本体拉取失败时仅展示昵称首字占位
+
+      // 兜底：单个资料接口有时不下发 head_frames（表现：选择器只剩默认框 1）。
+      // 再用批量资料接口取一次并集，并打印数量便于定位问题。
+      if (ownedFrames.length <= 1) {
+        try {
+          final list = await client.getProfileBatch3([target]);
+          if (list.isNotEmpty) {
+            frameId ??= list.first.headFrameId;
+            ownedFrames.addAll(list.first.ownedHeadFrameIds);
+          }
+        } catch (e) {
+          log.warn('getProfileBatch3 补头像框失败: $e', tag: _logTag);
+        }
+      }
+      log.debug('已拥有头像框 ${ownedFrames.length} 个', tag: _logTag);
+
+      try {
+        final head = await client.getMyHeadInfo();
+        if (head != null) {
+          headType = head.type;
+          headId = head.id;
+        }
+      } catch (_) {
+        // 忽略：头像本体拉取失败时仅展示昵称首字占位
+      }
+    } else {
+      // 他人：批量资料 + 头像槽位（都是按 uin 查的公开接口）
+      try {
+        final list = await client.getProfileBatch3([target]);
+        if (list.isNotEmpty) {
+          avatarUrl ??= list.first.avatarUrl;
+          frameId = list.first.headFrameId;
+          _nickname = list.first.nickname;
+        }
+      } catch (e) {
+        log.warn('getProfileBatch3 拉他人资料失败: $e', tag: _logTag);
+      }
+      try {
+        final heads = await client.getPersonCenterHeadInfos([target]);
+        final slot = heads[target];
+        if (slot != null) {
+          headType = slot.type;
+          headId = slot.id;
+        }
+      } catch (_) {
+        // 忽略：拿不到就用首字占位
+      }
     }
 
     List<PortraitItem> portraits = [];
-    try {
-      portraits = await client.getOwnedPortraits();
-    } catch (_) {
-      // 忽略：立绘拉取失败不展示立绘瓦片
+    if (_isSelf) {
+      try {
+        portraits = await client.getOwnedPortraits();
+      } catch (_) {
+        // 忽略：立绘拉取失败不展示立绘瓦片
+      }
     }
 
     if (!mounted) return;
@@ -229,26 +433,30 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return;
 
+    final target = _target;
     Map<String, Object?>? home;
     String? titleName;
     var level = 0;
     try {
       final svc = ref.read(chatServiceProvider);
-      home = await svc.userHomepage(auth.uin);
-      level = await svc.platformLevel(auth.uin);
+      home = await svc.userHomepage(target);
+      level = await svc.platformLevel(target);
       final titleId = homepageTitleId(home);
       titleName = titleId > 0 ? await svc.titleName(titleId) : null;
     } catch (e) {
       log.warn('主页模块拉取失败: $e', tag: _logTag);
     }
 
+    // 大会员只有「我的」接口，看别人主页时不展示。
     var isVip = false;
-    try {
-      final expiry = await ref.read(partnerClientProvider)?.getMyVipExpiry();
-      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-      isVip = expiry != null && expiry > now;
-    } catch (e) {
-      log.warn('大会员状态拉取失败: $e', tag: _logTag);
+    if (_isSelf) {
+      try {
+        final expiry = await ref.read(partnerClientProvider)?.getMyVipExpiry();
+        final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+        isVip = expiry != null && expiry > now;
+      } catch (e) {
+        log.warn('大会员状态拉取失败: $e', tag: _logTag);
+      }
     }
 
     if (!mounted) return;
@@ -261,6 +469,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       _pinnedPid = homepagePostingTopPid(home);
       _latestPid = homepagePostingLastPid(home);
     });
+    if (!_isSelf) _syncRelation();
   }
 
   /// 拉取「我的收藏夹」「迷你印迹」与 IP 属地三个独立接口。
@@ -274,25 +483,26 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Future<void> _loadExtraCounts() async {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return;
+    final target = _target;
     final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 
     int? favoriteCount;
     try {
-      favoriteCount = await client.getFavoriteFolderCount(auth.uin);
+      favoriteCount = await client.getFavoriteFolderCount(target);
     } catch (e) {
       log.warn('我的收藏夹数量拉取失败: $e', tag: _logTag);
     }
 
     int? multimediaCount;
     try {
-      multimediaCount = await client.getMultimediaImprintCount(auth.uin);
+      multimediaCount = await client.getMultimediaImprintCount(target);
     } catch (e) {
       log.warn('迷你印迹数量拉取失败: $e', tag: _logTag);
     }
 
     String? ipAddr;
     try {
-      ipAddr = await client.getUserAddr(auth.uin);
+      ipAddr = await client.getUserAddr(target);
     } catch (e) {
       log.warn('IP 属地拉取失败: $e', tag: _logTag);
     }
@@ -303,6 +513,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       _multimediaCount = multimediaCount;
       _ipAddr = ipAddr;
     });
+  }
+
+  /// 家族名（`family` 模块）；没加入家族则为空。
+  String get _familyName {
+    final fam = _home?['family'];
+    if (fam is! Map) return '';
+    final f = fam['data'];
+    if (f is! Map) return '';
+    final fm = f.cast<String, Object?>();
+    return fm['family_name']?.toString() ?? fm['name']?.toString() ?? '';
   }
 
   /// 已拥有且有本地图标的皮肤（skinId → 图标 headId），按图标 id 排序。
@@ -367,7 +587,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     List<Map<String, Object?>> layout;
     try {
-      layout = await client.getHomepageLayout(auth.uin);
+      layout = await client.getHomepageLayout(_target);
     } catch (e) {
       log.warn('主页布局拉取失败: $e', tag: _logTag);
       layout = const <Map<String, Object?>>[];
@@ -747,11 +967,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final auth = ref.watch(authProvider).auth;
-    final uin = auth?.uin ?? 0;
-    final skins = _ownedSkins;
-    final partners =
-        ref.watch(myPartnerListProvider).asData?.value ??
-        const <PartnerInfo>[];
+    // 主页主人：他人主页时是对方（以前这里写死 auth.uin，他人主页会显示我的迷你号）
+    final uin = widget.targetUin ?? auth?.uin ?? 0;
+    final name = _displayName;
+    // 已拥有的装扮只在看自己时才有（别人看不到"我拥有什么"）
+    final skins = _isSelf ? _ownedSkins : const <int, int>{};
+    final partners = _isSelf
+        ? (ref.watch(myPartnerListProvider).asData?.value ??
+              const <PartnerInfo>[])
+        : const <PartnerInfo>[];
     final levels =
         ref.watch(partnerLevelsProvider).asData?.value ?? const <int, int>{};
     final profiles =
@@ -760,7 +984,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     final directory =
         ref.watch(partnerDirectoryProvider).asData?.value ??
         PartnerDirectory.empty;
-    final declaration = _declaration?.text ?? '';
+    // 标签文案以服务端配置为准（拉不到才回退内置表）。
+    final catalog =
+        ref.watch(declarationCatalogProvider).asData?.value ??
+        DeclarationCatalog.empty;
+    final declaration = _declaration?.textWith(catalog) ?? '';
     // 主页模块（`get_user_homepage`）解析结果；缺失时为 null，UI 降级为「—」。
     final stats = homepageStats(_home);
     final charm = homepageCharmValue(_home);
@@ -777,13 +1005,14 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('个人主页'),
+        title: Text(_isSelf ? '个人主页' : name),
         actions: [
-          IconButton(
-            tooltip: '头像编辑',
-            icon: const Icon(Icons.badge_outlined),
-            onPressed: _openAvatarEdit,
-          ),
+          if (_isSelf)
+            IconButton(
+              tooltip: '头像编辑',
+              icon: const Icon(Icons.badge_outlined),
+              onPressed: _openAvatarEdit,
+            ),
           IconButton(
             tooltip: '刷新',
             icon: const Icon(Icons.refresh),
@@ -803,7 +1032,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             children: [
               // 1. 资料头卡
               _ProfileHeaderCard(
-                name: auth?.name ?? '',
+                name: name,
                 uin: uin,
                 avatarUrl: _avatarUrl,
                 headType: _headType,
@@ -812,19 +1041,30 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 level: _level,
                 isVip: _isVip,
                 stats: stats,
+                familyName: _familyName,
                 onCopyUin: () => _copyUin(uin),
-                onVisitors: () => _openVisitors(uin),
-                onEditLayout: _openLayoutEditor,
-                onRename: _editNickname,
-                onHomeland: () => _openHomeland(uin),
-                onEditAvatar: _openAvatarEdit,
+                onHomeland: _isSelf ? () => _openHomeland(uin) : null,
+                onVisitors: _isSelf ? () => _openVisitors(uin) : null,
+                onEditLayout: _isSelf ? _openLayoutEditor : null,
+                onRename: _isSelf ? _editNickname : null,
+                onEditAvatar: _isSelf ? _openAvatarEdit : null,
               ),
+              if (!_isSelf) ...[
+                const SizedBox(height: AppSpacing.md),
+                _RelationActions(
+                  following: _following,
+                  blacklisted: _blacklisted,
+                  busy: _relationBusy,
+                  onFollow: _toggleFollow,
+                  onBlacklist: _toggleBlacklist,
+                ),
+              ],
               const SizedBox(height: AppSpacing.md),
               // 2. 横幅：交友宣言 + 编辑
               _HomeBannerCard(
-                name: auth?.name ?? '',
+                name: name,
                 declaration: declaration,
-                onEdit: _openSocialSign,
+                onEdit: _isSelf ? _openSocialSign : null,
               ),
               const SizedBox(height: AppSpacing.md),
               // 3. 个性装扮（皮肤 / 立绘，点选即换头像本体）
@@ -865,12 +1105,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       ),
               ),
               const SizedBox(height: AppSpacing.md),
-              // 4. 头像框（已拥有，点选即更换）
+              // 4. 头像框（看自己时可点选更换；看别人时只报数量）
               _HomeSectionCard(
                 title: '头像框',
-                count: '${_ownedFrames.length}',
+                count: '${_ownedFrames.isNotEmpty ? _ownedFrames.length : (homepageHeadFrameCount(_home) ?? 0)}',
                 child: _ownedFrames.isEmpty
-                    ? const _UnavailableNote(kHomeUnavailableHint)
+                    ? _UnavailableNote(
+                        (homepageHeadFrameCount(_home) ?? 0) > 0
+                            ? '已拥有 ${homepageHeadFrameCount(_home)} 个头像框'
+                            : kHomeUnavailableHint,
+                      )
                     : Wrap(
                         spacing: AppSpacing.sm,
                         runSpacing: AppSpacing.sm,
@@ -957,7 +1201,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                   // `op_type` 1=置顶 / 0=取消）。本卡不展示动态列表，故对服务端
                   // 下发的「已置顶（top_pid）/ 最新（last_pid）」那条操作；
                   // 两者皆无（无动态）时不显示按钮。
-                  action: (_pinnedPid == 0 && _latestPid == 0)
+                  action: (!_isSelf || (_pinnedPid == 0 && _latestPid == 0))
                       ? null
                       : TextButton.icon(
                           onPressed: _postingTopBusy ? null : _togglePostingTop,
@@ -970,17 +1214,17 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                       _UnavailableNote(
                         postingCount == null
                             ? '外部客户端暂不展示动态正文'
-                            : '已发布 $postingCount 条动态（正文请在动态页查看）',
+                            : '已发布 $postingCount 条动态',
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const DynamicsPage(),
-                          ),
+                        onPressed: () => showAuthorDynamics(
+                          context,
+                          authorUin: uin,
+                          authorName: name,
                         ),
                         icon: const Icon(Icons.public, size: 16),
-                        label: const Text('前往动态页'),
+                        label: const Text('查看我的动态'),
                       ),
                     ],
                   ),
@@ -1053,19 +1297,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
                 ],
               ),
               const SizedBox(height: AppSpacing.md),
-              // 9. 交友宣言
-              _HomeSectionCard(
-                title: '交友宣言',
-                action: TextButton.icon(
-                  onPressed: _openSocialSign,
-                  icon: const Icon(Icons.edit, size: 16),
-                  label: const Text('编辑'),
-                ),
-                child: declaration.isEmpty
-                    ? const _UnavailableNote('还没有设置交友宣言')
-                    : Text(declaration, style: theme.textTheme.bodyMedium),
-              ),
-              const SizedBox(height: AppSpacing.md),
               // 10. 页脚：IP属地 + 迷你号
               _HomeFooter(uin: uin, ipAddr: _ipAddr),
             ],
@@ -1096,14 +1327,21 @@ class _ProfileHeaderCard extends StatelessWidget {
   /// 主页四项统计（`role_info` 模块）；null = 未取到，展示「—」占位。
   final HomeStats? stats;
 
+  /// 家族名（`family` 模块）；空则不显示。
+  final String familyName;
+
   final VoidCallback onCopyUin;
-  final VoidCallback onVisitors;
-  final VoidCallback onEditLayout;
-  final VoidCallback onRename;
-  final VoidCallback onHomeland;
+
+  /// 进自己的家园；为空则不显示（看别人主页时）。
+  final VoidCallback? onHomeland;
+
+  /// 以下入口只在自己主页出现：为空即不渲染（看别人主页时传 null）。
+  final VoidCallback? onVisitors;
+  final VoidCallback? onEditLayout;
+  final VoidCallback? onRename;
 
   /// 打开「头像编辑」弹窗（点按头像或顶栏按钮均可）。
-  final VoidCallback onEditAvatar;
+  final VoidCallback? onEditAvatar;
 
   const _ProfileHeaderCard({
     required this.name,
@@ -1115,12 +1353,13 @@ class _ProfileHeaderCard extends StatelessWidget {
     required this.level,
     required this.isVip,
     required this.stats,
+    required this.familyName,
     required this.onCopyUin,
-    required this.onVisitors,
-    required this.onEditLayout,
-    required this.onRename,
-    required this.onHomeland,
-    required this.onEditAvatar,
+    this.onHomeland,
+    this.onVisitors,
+    this.onEditLayout,
+    this.onRename,
+    this.onEditAvatar,
   });
 
   @override
@@ -1137,7 +1376,7 @@ class _ProfileHeaderCard extends StatelessWidget {
               // 头像本体 + 头像框统一由 AvatarView 渲染（槽位按 headFrameSlotSize
               // 放大，框不会被裁切）。点按头像打开「头像编辑」弹窗。
               Tooltip(
-                message: '头像编辑',
+                message: onEditAvatar == null ? name : '头像编辑',
                 child: InkWell(
                   onTap: onEditAvatar,
                   borderRadius: AppRadius.cardR,
@@ -1200,6 +1439,30 @@ class _ProfileHeaderCard extends StatelessWidget {
                         ),
                       ],
                     ),
+                    if (familyName.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.home_outlined,
+                            size: 14,
+                            color: theme.colorScheme.outline,
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              '家族: $familyName',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.outline,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -1259,31 +1522,91 @@ class _ProfileHeaderCard extends StatelessWidget {
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             children: [
-              OutlinedButton.icon(
-                onPressed: onVisitors,
-                icon: const Icon(Icons.visibility_outlined, size: 16),
-                label: const Text('最近访客'),
-              ),
-              FilledButton.icon(
-                // 参考图存在「编辑布局」；外部客户端无主页布局协议 → 仅外壳。
-                onPressed: onEditLayout,
-                icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
-                label: const Text('编辑布局'),
-              ),
-              OutlinedButton.icon(
-                onPressed: onRename,
-                icon: const Icon(Icons.drive_file_rename_outline, size: 16),
-                label: const Text('修改昵称'),
-              ),
-              OutlinedButton.icon(
-                onPressed: onHomeland,
-                icon: const Icon(Icons.home_outlined, size: 16),
-                label: const Text('家园'),
-              ),
+              if (onVisitors != null)
+                OutlinedButton.icon(
+                  onPressed: onVisitors,
+                  icon: const Icon(Icons.visibility_outlined, size: 16),
+                  label: const Text('最近访客'),
+                ),
+              if (onEditLayout != null)
+                FilledButton.icon(
+                  // 参考图存在「编辑布局」；外部客户端无主页布局协议 → 仅外壳。
+                  onPressed: onEditLayout,
+                  icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
+                  label: const Text('编辑布局'),
+                ),
+              if (onRename != null)
+                OutlinedButton.icon(
+                  onPressed: onRename,
+                  icon: const Icon(Icons.drive_file_rename_outline, size: 16),
+                  label: const Text('修改昵称'),
+                ),
+              if (onHomeland != null)
+                OutlinedButton.icon(
+                  onPressed: onHomeland,
+                  icon: const Icon(Icons.home_outlined, size: 16),
+                  label: const Text('家园'),
+                ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+/// 他人主页的关系操作条：关注 / 拉黑。
+class _RelationActions extends StatelessWidget {
+  final bool following;
+  final bool blacklisted;
+  final bool busy;
+  final VoidCallback onFollow;
+  final VoidCallback onBlacklist;
+
+  const _RelationActions({
+    required this.following,
+    required this.blacklisted,
+    required this.busy,
+    required this.onFollow,
+    required this.onBlacklist,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      children: [
+        Expanded(
+          child: following
+              ? OutlinedButton.icon(
+                  onPressed: busy ? null : onFollow,
+                  icon: const Icon(Icons.how_to_reg_outlined, size: 18),
+                  label: const Text('已关注'),
+                )
+              : FilledButton.icon(
+                  onPressed: busy ? null : onFollow,
+                  icon: const Icon(Icons.person_add_alt, size: 18),
+                  label: const Text('关注'),
+                ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: OutlinedButton.icon(
+            onPressed: busy ? null : onBlacklist,
+            icon: Icon(
+              blacklisted ? Icons.person_remove : Icons.block,
+              size: 18,
+              color: blacklisted ? theme.colorScheme.onSurface : theme.colorScheme.error,
+            ),
+            label: Text(
+              blacklisted ? '已在黑名单' : '拉黑',
+              style: TextStyle(
+                color: blacklisted ? null : theme.colorScheme.error,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -1297,12 +1620,14 @@ class _HomeBannerCard extends StatelessWidget {
 
   /// 已格式化的交友宣言；空串表示未设置。
   final String declaration;
-  final VoidCallback onEdit;
+
+  /// 为空则不显示「编辑」（看别人主页时）。
+  final VoidCallback? onEdit;
 
   const _HomeBannerCard({
     required this.name,
     required this.declaration,
-    required this.onEdit,
+    this.onEdit,
   });
 
   @override
@@ -1339,11 +1664,12 @@ class _HomeBannerCard extends StatelessWidget {
                   ),
                 ),
                 const Spacer(),
-                TextButton.icon(
-                  onPressed: onEdit,
-                  icon: const Icon(Icons.edit, size: 16),
-                  label: const Text('编辑'),
-                ),
+                if (onEdit != null)
+                  TextButton.icon(
+                    onPressed: onEdit,
+                    icon: const Icon(Icons.edit, size: 16),
+                    label: const Text('编辑'),
+                  ),
               ],
             ),
             const SizedBox(height: AppSpacing.sm),

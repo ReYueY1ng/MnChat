@@ -6,7 +6,8 @@ import 'package:dio/dio.dart';
 
 import '../crypto/encoding.dart' show luaUrlEncode;
 import '../crypto/md5_sign.dart';
-import '../net/config.dart' show kDefaultBase, kDefaultUrls;
+import '../net/config.dart'
+    show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart';
 
@@ -70,6 +71,54 @@ String buildGroupUrl({
   }
   final query = parts.join('&');
   return '${_rstripSlash(server)}$path?$query&$sign';
+}
+
+/// `/miniw/*` 参数签名 GET 的完整 URL（对齐反编译 `http_getParamMD5` + `url_addParams`）。
+///
+/// 关键点：真机请求在**业务参数之外**永远再带一组全局参数
+/// （`uin / ver / apiid / lang / country / server_ts`，见 `http.lua:117-186`），
+/// 而且这组参数**既进签名、也进 query**。漏掉它们会：
+/// - 服务器缺 `uin` → **HTTP 400**（线上「表情已拥有列表拉取失败」就是这个）；
+/// - 即使不 400，md5 也与服务器算的不一致。
+///
+/// 另外对齐签名细节：`s2` 只进签名不进 query；`json` 在排除表里（所以追加的
+/// `json=1` 不参与签名）；`encrypt_ver=3` 两者都有。
+String buildMiniwParamMd5Url({
+  required String baseUrl,
+  required String path,
+  required Map<String, String> params,
+  required int uin,
+  required String s2,
+  required String s2t,
+  String ver = kClientVersionStr,
+  String apiId = kApiId,
+  String lang = '0',
+  String country = 'CN',
+  List<String> trailing = const [],
+  int? now,
+}) {
+  final ts = now ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final all = <String, String>{
+    // url_addParams("") 注入的全局参数
+    'uin': '$uin',
+    'ver': ver,
+    'apiid': apiId,
+    'lang': lang,
+    'country': country,
+    'server_ts': '$ts',
+    ...params,
+  };
+  final md5 = httpGetParamMd5(all, timeVal: ts, s2: s2, s2t: s2t);
+  final parts = <String>[
+    ...all.entries.map((e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}'),
+    'time=$ts',
+    's2t=$s2t',
+    'encrypt_ver=3',
+  ];
+  final base = _rstripSlash(baseUrl);
+  final cleanPath = path.startsWith('/') ? path : '/$path';
+  final tail = trailing.isEmpty ? '' : '&${trailing.join('&')}';
+  return '$base$cleanPath?${parts.join('&')}&md5=$md5$tail';
 }
 
 /// 统一 GET 请求（网关路径，自动带 UA）。

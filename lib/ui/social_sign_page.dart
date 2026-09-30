@@ -85,6 +85,10 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
 
   @override
   Widget build(BuildContext context) {
+    // 「想要…/喜欢…」的选项由服务端 visual-cfg 下发；未加载完先用内置表兜底。
+    final catalog =
+        ref.watch(declarationCatalogProvider).asData?.value ??
+        DeclarationCatalog.empty;
     return Scaffold(
       appBar: AppBar(
         title: const Text('交友标签'),
@@ -111,12 +115,11 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                       selected: _socialLab == 0,
                       onSelected: (_) => setState(() => _socialLab = 0),
                     ),
-                    for (final t in kSocialTags)
+                    for (final (id, tag) in catalog.socialOptions)
                       ChoiceChip(
-                        label: Text('${t['tag']}'),
-                        selected: _socialLab == t['id'],
-                        onSelected: (_) =>
-                            setState(() => _socialLab = t['id'] as int),
+                        label: Text(tag),
+                        selected: _socialLab == id,
+                        onSelected: (_) => setState(() => _socialLab = id),
                       ),
                   ],
                 ),
@@ -132,12 +135,11 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                       selected: _gameLab == 0,
                       onSelected: (_) => setState(() => _gameLab = 0),
                     ),
-                    for (final t in kGameTags)
+                    for (final (id, tag) in catalog.gameOptions)
                       ChoiceChip(
-                        label: Text('${t['tag']}'),
-                        selected: _gameLab == t['id'],
-                        onSelected: (_) =>
-                            setState(() => _gameLab = t['id'] as int),
+                        label: Text(tag),
+                        selected: _gameLab == id,
+                        onSelected: (_) => setState(() => _gameLab = id),
                       ),
                   ],
                 ),
@@ -147,9 +149,17 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                     leading: const Icon(Icons.auto_awesome),
                     title: const Text('我的名片'),
                     subtitle: Text(
-                      formatDeclaration(_socialLab, _gameLab).isEmpty
+                      formatDeclaration(
+                        _socialLab,
+                        _gameLab,
+                        catalog: catalog,
+                      ).isEmpty
                           ? '未设置'
-                          : formatDeclaration(_socialLab, _gameLab),
+                          : formatDeclaration(
+                              _socialLab,
+                              _gameLab,
+                              catalog: catalog,
+                            ),
                     ),
                   ),
                 ),

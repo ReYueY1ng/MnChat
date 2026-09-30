@@ -1,9 +1,11 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/models/friend_tag.dart';
 import '../core/models/messages.dart';
 import '../core/services/chat_service.dart' show SessionSnapshot;
 import '../core/services/partner.dart';
+import '../core/services/rich_media.dart' show RichMedia;
 import '../state/providers.dart';
 import 'friend_request_page.dart' show FriendRequestPage, showAddFriendDialog;
 import 'blacklist_page.dart';
@@ -13,9 +15,12 @@ import 'partner_page.dart';
 import 'player_home_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/friend_filter_dialog.dart';
+import 'widgets/friend_tag_dialog.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/partner_badges.dart';
-import 'widgets/player_info_sheet.dart';
+import 'widgets/session_menu.dart';
+import 'widgets/session_player_info_popup.dart';
 import 'widgets/rich_text_view.dart';
 
 /// 好友页 —— 通讯录：全部联系人 + 关系分类 + 好友申请入口。
@@ -35,11 +40,12 @@ class FriendsPage extends ConsumerStatefulWidget {
 /// 左侧分类。
 enum _FriendCat { friend, follow, group }
 
-/// 排序方式。
+/// 排序方式 —— 文案对齐游戏 `friendSortText`（stringdef 156007-156010）。
 enum _SortMode {
-  online('在线优先'),
-  name('昵称'),
-  recent('最近活跃');
+  defaultOrder('好友默认排序'),
+  tacitDesc('默契度从高到低'),
+  loginDesc('登录从近到远'),
+  loginAsc('登录从远到近');
 
   const _SortMode(this.label);
   final String label;
@@ -47,9 +53,19 @@ enum _SortMode {
 
 class _FriendsPageState extends ConsumerState<FriendsPage> {
   String _search = '';
-  bool _onlyOnline = false;
   _FriendCat _cat = _FriendCat.friend;
-  _SortMode _sort = _SortMode.online;
+  _SortMode _sort = _SortMode.defaultOrder;
+
+  /// 筛选（通用多选 + 标签多选，见 friend_filter_dialog.dart）。
+  FriendFilterState _filter = const FriendFilterState();
+
+  /// 批量管理：勾选中的好友（非空即处于批量模式）。
+  final Set<int> _selected = <int>{};
+  bool _batchMode = false;
+
+  /// 开了「上线通知」的好友（筛选用；`SettingsStore` 是按 uin 分键存的，
+  /// 没有批量读接口，这里在进页面 / 改筛选时一次性读进内存）。
+  Set<int> _notifyUins = <int>{};
 
   /// 从会话快照取全部会话。
   List<ChatSession> _all(SessionSnapshot? snap) => snap?.sessions ?? const [];
@@ -75,6 +91,124 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     }
   }
 
+  /// 筛选：搜索（昵称/迷你号）+ 通用条件 + 标签，条件之间都是 AND
+  /// （对齐 `main_newfriendsmgrmodel.lua:117-143`）。
+  List<ChatSession> _applyFilter(
+    List<ChatSession> pool,
+    PartnerDirectory directory,
+    Map<int, Set<int>> tagIndex,
+  ) {
+    return [
+      for (final s in pool)
+        if (_matches(s, directory, tagIndex)) s,
+    ];
+  }
+
+  bool _matches(
+    ChatSession s,
+    PartnerDirectory directory,
+    Map<int, Set<int>> tagIndex,
+  ) {
+    if (_search.isNotEmpty) {
+      final q = _search.toLowerCase();
+      if (!s.name.toLowerCase().contains(q) && !'${s.id}'.contains(q)) {
+        return false;
+      }
+    }
+    // 通用筛选对群无效（群没有在线/拍档/标签）。
+    if (_cat == _FriendCat.group) return true;
+
+    for (final c in _filter.common) {
+      switch (c) {
+        case FriendFilterCommon.online:
+          if (!s.isOnline) return false;
+        case FriendFilterCommon.partner:
+          // 拍档判定用 lab > 0（非拍档也会出现在 get_list 里）。
+          if (!directory.isPartner(s.id)) return false;
+        case FriendFilterCommon.onlineNotify:
+          // 本地设置里的开关（游戏用好友列表的 notify_flag + 拍档兜底，
+          // 本客户端只写本地与 set_online_notify_flag，没有回读）。
+          if (!_onlineNotifyOf(s.id)) return false;
+        case FriendFilterCommon.invitedMe:
+          if (!_invitedMe(s)) return false;
+      }
+    }
+    if (_filter.tagIds.isNotEmpty) {
+      final mine = tagIndex[s.id] ?? const <int>{};
+      for (final id in _filter.tagIds) {
+        if (!mine.contains(id)) return false;
+      }
+    }
+    return true;
+  }
+
+  bool _onlineNotifyOf(int uin) => _notifyUins.contains(uin);
+
+  /// 最近有没有给我发过"邀请一起玩"（`InviteJoinRoom*` / `InviteJoinTeam`）。
+  bool _invitedMe(ChatSession s) {
+    final ext = s.lastMessage?.extendData;
+    if (ext == null || ext.isEmpty) return false;
+    final media = RichMedia.decode(ext);
+    return media != null && media.isRoomInvite;
+  }
+
+  /// 排序（对齐 `newfriendmgr.lua:631-692`）：
+  /// - 默认：在线优先，离线里未读 → 登录时间近 → 昵称；
+  /// - 默契度从高到低（拍档目录里的 tacitnum，稳定回退原顺序）；
+  /// - 登录从近到远 / 从远到近（在线组在前，组内按 lastLoginTime）。
+  List<ChatSession> _applySort(
+    List<ChatSession> list,
+    PartnerDirectory directory,
+  ) {
+    final sorted = [...list];
+    int byName(ChatSession a, ChatSession b) =>
+        a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    switch (_sort) {
+      case _SortMode.defaultOrder:
+        sorted.sort((a, b) {
+          if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
+          if (a.unreadCount != b.unreadCount) {
+            return b.unreadCount.compareTo(a.unreadCount);
+          }
+          if (a.isOnline) {
+            final at = a.lastMessage?.time ?? 0;
+            final bt = b.lastMessage?.time ?? 0;
+            if (at != bt) return bt.compareTo(at);
+          } else if (a.lastLoginTime != b.lastLoginTime) {
+            return b.lastLoginTime.compareTo(a.lastLoginTime);
+          }
+          return byName(a, b);
+        });
+      case _SortMode.tacitDesc:
+        final idx = <int, int>{
+          for (var i = 0; i < sorted.length; i++) sorted[i].id: i,
+        };
+        sorted.sort((a, b) {
+          final ta = directory.tacitOf(a.id);
+          final tb = directory.tacitOf(b.id);
+          if (ta != tb) return tb.compareTo(ta);
+          return (idx[a.id] ?? 0).compareTo(idx[b.id] ?? 0);
+        });
+      case _SortMode.loginDesc:
+        sorted.sort((a, b) {
+          if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
+          if (a.lastLoginTime != b.lastLoginTime) {
+            return b.lastLoginTime.compareTo(a.lastLoginTime);
+          }
+          return byName(a, b);
+        });
+      case _SortMode.loginAsc:
+        sorted.sort((a, b) {
+          if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
+          if (a.lastLoginTime != b.lastLoginTime) {
+            return a.lastLoginTime.compareTo(b.lastLoginTime);
+          }
+          return byName(a, b);
+        });
+    }
+    return sorted;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -83,31 +217,15 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     final pool = _ofCategory(_all(snap));
     final onlineCount = pool.where((s) => s.isOnline).length;
 
-    final filtered =
-        pool.where((s) {
-          if (_cat != _FriendCat.group && _onlyOnline && !s.isOnline) {
-            return false;
-          }
-          if (_search.isNotEmpty) {
-            final q = _search.toLowerCase();
-            if (!s.name.toLowerCase().contains(q) && !'${s.id}'.contains(q)) {
-              return false;
-            }
-          }
-          return true;
-        }).toList()..sort((a, b) {
-          switch (_sort) {
-            case _SortMode.name:
-              return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-            case _SortMode.recent:
-              return (b.lastMessage?.time ?? 0).compareTo(
-                a.lastMessage?.time ?? 0,
-              );
-            case _SortMode.online:
-              if (a.isOnline != b.isOnline) return a.isOnline ? -1 : 1;
-              return a.name.toLowerCase().compareTo(b.name.toLowerCase());
-          }
-        });
+    final directory =
+        ref.watch(partnerDirectoryProvider).asData?.value ??
+        PartnerDirectory.empty;
+    final tags = ref.watch(friendTagPoolProvider).asData?.value ??
+        const <FriendTag>[];
+    final tagIndex = friendTagIndex(tags);
+
+    final filtered = _applyFilter(pool, directory, tagIndex);
+    final sorted = _applySort(filtered, directory);
 
     return Scaffold(
       appBar: AppBar(
@@ -182,6 +300,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                 _buildCategoryChips(theme),
                 const Divider(height: 1),
               ],
+              if (_batchMode) _buildBatchBar(theme),
               Expanded(
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -191,7 +310,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                       const VerticalDivider(width: 1),
                     ],
                     Expanded(
-                      child: filtered.isEmpty
+                      child: sorted.isEmpty
                           ? _EmptyFriends(
                               isGroup: _cat == _FriendCat.group,
                               hasData: pool.isNotEmpty,
@@ -207,21 +326,38 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                                 horizontal: AppSpacing.sm,
                                 vertical: AppSpacing.sm,
                               ),
-                              itemCount: filtered.length,
+                              itemCount: sorted.length,
                               // 行间留白与 CardThemeData.margin.vertical 一致。
                               separatorBuilder: (_, _) =>
                                   const SizedBox(height: AppSpacing.sm),
                               itemBuilder: (context, i) {
-                                final f = filtered[i];
+                                final f = sorted[i];
                                 return _FriendTile(
                                   session: f,
-                                  onTap: () => _open(f),
-                                  onLongPress: () => _showFriendMenu(f),
+                                  batchMode: _batchMode,
+                                  selected: _selected.contains(f.id),
+                                  onSelectToggle: () => setState(() {
+                                    _selected.contains(f.id)
+                                        ? _selected.remove(f.id)
+                                        : _selected.add(f.id);
+                                  }),
+                                  onTap: () {
+                                    if (_batchMode) {
+                                      setState(() {
+                                        _selected.contains(f.id)
+                                            ? _selected.remove(f.id)
+                                            : _selected.add(f.id);
+                                      });
+                                      return;
+                                    }
+                                    _open(f);
+                                  },
+                                  onLongPress: (pos) => _showFriendMenu(f, pos),
                                   // 桌面端右键打开同一菜单
-                                  onSecondaryTap: () => _showFriendMenu(f),
-                                  // 点击头像：玩家简要信息卡（仅好友）
+                                  onSecondaryTap: (pos) => _showFriendMenu(f, pos),
+                                  // 点击头像：玩家简要信息浮窗（仅好友）
                                   onAvatarTap: f.type == ChatSessionType.friend
-                                      ? () => _showPlayerInfo(f)
+                                      ? (pos) => _showPlayerInfo(f, pos)
                                       : null,
                                 );
                               },
@@ -237,6 +373,125 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
   }
 
+  /// 打开筛选对话框（通用 4 项 + 标签）。
+  Future<void> _openFilterDialog() async {
+    final tags = ref.read(friendTagPoolProvider).asData?.value ?? const [];
+    final next = await showFriendFilterDialog(
+      context,
+      current: _filter,
+      tags: tags,
+      onCreateTag: () async {
+        Navigator.of(context).pop();
+        await showFriendTagDialog(context, ref, uins: const []);
+      },
+    );
+    if (next == null || !mounted) return;
+    setState(() => _filter = next);
+    await _loadNotifyFlags();
+  }
+
+  /// 批量操作条：打标签 / 清除标签 / 上线通知。
+  Widget _buildBatchBar(ThemeData theme) {
+    final count = _selected.length;
+    return Material(
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        child: Row(
+          children: [
+            Text('已选 $count 人', style: theme.textTheme.labelMedium),
+            const Spacer(),
+            TextButton.icon(
+              onPressed: count == 0
+                  ? null
+                  : () => showFriendTagDialog(
+                      context,
+                      ref,
+                      uins: _selected.toList(),
+                    ),
+              icon: const Icon(Icons.label_outline, size: 16),
+              label: const Text('打标签'),
+            ),
+            TextButton.icon(
+              onPressed: count == 0 ? null : _clearTagsForSelected,
+              icon: const Icon(Icons.label_off_outlined, size: 16),
+              label: const Text('清除标签'),
+            ),
+            // 对齐游戏 `btn_multSetOnlineNotify`：批量开「上线通知」。
+            TextButton.icon(
+              onPressed: count == 0 ? null : _setOnlineNotifyForSelected,
+              icon: const Icon(Icons.notifications_active_outlined, size: 16),
+              label: const Text('上线通知'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 批量开「上线通知」：服务端 `batch_set_online_notify_flag` +
+  /// 本地设置（筛选与上线提醒都读它）。
+  Future<void> _setOnlineNotifyForSelected() async {
+    final uins = _selected.toList();
+    try {
+      await ref
+          .read(chatServiceProvider)
+          .setOnlineNotifyBatch(uins, on: true);
+    } catch (_) {
+      // 服务端失败也写本地（与单个设置的行为一致：本地生效 + 提示）
+    }
+    final store = ref.read(settingsProvider);
+    for (final u in uins) {
+      try {
+        await store.setFriendOnlineNotify(u, true);
+      } catch (_) {
+        // 忽略单条写入失败
+      }
+    }
+    if (!mounted) return;
+    setState(() => _notifyUins = {..._notifyUins, ...uins});
+    _toast('已设置上线通知（${uins.length} 人）');
+  }
+
+  Future<void> _clearTagsForSelected() async {
+    try {
+      await ref
+          .read(chatServiceProvider)
+          .clearFriendLabels(_selected.toList());
+      ref.invalidate(friendTagPoolProvider);
+      _toast('已清除标签');
+    } catch (e) {
+      _toast('操作失败: $e');
+    }
+  }
+
+  void _toast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  /// 把当前候选好友的上线通知开关读进 [_notifyUins]（筛选「上线通知」要用）。
+  Future<void> _loadNotifyFlags() async {
+    try {
+      final store = ref.read(settingsProvider);
+      final snap = ref.read(sessionListProvider).asData?.value;
+      final next = <int>{};
+      for (final s in _all(snap)) {
+        if (s.type != ChatSessionType.friend) continue;
+        if (await store.friendOnlineNotify(s.id)) next.add(s.id);
+      }
+      if (!mounted) return;
+      setState(() => _notifyUins = next);
+    } catch (_) {
+      // 设置不可用（例如没有本地库）时，筛选里的「上线通知」按"都没开"处理。
+    }
+  }
+
   /// 点击好友/群 → 进入聊天（好友经回调切 tab）。
   void _open(ChatSession s) {
     final cb = widget.onOpenChat;
@@ -247,18 +502,21 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     }
   }
 
-  /// 好友长按 / 右键菜单（上线通知、置顶、备注、家园、删除好友）。
-  Future<void> _showFriendMenu(ChatSession s) {
-    return showFriendMenu(context, ref, uin: s.id, name: s.name, type: s.type);
+  /// 好友长按 / 右键：与会话页同款浮动菜单（上线通知、置顶、免打扰、
+  /// 拍一拍、备注、家园、删除好友）。好友页不传 onRemoved —— 这里是按好友
+  /// 维度列人，没有「移除会话」这回事。
+  Future<void> _showFriendMenu(ChatSession s, Offset globalPosition) {
+    return showSessionMenu(context, ref, session: s, globalPosition: globalPosition);
   }
 
-  /// 点击头像：玩家简要信息卡。
-  Future<void> _showPlayerInfo(ChatSession s) {
-    return showPlayerInfoSheet(
+  /// 点击头像：与会话页同款玩家信息浮窗（锚在指针位置）。
+  Future<void> _showPlayerInfo(ChatSession s, Offset globalPosition) {
+    return showSessionPlayerInfoPopup(
       context,
       ref,
       uin: s.id,
       name: s.name,
+      anchor: Rect.fromLTWH(globalPosition.dx, globalPosition.dy, 1, 1),
       avatarUrl: s.avatar,
       headType: s.headType,
       headId: s.headId,
@@ -266,7 +524,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
   }
 
-  /// 顶部工具条：在线计数 / 刷新 / 只看在线 / 排序 / 搜索。
+  /// 顶部工具条（对齐游戏 `main_NewFriendsMgr`）：
+  /// `在线好友 X/Y` + 刷新 + 批量管理 + 排序下拉 + 筛选 + 搜索。
   ///
   /// 工具条位于列表上方的 Column 中，必须是不透明实心条：透明背景会让下方
   /// 内容透出（"遮不住卡片"）。用页面底色铺底，保持与页面视觉无缝。
@@ -294,8 +553,9 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
       ),
     );
     final controls = <Widget>[
+      // 游戏文案：`GetS(156004)` =「在线好友@1/@2」
       Text(
-        '在线 $online / $total',
+        '在线好友 $online/$total',
         style: theme.textTheme.labelMedium?.copyWith(
           color: theme.colorScheme.onSurfaceVariant,
         ),
@@ -306,17 +566,35 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         icon: const Icon(Icons.refresh, size: 18),
         onPressed: () => ref.read(chatServiceProvider).loadSessions(),
       ),
-    ];
-    // 「只看在线」单独一份：窄屏时要和排序一起靠右，宽屏时紧跟刷新按钮。
-    final onlineOnlyChip = <Widget>[
-      if (_cat != _FriendCat.group)
-        FilterChip(
-          visualDensity: adaptiveDensity(context),
-          label: const Text('只看在线', style: TextStyle(fontSize: 12)),
-          selected: _onlyOnline,
-          onSelected: (v) => setState(() => _onlyOnline = v),
+      // 批量管理（游戏 btn_multMgr）：进入后可多选好友批量打标签 / 清除 / 上线通知
+      IconButton(
+        tooltip: _batchMode ? '退出批量管理' : '批量管理',
+        visualDensity: adaptiveDensity(context),
+        icon: Icon(
+          _batchMode ? Icons.checklist : Icons.checklist_outlined,
+          size: 18,
         ),
+        onPressed: () => setState(() {
+          _batchMode = !_batchMode;
+          _selected.clear();
+        }),
+      ),
     ];
+    // 筛选入口：有生效条件时高亮（游戏里漏斗的 selSt 控制器）。
+    final filterButton = IconButton(
+      tooltip: '筛选',
+      visualDensity: adaptiveDensity(context),
+      icon: Badge(
+        isLabelVisible: !_filter.isEmpty,
+        smallSize: 8,
+        child: Icon(
+          Icons.filter_alt_outlined,
+          size: 18,
+          color: _filter.isEmpty ? null : theme.colorScheme.primary,
+        ),
+      ),
+      onPressed: _openFilterDialog,
+    );
     final sortButton = PopupMenuButton<_SortMode>(
       tooltip: '排序方式',
       onSelected: (m) => setState(() => _sort = m),
@@ -360,11 +638,10 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                   Row(
                     children: [
                       ...controls,
-                      // 窄屏：只看在线 + 排序都推到右边。
+                      // 窄屏：排序 / 筛选推到右边。
                       const Spacer(),
-                      ...onlineOnlyChip,
-                      const SizedBox(width: 8),
                       sortButton,
+                      filterButton,
                     ],
                   ),
                   const SizedBox(height: 8),
@@ -374,12 +651,9 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             : Row(
                 children: [
                   ...controls,
-                  if (onlineOnlyChip.isNotEmpty) ...[
-                    const SizedBox(width: 4),
-                    ...onlineOnlyChip,
-                  ],
                   const SizedBox(width: 8),
                   sortButton,
+                  filterButton,
                   const SizedBox(width: 8),
                   Expanded(child: searchField),
                 ],
@@ -533,12 +807,17 @@ class _FriendTile extends ConsumerWidget {
   final ChatSession session;
   final VoidCallback onTap;
 
-  /// 长按 / 桌面端右键打开好友操作菜单。
-  final VoidCallback? onLongPress;
-  final VoidCallback? onSecondaryTap;
+  /// 长按 / 桌面端右键打开好友操作菜单（参数为指针全局坐标）。
+  final ValueChanged<Offset>? onLongPress;
+  final ValueChanged<Offset>? onSecondaryTap;
 
-  /// 点击头像打开玩家简要信息卡（仅好友会话传入）。
-  final VoidCallback? onAvatarTap;
+  /// 点击头像打开玩家信息浮窗（仅好友会话传入），参数为指针全局坐标。
+  final ValueChanged<Offset>? onAvatarTap;
+
+  /// 批量管理模式下：行首显示勾选框。
+  final bool batchMode;
+  final bool selected;
+  final VoidCallback? onSelectToggle;
 
   const _FriendTile({
     required this.session,
@@ -546,6 +825,9 @@ class _FriendTile extends ConsumerWidget {
     this.onLongPress,
     this.onSecondaryTap,
     this.onAvatarTap,
+    this.batchMode = false,
+    this.selected = false,
+    this.onSelectToggle,
   });
 
   String _relationLabel(int relation) {
@@ -568,7 +850,7 @@ class _FriendTile extends ConsumerWidget {
         : (session.gameStatus ?? (session.isOnline ? '在线' : '离线'));
     final name = session.name.isNotEmpty ? session.name : '${session.id}';
 
-    // 等级 / 拍档 / 大会员：来自会话级批量缓存（随会话流一次拉取，逐行不请求）。
+    // 等级 / 拍档 / 大会员 / 默契度：来自会话级批量缓存（随会话流一次拉取）。
     final directory =
         ref.watch(partnerDirectoryProvider).asData?.value ??
         PartnerDirectory.empty;
@@ -603,12 +885,18 @@ class _FriendTile extends ConsumerWidget {
       contentPadding: AppSpacing.listTilePadding,
       visualDensity: kAvatarListTileDensity,
       minTileHeight: headFrameSlotSize(24),
-      // 头像可点击（仅好友）：opaque 保证不与整行 onTap 冲突
-      leading: onAvatarTap == null
+      // 批量管理：行首换成勾选框
+      leading: batchMode
+          ? Checkbox(
+              value: selected,
+              onChanged: (_) => onSelectToggle?.call(),
+            )
+          : onAvatarTap == null
           ? avatar
           : GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: onAvatarTap,
+              // onTapUp 才拿得到指针坐标（浮窗要锚在点击处）。
+              onTapUp: (d) => onAvatarTap!(d.globalPosition),
               child: avatar,
             ),
       title: Row(
@@ -620,12 +908,16 @@ class _FriendTile extends ConsumerWidget {
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          // 默契度是**每个好友都有**的（`get_list` 里非拍档项 `lab == 0`），
+          // 所以这里显式传值 —— 非拍档也显示，配色用 lab（0 = 默认色）。
           if (!isGroup)
             PartnerNameBadges(
               level: level,
               partner: partner,
               isVip: isVip,
               levels: levelCfg,
+              tacitnum: directory.tacitOf(session.id),
+              lab: partner?.lab ?? 0,
             ),
           if (rel.isNotEmpty) ...[
             const SizedBox(width: 6),
@@ -692,14 +984,18 @@ class _FriendTile extends ConsumerWidget {
               ],
             ),
       onTap: onTap,
-      onLongPress: onLongPress,
+      // 长按不挂 ListTile 上：它不给指针坐标，而浮动菜单要锚在按下处。
     );
 
-    // 右键（桌面端）打开菜单：ListTile 不暴露 secondary tap，外层包一层
+    // 长按 / 右键（桌面端）由外层 GestureDetector 接管（ListTile 不暴露
+    // secondary tap，onLongPress 也没有坐标）。
     return GestureDetector(
+      onLongPressStart: onLongPress == null
+          ? null
+          : (d) => onLongPress!(d.globalPosition),
       onSecondaryTapDown: onSecondaryTap == null
           ? null
-          : (_) => onSecondaryTap!(),
+          : (d) => onSecondaryTap!(d.globalPosition),
       child: tile,
     );
   }

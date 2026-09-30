@@ -57,6 +57,17 @@ class ChatBackgroundService : Service() {
         var isRunning = false
             private set
 
+        /**
+         * 已下单 `startForegroundService()`、但服务尚未执行到 `startForeground()` 的窗口。
+         *
+         * 该窗口内**绝不能**调用 `stopService()`：AMS 的 `stopServiceLocked()` 在记录
+         * 处于 delayed / pending / isServiceNeeded 时会提前返回，既不清 `fgRequired`
+         * 也不撤 `SERVICE_FOREGROUND_TIMEOUT_MSG`，超时一到就抛
+         * `ForegroundServiceDidNotStartInTimeException` 崩进程（前台服务契约泄漏）。
+         */
+        @Volatile
+        private var startRequested = false
+
         /** 由 sessionKey 推导通知 id，并避开常驻通知 id（避免互相顶掉）。 */
         fun messageIdFor(sessionKey: String): Int {
             val id = sessionKey.hashCode()
@@ -73,6 +84,7 @@ class ChatBackgroundService : Service() {
             return try {
                 val intent = Intent(context, ChatBackgroundService::class.java)
                     .setAction(ACTION_START)
+                startRequested = true
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(intent)
                 } else {
@@ -80,16 +92,32 @@ class ChatBackgroundService : Service() {
                 }
                 true
             } catch (e: Exception) {
+                startRequested = false
                 Log.w(TAG, "启动前台服务失败: $e")
                 false
             }
         }
 
-        /** 停止前台服务（常驻通知随之移除）。 */
+        /**
+         * 停止前台服务（常驻通知随之移除）。
+         *
+         * **不用 `stopService()`**：若 `startForegroundService()` 的前台契约尚未履行
+         * （见 [startRequested]），`stopServiceLocked()` 会在 delayed / pending /
+         * isServiceNeeded 时提前返回，从而泄漏 `fgRequired` 与超时消息，最终导致
+         * `ForegroundServiceDidNotStartInTimeException` 崩溃。
+         * 改为投递 [ACTION_STOP]，由 `onStartCommand()` 先 `ensureForeground()` 兑现
+         * 契约、再自停 —— 任何时刻都不会留下未兑现的前台契约。
+         */
         fun stop(context: Context) {
+            // 既没在跑、也没有未兑现的启动请求：没有可停的东西。
+            if (!isRunning && !startRequested) return
             try {
-                context.stopService(Intent(context, ChatBackgroundService::class.java))
+                val intent = Intent(context, ChatBackgroundService::class.java)
+                    .setAction(ACTION_STOP)
+                context.startService(intent)
             } catch (e: Exception) {
+                // 后台限制拒绝 startService：**不**降级到 stopService（会重现竞态）。
+                // 服务稍后 startForeground() 兑现契约，回前台时再次 stop 即可。
                 Log.w(TAG, "停止前台服务失败: $e")
             }
         }
@@ -298,21 +326,42 @@ class ChatBackgroundService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
+    override fun onCreate() {
+        super.onCreate()
+        // 一被创建就立即兑现前台契约：无论随后 intent 是 START 还是 STOP，
+        // 都必须在系统超时内调用 startForeground()，否则系统抛
+        // ForegroundServiceDidNotStartInTimeException（进程级崩溃，无法捕获）。
+        ensureForeground()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // 幂等兜底：服务已存在、onCreate 不再执行时，仍保证契约已履行。
+        ensureForeground()
         if (intent?.action == ACTION_STOP) {
             removeForeground()
             stopSelf()
             return START_NOT_STICKY
         }
-        return try {
+        return START_STICKY
+    }
+
+    /**
+     * 幂等地进入前台。
+     *
+     * 任何一次 `startForegroundService()` 都会给本服务记一笔「必须尽快
+     * startForeground()」的账（AMS 的 `fgRequired` + 超时消息）。把它收敛到唯一
+     * 入口，保证只要服务被启动、无论带着什么 action，这笔账都会被还清。
+     */
+    private fun ensureForeground() {
+        if (isRunning) return
+        try {
             startInForeground()
-            START_STICKY
         } catch (e: Exception) {
             // 前台服务启动被拒（Android 12+ 后台限制）/ 通知渠道异常：
             // 收起服务，不影响应用本体运行。
             Log.w(TAG, "前台服务启动失败: $e")
+            removeForeground()
             stopSelf()
-            START_NOT_STICKY
         }
     }
 
@@ -327,6 +376,7 @@ class ChatBackgroundService : Service() {
         launchPending(this, "", SERVICE_NOTIFICATION_ID)?.let { nb.setContentIntent(it) }
         startForeground(SERVICE_NOTIFICATION_ID, nb.build())
         isRunning = true
+        startRequested = false
     }
 
     /** 移除前台状态与常驻通知（兼容 API < 24）。 */
@@ -346,6 +396,7 @@ class ChatBackgroundService : Service() {
 
     override fun onDestroy() {
         isRunning = false
+        startRequested = false
         super.onDestroy()
     }
 }

@@ -18,17 +18,12 @@ library;
 
 import 'package:dio/dio.dart';
 
-import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
-import '../net/config.dart'
-    show
-        kApiId,
-        kClientVersionStr,
-        kDefaultBase,
-        kDefaultUrls;
+import '../net/config.dart' show kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
 import 'config_text_cache.dart';
+import 'gateway.dart' show buildMiniwParamMd5Url;
 
 /// 本模块日志标签。
 const String _logTag = 'Title';
@@ -97,7 +92,9 @@ class TitleCatalog {
 }
 
 /// 提取 `key = { ... }` 的最外层 `{...}` 块（支持嵌套大括号）。
-String? _extractBlock(String text, String key) {
+///
+/// 多个 visual-cfg（称号、交友标签…）都是这种 Lua 表文本，公共实现。
+String? extractLuaBlock(String text, String key) {
   final i = text.indexOf(key);
   if (i < 0) return null;
   final open = text.indexOf('{', i);
@@ -142,7 +139,7 @@ Map<int, TitleConfigEntry> parseTitleEntries(String text) {
 /// 解析 `title_manager` 配置的 `title_typeList` → 分类列表。
 List<TitleType> parseTitleTypes(String text) {
   final out = <TitleType>[];
-  final block = _extractBlock(text, 'title_typeList');
+  final block = extractLuaBlock(text, 'title_typeList');
   if (block == null) return out;
   for (final m in RegExp(r'\{([^{}]*)\}').allMatches(block)) {
     final body = m.group(1)!;
@@ -352,35 +349,17 @@ class TitleClient {
        baseUrl =
            baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
 
-  String _url(String act, [Map<String, String> params = const {}]) {
-    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final all = <String, String>{
-      'act': act,
-      'uin': '$uin',
-      'apiid': kApiId,
-      'ver': kClientVersionStr,
-      'country': 'CN',
-      'lang': '0',
-      ...params,
-    };
-    final md5 = httpGetParamMd5(
-      all,
-      timeVal: now,
-      s2: s2,
-      s2t: s2t,
-      key: httpGetParamKey,
-    );
-    final parts = <String>[
-      ...all.entries.map(
-        (e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}',
-      ),
-      'time=$now',
-      's2t=$s2t',
-      'encrypt_ver=3',
-    ];
-    return '$base/miniw/title?${parts.join('&')}&md5=$md5';
-  }
+  /// `/miniw/title` 请求 URL —— 走共享构造器（会带上全局参数，见
+  /// [buildMiniwParamMd5Url]）。
+  String _url(String act, [Map<String, String> params = const {}]) =>
+      buildMiniwParamMd5Url(
+        baseUrl: baseUrl,
+        path: '/miniw/title',
+        params: {'act': act, ...params},
+        uin: uin,
+        s2: s2,
+        s2t: s2t,
+      );
 
   Future<Map<String, Object?>> _get(String url, String act) async {
     log.debug('$act url（已脱敏）: ${redactUrl(url)}', tag: _logTag);

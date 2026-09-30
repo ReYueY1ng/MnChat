@@ -292,6 +292,14 @@ class PartnerDirectory {
 
   PartnerInfo? partnerOf(int uin) => partners[uin];
 
+  /// 与某个好友的默契度。**每个好友都有**（`get_list` 会返回 `lab == 0`
+  /// 的非拍档项，见 `bestpartnerdatamgr.lua:738-797`；取不到就是 0）。
+  int tacitOf(int uin) => partners[uin]?.tacitnum ?? 0;
+
+  /// 是不是最佳拍档 —— 判定用 `lab > 0`（`GetUinRepotType == 2`），
+  /// 不能只看"在不在 get_list 的返回里"（非拍档也在）。
+  bool isPartner(int uin) => (partners[uin]?.lab ?? 0) > 0;
+
   /// 是否大会员：到期时间存在且晚于 [now]（默认当前时间）。
   bool isVip(int uin, {int? now}) {
     final expiry = vipExpiry[uin];

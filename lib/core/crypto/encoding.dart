@@ -62,3 +62,47 @@ List<int> urlsafeB64Urldecode(String s) {
   }
   return base64Url.decode(normalized);
 }
+
+/// 宽松解码游戏侧的 base64 变体 —— 解不出来返回 null（不抛）。
+///
+/// 真机抓到的 `extend_data` 用的是**把 `=` 填充也换成 `_`** 的 urlsafe 变体，例如
+/// `...ImNoYXJlVHlwZSI6MH0__`（尾部 `__` 即 `==`）。如果按常规把 `_` 一律当
+/// `/`，尾部就会变成 `//` → 解出乱码 → 整条消息退化（表现：动态表情显示成
+/// 「请升级到最新版本查看」）。
+///
+/// 由于 `_` 既可能是 `/` 也可能是填充，这里**依次尝试几种规范化**，取第一个
+/// 既能 base64 解出、又是**合法 UTF-8** 的候选 —— 载荷都是 UTF-8 文本
+/// （JSON），用 UTF-8 校验就能把「把填充当数据」的错误候选区分开。
+List<int>? lenientBase64Decode(String s) {
+  for (final candidate in _base64Candidates(s)) {
+    try {
+      final bytes = base64Decode(candidate);
+      utf8.decode(bytes); // 错误候选会在这里失败（乱码），继续试下一个
+      return bytes;
+    } catch (_) {
+      // 试下一种
+    }
+  }
+  return null;
+}
+
+Iterable<String> _base64Candidates(String s) sync* {
+  // `:`（本项目发出去的填充写法）、`-`/`+` 的互换先统一掉。
+  final unified = s.replaceAll(':', '=').replaceAll('-', '+');
+  // 1) 标准 urlsafe：`_` == `/`
+  yield _leftPad(unified.replaceAll('_', '/'));
+  // 2) 尾部 1~2 个 `_` 当填充（真机实测形态）
+  for (var pads = 2; pads >= 1; pads--) {
+    if (unified.length > pads && unified.endsWith('_' * pads)) {
+      final body = unified.substring(0, unified.length - pads);
+      yield _leftPad('${body.replaceAll('_', '/')}${'=' * pads}');
+    }
+  }
+  // 3) `_` 全是填充
+  yield _leftPad(unified.replaceAll('_', '='));
+}
+
+String _leftPad(String s) {
+  final rem = s.length % 4;
+  return rem == 0 ? s : s.padRight(s.length + (4 - rem), '=');
+}

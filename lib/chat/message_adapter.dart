@@ -8,6 +8,7 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 
 import '../core/chat_emoji.dart' show decodeEmojiCodes;
 import '../core/models/messages.dart';
+import '../core/services/rich_media.dart' show RichMedia;
 
 /// 会话存储 key，格式 `'${type.name}_$id'`（`friend_123` / `group_456`）。
 ///
@@ -58,6 +59,13 @@ Message chatMessageToMessage(
   final createdAt = DateTime.fromMillisecondsSinceEpoch(m.time * 1000, isUtc: true);
   // 显示文本：把表情码 #A1xx 解码为 Unicode 表情（id 仍用原始 text 保证稳定）。
   final text = decodeEmojiCodes(m.text);
+  // 动态/互动表情的真身在 extend_data.interCode。**老数据行**（当时还没解析
+  // interCode）只存了 extend_data，所以这里统一兜底再解一次 —— 否则那些消息会
+  // 一直显示「请升级到最新版本查看」。
+  final interCode = (m.interCode ?? '').isNotEmpty
+      ? m.interCode
+      : decodeChatExtendData(m.extendData)?['interCode']?.toString();
+  final hasInterCode = (interCode ?? '').isNotEmpty;
 
   if (m.isSystemMsg || m.type == ChatMsgType.system) {
     return Message.system(id: id, authorId: 'system', createdAt: createdAt, text: text);
@@ -68,17 +76,48 @@ Message chatMessageToMessage(
         id: id,
         authorId: m.uin.toString(),
         createdAt: createdAt,
-        metadata: {'type': 'share', 'text': text, 'extend': m.extendData},
+        metadata: {
+          'type': 'share',
+          'text': text,
+          'extend': m.extendData,
+          if (hasInterCode) 'interCode': interCode,
+          if (m.isLive) 'live': true,
+        },
       );
     case ChatMsgType.custom:
       return Message.custom(
         id: id,
         authorId: m.uin.toString(),
         createdAt: createdAt,
-        metadata: {'type': 'custom', 'text': text, 'extend': m.extendData},
+        metadata: {
+          'type': 'custom',
+          'text': text,
+          'extend': m.extendData,
+          if (hasInterCode) 'interCode': interCode,
+          if (m.isLive) 'live': true,
+        },
       );
     case ChatMsgType.text:
     case ChatMsgType.system:
+      // 收到的卡片类消息（礼物 / 红包 / 房间邀请 / 拍一拍 …）在推送侧没有
+      // msg_type（默认 text），但 extend_data 里写着 Type/shareType。游戏客户端
+      // 也只认 extend_data（`mainchatview.lua:412-450`）—— 这里同样按它分流，
+      // 否则礼物只会显示那句「收到来自「X」的默契礼物」兜底文案。
+      final media = RichMedia.decode(m.extendData);
+      if (media != null && media.isCard) {
+        return Message.custom(
+          id: id,
+          authorId: m.uin.toString(),
+          createdAt: createdAt,
+          metadata: {
+            'type': 'custom',
+            'text': text,
+            'extend': m.extendData,
+            if (hasInterCode) 'interCode': interCode,
+            if (m.isLive) 'live': true,
+          },
+        );
+      }
       return Message.text(
         id: id,
         authorId: m.uin.toString(),
@@ -86,7 +125,12 @@ Message chatMessageToMessage(
         text: text,
         // 保留原始文本（含 #A1xx 表情码），供气泡行内渲染真实游戏贴图；
         // text 字段则用解码后的 Unicode（会话/通知预览友好）。
-        metadata: {'raw': m.text},
+        // interCode：动态表情/互动表情的真身（此时 m.text 只是低版本提示文案）。
+        metadata: {
+          'raw': m.text,
+          if (hasInterCode) 'interCode': interCode,
+          if (m.isLive) 'live': true,
+        },
       );
   }
 }

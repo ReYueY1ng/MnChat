@@ -1,0 +1,6 @@
+# spine 运行时只作开发期工具，不 vendor 进仓库（见 README）
+spine-core.js
+frames/
+*.json
+node_modules/
+package*.json

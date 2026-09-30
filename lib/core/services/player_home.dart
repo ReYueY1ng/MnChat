@@ -22,6 +22,7 @@ import '../models/homepage_modules.dart'
 import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
+import '../storage/settings_store.dart' show SettingsKeys, SettingsStore;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
 
@@ -289,6 +290,15 @@ class PlayerHomeClient {
   }) =>
       leaveTrace &&
       (lastSentAt <= 0 || now - lastSentAt >= visitRecordDedupSeconds);
+
+  /// 读取「访问主页留下踪迹」开关的**持久化值**（未设置过默认开启）。
+  ///
+  /// 必须走 [SettingsStore]，**不要**读 `leaveVisitTraceProvider`：那个 Notifier 的
+  /// `build()` 会先同步返回默认值 `true`，持久化的值要等异步加载完才写回 state。
+  /// 冷启动后先去别人的主页时，`ref.read` 拿到的就是这个默认 `true`，
+  /// 于是「关闭留下踪迹」被无视、照样上报了访问记录。
+  static Future<bool> leaveTraceEnabled(SettingsStore store) =>
+      store.getBool(SettingsKeys.leaveVisitTrace, fallback: true);
 
   /// 访问主页（act=add_visit_record）。[prize]=1 附带送花等。
   Future<bool> addVisitRecord(int targetUin, {int prize = 0}) async {

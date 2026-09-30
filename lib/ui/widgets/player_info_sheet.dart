@@ -3,10 +3,11 @@
 /// - [showPlayerInfoSheet]：点击头像弹出的玩家简要信息底部弹窗
 ///   （头像/昵称/迷你号/称号占位 + 个人中心/置顶/赠送/更多）。
 /// - [showFriendMenu]：长按 / 右键 / 信息卡「更多」共用的操作菜单
-///   （上线通知/置顶/备注/家园/删除好友，会话列表另带免打扰）。
+///   （上线通知/拍一拍/置顶/备注/家园/删除好友，会话列表另带免打扰）。
 ///
-/// 备注 / 上线通知 / 置顶均走本地设置 [SettingsStore]，删除好友走
-/// `buddysvr.buddy_rm`；不涉及服务端的 set_note / set_online_notify_flag。
+/// 备注（`cmd=set_note`）/ 上线通知（`cmd=set_online_notify_flag`）/ 置顶
+/// （`cmd=set_sort_flag`）走**服务端同步**，同时写一份本地设置作为离线兜底；
+/// 删除好友走 `buddysvr.buddy_rm`，拍一拍走 `cmd=take_pat`。
 library;
 
 import 'dart:async' show unawaited;
@@ -15,12 +16,14 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/messages.dart';
+import '../../core/services/partner.dart' show PartnerDirectory;
 import '../../core/models/medal_catalog.dart';
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
+import 'gift_picker.dart' show showGiftPicker;
 import 'rich_text_view.dart';
 
 /// 显示玩家简要信息底部弹窗。
@@ -115,7 +118,7 @@ Future<void> showPlayerInfoSheet(
                   final home = snap.data?.$2;
                   final score = snap.data?.$3;
                   final title = snap.data?.$4;
-                  final tacit = _tacitnumFor(home, uin);
+                  final tacit = _tacitnumFor(ref, uin);
                   final adv = score == null
                       ? '--'
                       : '${score['name'] ?? ''} ${score['level'] ?? ''}'.trim();
@@ -221,8 +224,9 @@ Future<void> showPlayerInfoSheet(
                     label: '赠送',
                     onTap: () {
                       Navigator.pop(ctx);
-                      ScaffoldMessenger.of(context)
-                          .showSnackBar(const SnackBar(content: Text('暂未开放')));
+                      unawaited(
+                        showGiftPicker(context, ref, uin: uin, name: name),
+                      );
                     },
                   ),
                   _CircleAction(
@@ -312,6 +316,11 @@ Future<void> showFriendMenu(
             // 以下仅好友会话
             if (isFriend) ...[
               ListTile(
+                leading: const Icon(Icons.touch_app_outlined),
+                title: const Text('拍一拍'),
+                onTap: () => Navigator.pop(ctx, 'pat'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.edit_note),
                 title: const Text('备注'),
                 onTap: () => Navigator.pop(ctx, 'note'),
@@ -342,17 +351,52 @@ Future<void> showFriendMenu(
 
   switch (action) {
     case 'notify':
-      await settings.setFriendOnlineNotify(uin, !notifyOn);
+      final on = !notifyOn;
+      await settings.setFriendOnlineNotify(uin, on);
+      final synced = await _serverSync(
+        () => ref.read(chatServiceProvider).setFriendOnlineNotify(uin, on: on),
+      );
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(notifyOn ? '已关闭上线通知' : '已开启上线通知')),
+          SnackBar(
+            content: Text(
+              synced
+                  ? (on ? '已开启上线通知' : '已关闭上线通知')
+                  : '上线通知同步失败（已本地生效）',
+            ),
+          ),
+        );
+      }
+    case 'pat':
+      var ok = false;
+      try {
+        final resp = await ref.read(chatServiceProvider).patFriend(uin);
+        final code = resp['result'] ?? resp['ret'];
+        ok = code is num && code == 0;
+      } catch (_) {
+        ok = false;
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(ok ? '已拍一拍' : '拍一拍失败')),
         );
       }
     case 'pin':
-      await settings.setPinned(key, !pinned);
+      final top = !pinned;
+      await settings.setPinned(key, top);
+      final synced = await _serverSync(
+        () => ref.read(chatServiceProvider).setFriendTop(uin, top: top),
+      );
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(pinned ? '已取消置顶' : '已置顶')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              synced
+                  ? (top ? '已置顶' : '已取消置顶')
+                  : '置顶同步失败（已本地生效）',
+            ),
+          ),
+        );
       }
     case 'mute':
       await settings.setMuted(key, !muted);
@@ -370,6 +414,17 @@ Future<void> showFriendMenu(
       );
     case 'remove':
       await _confirmRemoveFriend(context, ref, uin: uin, name: name);
+  }
+}
+
+/// 执行一次服务端同步；成功返回 true，失败返回 false（不抛出）。
+/// 调用方负责在 await 后用 `context.mounted` 守卫再提示。
+Future<bool> _serverSync(Future<Object?> Function() call) async {
+  try {
+    await call();
+    return true;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -410,9 +465,13 @@ Future<void> _editFriendNote(
   );
   if (ok == true) {
     await settings.setFriendNote(uin, ctrl.text);
+    final synced = await _serverSync(
+      () => ref.read(chatServiceProvider).setFriendNote(uin, ctrl.text.trim()),
+    );
     if (context.mounted) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('备注已保存')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(synced ? '备注已保存' : '备注同步失败（已本地保存）')),
+      );
     }
   }
   ctrl.dispose();
@@ -457,22 +516,16 @@ Future<void> _confirmRemoveFriend(
   }
 }
 
-/// 从主页 `partner` 模块取与指定好友的默契度（无匹配则退回首项，仍无则 0）。
-int _tacitnumFor(Map<String, Object?>? home, int uin) {
-  final partner = home?['partner'];
-  if (partner is! List) return 0;
-  int? fallback;
-  for (final e in partner) {
-    if (e is! Map) continue;
-    final m = e.cast<String, Object?>();
-    final t = m['tacitnum'];
-    final tv = t is num ? t.toInt() : int.tryParse('$t') ?? 0;
-    final bu = m['bestUin'];
-    final buv = bu is num ? bu.toInt() : int.tryParse('$bu') ?? 0;
-    if (buv == uin) return tv;
-    fallback ??= tv;
-  }
-  return fallback ?? 0;
+/// 与指定好友的默契度。
+///
+/// 用**我自己的**拍档目录（`get_list` 对每个好友都会返回 `tacitnum`，
+/// 非拍档是 `lab == 0`），而不是对方主页的 `partner` 模块 —— 那是**他**的拍档，
+/// 不是我和他的默契度。
+int _tacitnumFor(WidgetRef ref, int uin) {
+  final directory =
+      ref.watch(partnerDirectoryProvider).asData?.value ??
+      PartnerDirectory.empty;
+  return directory.tacitOf(uin);
 }
 
 /// 从主页 `title` 模块取当前佩戴称号 id（`title.data.match_title.use_title.id`）。

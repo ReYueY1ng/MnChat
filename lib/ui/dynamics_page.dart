@@ -14,7 +14,14 @@ import 'widgets/dynamics_card.dart';
 /// 每个分类独立缓存：切换分类不清空其它分类已加载内容，
 /// 返回时直接显示缓存并后台静默刷新。
 class DynamicsPage extends ConsumerStatefulWidget {
-  const DynamicsPage({super.key});
+  /// 只看某个玩家的动态（他人主页的「TA 的动态」浮层用）；
+  /// null = 普通动态页（热门 / 关注 / 官方 / 我的 四个分类）。
+  final int? authorUin;
+
+  /// 展示在标题里的昵称（仅 [authorUin] 非空时有意义）。
+  final String? authorName;
+
+  const DynamicsPage({super.key, this.authorUin, this.authorName});
 
   @override
   ConsumerState<DynamicsPage> createState() => _DynamicsPageState();
@@ -45,7 +52,14 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   static const _feedTypes = [DynamicsFeedType.hot, DynamicsFeedType.recommend, DynamicsFeedType.official, DynamicsFeedType.mine];
   static const _feedLabels = ['热门', '关注', '官方', '我的'];
 
-  _TabCache get _cache => _caches[_tab];
+  /// 只看某个玩家的动态时：固定用「我的」这个 act（`get_posting_list`），
+  /// 只是把 `op_uin` 换成对方 —— 服务端同一个接口既能查自己也能查别人。
+  bool get _singleAuthor => widget.authorUin != null;
+
+  DynamicsFeedType get _feedType =>
+      _singleAuthor ? DynamicsFeedType.mine : _feedTypes[_tab];
+
+  _TabCache get _cache => _singleAuthor ? _caches.first : _caches[_tab];
 
   @override
   void initState() {
@@ -98,7 +112,10 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       cache.error = null;
     });
     try {
-      final result = await client.pullPostings(_feedTypes[_tab]);
+      final result = await client.pullPostings(
+        _feedType,
+        opUin: widget.authorUin,
+      );
       if (!mounted || seq != _reqSeq) return; // 已切 tab，丢弃旧响应
       setState(() {
         cache.posts = result.posts;
@@ -128,8 +145,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     final seq = _reqSeq;
     setState(() => cache.loadingMore = true);
     try {
-      final result =
-          await client.pullPostings(_feedTypes[_tab], ct: cache.nextCt);
+      final result = await client.pullPostings(
+        _feedType,
+        ct: cache.nextCt,
+        opUin: widget.authorUin,
+      );
       if (!mounted || seq != _reqSeq) return;
       setState(() {
         cache.posts = [...cache.posts, ...result.posts];
@@ -163,7 +183,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       initialIndex: 0, // 默认"热门"（最左）
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('动态'),
+          title: Text(
+            _singleAuthor
+                ? '${widget.authorName ?? widget.authorUin} 的动态'
+                : '动态',
+          ),
           actions: [
             IconButton(
               tooltip: '动态通知',
@@ -178,9 +202,10 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                 ),
               ),
             ),
-            IconButton(
-              tooltip: '发布动态',
-              icon: const Icon(Icons.edit_outlined),
+            if (!_singleAuthor)
+              IconButton(
+                tooltip: '发布动态',
+                icon: const Icon(Icons.edit_outlined),
               onPressed: () async {
                 final ok = await Navigator.of(context).push<bool>(
                   MaterialPageRoute(
@@ -203,10 +228,12 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
               onPressed: _init,
             ),
           ],
-          bottom: TabBar(
-            onTap: _switchTab,
-            tabs: [for (final l in _feedLabels) Tab(text: l)],
-          ),
+          bottom: _singleAuthor
+              ? null
+              : TabBar(
+                  onTap: _switchTab,
+                  tabs: [for (final l in _feedLabels) Tab(text: l)],
+                ),
         ),
         body: _body(),
       ),

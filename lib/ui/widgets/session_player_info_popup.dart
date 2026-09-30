@@ -18,11 +18,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/medal_catalog.dart';
 import '../../core/models/messages.dart';
+import '../../core/services/partner.dart' show PartnerDirectory;
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
+import '../profile_page.dart';
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
+import 'gift_picker.dart' show showGiftPicker;
 import 'player_info_sheet.dart' show showFriendMenu;
 import 'rich_text_view.dart';
 
@@ -282,25 +285,51 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
     ).showSnackBar(SnackBar(content: Text(next ? '已置顶' : '已取消置顶')));
   }
 
-  /// 个人中心：先关浮窗，再推入玩家主页。
+  /// 是不是「我自己」——决定动作行内容与「个人主页」的去向。
+  bool get _isSelf => widget.uin == widget.ref.read(myUinProvider);
+
+  /// 个人中心：先关浮窗，再推入主页。
+  ///
+  /// 自己 → 个人主页（[ProfilePage]，带编辑入口）；别人 → 他人主页
+  /// （[PlayerHomePage]）。
   void _openHomePage() {
     final navigator = Navigator.of(context);
+    final self = _isSelf;
     navigator.pop();
     unawaited(
       navigator.push(
         MaterialPageRoute<void>(
-          builder: (_) => PlayerHomePage(targetUin: widget.uin),
+          builder: (_) =>
+              self ? const ProfilePage() : PlayerHomePage(targetUin: widget.uin),
         ),
       ),
     );
   }
 
-  /// 赠送：暂未开放（与底部弹窗一致）。
+  /// 赠送：关掉浮窗后弹礼物面板（锚点沿用本浮窗的位置）。
   void _gift() {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('暂未开放')));
-    Navigator.of(context).pop();
+    final navigator = Navigator.of(context);
+    final anchor = _anchorRect(context);
+    final hostRef = widget.ref;
+    final uin = widget.uin;
+    final name = widget.name;
+    navigator.pop();
+    unawaited(
+      showGiftPicker(
+        navigator.context,
+        hostRef,
+        uin: uin,
+        name: name,
+        anchor: anchor,
+      ),
+    );
+  }
+
+  /// 本浮窗当前的屏幕矩形（作为礼物面板的锚点）。
+  Rect? _anchorRect(BuildContext context) {
+    final box = context.findRenderObject();
+    if (box is! RenderBox || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
   }
 
   /// 更多：关浮窗后打开好友操作菜单（与长按 / 右键共用）。
@@ -368,7 +397,7 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
               future: _playerInfoOf(widget.ref, widget.uin),
               builder: (context, snap) {
                 final info = snap.data ?? SessionPlayerInfo.empty;
-                final tacit = _tacitnumFor(info.home, widget.uin);
+                final tacit = _tacitnumFor(widget.ref, widget.uin);
                 final adv = info.score == null
                     ? '--'
                     : '${info.score!['name'] ?? ''} ${info.score!['level'] ?? ''}'
@@ -440,32 +469,43 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
             if (widget.showActions) ...[
               const Divider(height: 1),
               const SizedBox(height: AppSpacing.sm),
-              // 操作行：个人中心 / 置顶 / 赠送 / 更多
+              // 操作行：自己只有「个人主页」入口（置顶 / 赠送 / 更多是好友操作）；
+              // 别人是 个人中心 / 置顶 / 赠送 / 更多。
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
-                children: [
-                  _CircleAction(
-                    icon: Icons.person_outline,
-                    label: '个人中心',
-                    onTap: _openHomePage,
-                  ),
-                  _CircleAction(
-                    icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                    label: pinned ? '取消置顶' : '置顶',
-                    highlighted: pinned,
-                    onTap: () => unawaited(_togglePinned()),
-                  ),
-                  _CircleAction(
-                    icon: Icons.card_giftcard,
-                    label: '赠送',
-                    onTap: _gift,
-                  ),
-                  _CircleAction(
-                    icon: Icons.more_horiz,
-                    label: '更多',
-                    onTap: () => unawaited(_openMoreMenu()),
-                  ),
-                ],
+                children: _isSelf
+                    ? [
+                        _CircleAction(
+                          icon: Icons.account_circle_outlined,
+                          label: '个人主页',
+                          onTap: _openHomePage,
+                        ),
+                      ]
+                    : [
+                        _CircleAction(
+                          icon: Icons.person_outline,
+                          label: '个人中心',
+                          onTap: _openHomePage,
+                        ),
+                        _CircleAction(
+                          icon: pinned
+                              ? Icons.push_pin
+                              : Icons.push_pin_outlined,
+                          label: pinned ? '取消置顶' : '置顶',
+                          highlighted: pinned,
+                          onTap: () => unawaited(_togglePinned()),
+                        ),
+                        _CircleAction(
+                          icon: Icons.card_giftcard,
+                          label: '赠送',
+                          onTap: _gift,
+                        ),
+                        _CircleAction(
+                          icon: Icons.more_horiz,
+                          label: '更多',
+                          onTap: () => unawaited(_openMoreMenu()),
+                        ),
+                      ],
               ),
             ],
           ],
@@ -475,22 +515,16 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
   }
 }
 
-/// 从主页 `partner` 模块取与指定好友的默契度（无匹配则退回首项，仍无则 0）。
-int _tacitnumFor(Map<String, Object?>? home, int uin) {
-  final partner = home?['partner'];
-  if (partner is! List) return 0;
-  int? fallback;
-  for (final e in partner) {
-    if (e is! Map) continue;
-    final m = e.cast<String, Object?>();
-    final t = m['tacitnum'];
-    final tv = t is num ? t.toInt() : int.tryParse('$t') ?? 0;
-    final bu = m['bestUin'];
-    final buv = bu is num ? bu.toInt() : int.tryParse('$bu') ?? 0;
-    if (buv == uin) return tv;
-    fallback ??= tv;
-  }
-  return fallback ?? 0;
+/// 与指定好友的默契度。
+///
+/// 用**我自己的**拍档目录（`get_list` 对每个好友都会返回 `tacitnum`，
+/// 非拍档是 `lab == 0`），而不是对方主页的 `partner` 模块 —— 那是**他**的拍档，
+/// 不是我和他的默契度。
+int _tacitnumFor(WidgetRef ref, int uin) {
+  final directory =
+      ref.watch(partnerDirectoryProvider).asData?.value ??
+      PartnerDirectory.empty;
+  return directory.tacitOf(uin);
 }
 
 /// 从主页 `title` 模块取当前佩戴称号 id（`title.data.match_title.use_title.id`）。

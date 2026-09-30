@@ -189,25 +189,38 @@ class PartnerNameBadges extends StatelessWidget {
   /// 关系等级阈值（升序）；空 / null → 默契度徽标不画进度条。
   final List<(int level, int intimacyValue)>? levels;
 
+  /// 显式指定默契度（**每个好友都有**，非拍档是 0/不显示拍档样式）。
+  ///
+  /// 传了就按它渲染（配色由 [lab] 决定）；不传则用 [partner] 自带的。
+  final int? tacitnum;
+  final int lab;
+
   const PartnerNameBadges({
     super.key,
     this.level = 0,
     this.partner,
     this.isVip = false,
     this.levels,
+    this.tacitnum,
+    this.lab = 0,
   });
 
   @override
   Widget build(BuildContext context) {
     final p = partner;
-    if (level <= 0 && p == null && !isVip) return const SizedBox.shrink();
+    // 没有拍档信息时也用显式传进来的默契度（游戏里每行都显示）。
+    final tacit = tacitnum ?? p?.tacitnum;
+    final tacitLab = tacitnum != null ? lab : (p?.lab ?? 0);
+    if (level <= 0 && p == null && !isVip && tacit == null) {
+      return const SizedBox.shrink();
+    }
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
         if (level > 0) LevelBadge(level: level),
-        if (p != null) ...[
+        if (tacit != null) ...[
           const SizedBox(width: AppSpacing.xs),
-          TacitBadge(tacitnum: p.tacitnum, lab: p.lab, levels: levels),
+          TacitBadge(tacitnum: tacit, lab: tacitLab, levels: levels),
         ],
         if (isVip) ...[
           const SizedBox(width: AppSpacing.xs),

@@ -2,9 +2,11 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/chat_emoji.dart' show kChatEmoji;
-import '../../core/emoticon.dart' show EmoticonImage;
+import '../../core/emoticon.dart' show EmoticonImage, ImfcEmojiImage;
+import '../../core/models/emoji_catalog.dart' show parseImfc;
 import '../../core/models/nickname.dart';
 import '../../state/providers.dart';
+import 'emoji_code_image.dart';
 
 /// 迷你世界富文本 → [InlineSpan] 的统一解析。
 ///
@@ -21,6 +23,7 @@ List<InlineSpan> buildRichSpans(
   String content, {
   required BuildContext context,
   double emojiSize = 16,
+  bool emojiAnimate = true,
 }) {
   final spans = <InlineSpan>[];
   if (content.isEmpty) return spans;
@@ -29,7 +32,10 @@ List<InlineSpan> buildRichSpans(
     // `@` 提及：排除空白、`[`/`<`（标记起始）与中文标点，避免把
     // `@[color]名字，后续正文` 整段吞成一个 mention。
     // `#[cC]RRGGBB` 为游戏颜色码；`#n` 为换行（见 ubbcodeparser / stringdef.csv）。
-    r'(\[[/]?[a-zA-Z=#0-9]*[^\]]*\]|<[/]?[a-zA-Z][^>]{0,24}>|#[cC][0-9a-fA-F]{6}|#n|#A\d{3}|#\{[^}]*\}|@[^\s@\[\]<>#，。！？、：；]{1,24})',
+    // 动态表情 `[mdemo]<Type>&<包ID>&<图ID>[/mdemo]` 与互动表情 `@IMFC&<序号>_<结果>`
+    // 必须**整体**匹配：前者否则会被通用 `[...]` 分支拆成裸文本，
+    // 后者否则会被末尾的 `@提及` 分支当成昵称高亮。
+    r'(\[mdemo\][^\[]*\[/mdemo\]|@IMFC&\d+_\d+|\[[/]?[a-zA-Z=#0-9]*[^\]]*\]|<[/]?[a-zA-Z][^>]{0,24}>|#[cC][0-9a-fA-F]{6}|#n|#A\d{3}|#\{[^}]*\}|@[^\s@\[\]<>#，。！？、：；]{1,24})',
   );
 
   var pos = 0;
@@ -91,6 +97,33 @@ List<InlineSpan> buildRichSpans(
               color: scheme.onPrimaryContainer,
               backgroundColor: scheme.primaryContainer,
               fontWeight: FontWeight.w600,
+            ),
+          ),
+        );
+      }
+    } else if (tag.startsWith('[mdemo]')) {
+      // 动态/新表情包代码 → 图片（素材由表情仓库按需下载）。
+      spans.add(
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: EmojiCodeImage(
+            code: tag,
+            size: emojiSize,
+            animate: emojiAnimate,
+          ),
+        ),
+      );
+    } else if (tag.startsWith('@IMFC&')) {
+      // 互动表情（骰子 / 猜拳）→ 按结果渲染图集帧。
+      final ref = parseImfc(tag);
+      if (ref != null) {
+        spans.add(
+          WidgetSpan(
+            alignment: PlaceholderAlignment.middle,
+            child: ImfcEmojiImage(
+              ref: ref,
+              size: emojiSize,
+              animate: emojiAnimate,
             ),
           ),
         );

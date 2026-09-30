@@ -5,12 +5,13 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import '../models/emoji_catalog.dart' show ImfcEmoji, imfcInterCode, imfcMessageText;
 import '../models/messages.dart';
 import '../storage/app_database.dart';
-import '../storage/chat_mapper.dart';
 import 'auth.dart';
 import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
@@ -25,6 +26,7 @@ import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
 import 'message_center.dart';
+import 'miniw_extra.dart';
 import 'name_rules.dart';
 import 'player_home.dart';
 import 'profile.dart';
@@ -79,6 +81,10 @@ class ChatService {
   MessageCenterClient? _messageCenter;
   SocialSignClient? _socialSign;
   PlayerHomeClient? _playerHome;
+  EmojiClient? _emoji;
+  BubbleClient? _bubble;
+  FriendGiftClient? _gift;
+  RedPacketClient? _redPacket;
 
   /// 纯 RPC 命令客户端（好友/群/conn 的网络调用剥离至此）。
   final ChatCommandClient _commands = ChatCommandClient();
@@ -335,6 +341,21 @@ class ChatService {
   /// 玩家主页客户端（登录后可用，未登录返回 null）。
   PlayerHomeClient? get playerHome => _playerHome;
 
+  /// 好友客户端（登录后可用，未登录返回 null）。
+  FriendClient? get friend => _friend;
+
+  /// 表情系统客户端（登录后可用，未登录返回 null）。
+  EmojiClient? get emoji => _emoji;
+
+  /// 聊天气泡客户端（登录后可用，未登录返回 null）。
+  BubbleClient? get bubble => _bubble;
+
+  /// 好友礼物客户端（登录后可用，未登录返回 null）。
+  FriendGiftClient? get gift => _gift;
+
+  /// 红包客户端（登录后可用，未登录返回 null）。
+  RedPacketClient? get redPacket => _redPacket;
+
   /// 会话消息历史（按时间升序）。key = sessionKey(type, id)。
   /// 返回稳定升序副本（缓存以升序为规范，此处兜底保证对外契约）。
   List<ChatMessage> historyOf(ChatSessionType type, int id) =>
@@ -392,6 +413,10 @@ class ChatService {
       );
       _socialSign ??= SocialSignClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _playerHome ??= PlayerHomeClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _emoji ??= EmojiClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _bubble ??= BubbleClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _gift ??= FriendGiftClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
+      _redPacket ??= RedPacketClient(uin: uin, s2: auth.s2, s2t: auth.s2t);
       _syncCommandClient();
       _setState(ChatServiceState.connected);
       await _connectChatPush();
@@ -620,6 +645,309 @@ class ChatService {
     return resp;
   }
 
+  /// 群置顶/取消置顶（服务端，act=set_group_top）。
+  /// 与「会话置顶」（本地 kv）不同：这是账号级的群置顶。
+  Future<Map<String, Object?>> setGroupTop(
+    int groupId, {
+    required bool top,
+  }) async {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.setGroupTop(groupId, top: top);
+  }
+
+  /// 禁言/取消禁言群成员（act=set_silent）。
+  Future<Map<String, Object?>> setGroupMemberSilent(
+    int groupId, {
+    required int opUin,
+    required bool silent,
+  }) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.setSilent(groupId, opUin: opUin, silent: silent);
+  }
+
+  /// 屏蔽/取消屏蔽群成员消息（act=set_ban）。
+  Future<Map<String, Object?>> setGroupMemberBanned(
+    int groupId, {
+    required int opUin,
+    required bool ban,
+  }) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.setBan(groupId, opUin: opUin, ban: ban);
+  }
+
+  /// 举报群成员（act=report_group_user）。
+  Future<Map<String, Object?>> reportGroupMember(
+    int groupId, {
+    required int opUin,
+  }) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.reportGroupUser(groupId, opUin: opUin);
+  }
+
+  /// 一键拒绝全部入群申请（act=reject_group_apply_all）。
+  Future<Map<String, Object?>> rejectAllGroupApplies(int groupId) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.rejectGroupApplyAll(groupId);
+  }
+
+  // ── 好友设置 / 社交（服务端同步）────────────────────────────────────────
+
+  /// 修改好友备注（cmd=set_note，服务端同步）。成功刷新会话列表使昵称生效。
+  Future<Map<String, Object?>> setFriendNote(int uin, String note) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.setNote(uin, note);
+    await loadSessions();
+    return resp;
+  }
+
+  /// 设置好友上线提醒（cmd=set_online_notify_flag，服务端同步）。
+  Future<Map<String, Object?>> setFriendOnlineNotify(
+    int uin, {
+    required bool on,
+  }) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.setOnlineNotifyFlag(uin, on: on);
+  }
+
+  /// 好友置顶/取消置顶（cmd=set_sort_flag）。
+  Future<Map<String, Object?>> setFriendTop(
+    int uin, {
+    required bool top,
+  }) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.setSortFlag(uin, top: top);
+  }
+
+  /// 一键拒绝全部好友申请（cmd=reject_apply_all）。成功后清空本地待处理申请。
+  Future<Map<String, Object?>> rejectAllFriendRequests() async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.rejectApplyAll();
+    _dispatcher.rejectAllPending();
+    return resp;
+  }
+
+  /// 拍一拍好友（cmd=take_pat）。成功后本地回显一条拍一拍消息。
+  Future<Map<String, Object?>> patFriend(int desUin, {String? myName}) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.takePat(desUin);
+    final code = resp['result'] ?? resp['ret'];
+    if (code is num && code == 0) {
+      final me = myName ?? myNickname;
+      final m = ChatMessage(
+        uin: myUin,
+        text: '$me 拍了拍你',
+        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        isSuccess: true,
+      );
+      _upserter.upsertFriend(desUin, m);
+    }
+    return resp;
+  }
+
+  /// 发送互动表情「骰子 / 猜拳」。
+  ///
+  /// 对齐反编译 `EmojiBtnTemplate_StructureSendText`：随机取 1..mod 作为结果，
+  /// `interCode = "@IMFC&<序号>_<结果>"`；消息文本是
+  /// `JSON{content: 低版本占位文案, extend_data: interCode}`；
+  /// extend_data 里也带一份 `interCode`（`DeCodeIMFCMsg` 优先读它）。
+  /// 返回实际结果（1 起），供 UI 提示。
+  Future<int> sendImfcEmoji(int desUin, ImfcEmoji emoji) async {
+    final friend = _friend;
+    final auth = _auth;
+    if (friend == null || auth == null) throw StateError('not logged in');
+    final result = 1 + _random.nextInt(emoji.mod);
+    final interCode = imfcInterCode(emoji.index, result);
+    final text = imfcMessageText(emoji.index, result);
+    final extend = _emojiExtendData(interCode);
+    await friend.sendChatMsg(desUin: desUin, msg: text, extendData: extend);
+    // 本地乐观回显：文本保持 JSON 信封，气泡会解析成结果图。
+    _upserter.upsertFriend(
+      desUin,
+      ChatMessage(
+        uin: myUin,
+        text: text,
+        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        isSuccess: true,
+        interCode: interCode,
+        isLive: true,
+      ),
+    );
+    return result;
+  }
+
+  /// 赠送礼物（`miniw/welfare?act=give_gift`）。
+  ///
+  /// 成功后按游戏客户端的做法，在聊天里补一条 `Type=SendFriendGift` 的卡片消息
+  /// （`friendgiftdatamgr.lua:389-460` 的 `NewSendGiftMsg`）：游戏端也是自己发
+  /// 这条消息的，不发的话对方只能拿到礼物、聊天里什么都没有。
+  Future<bool> sendGift({
+    required int desUin,
+    required int itemId,
+    required int num,
+    required int payType,
+    int addValue = 0,
+  }) async {
+    final friend = _friend;
+    final gift = _gift;
+    if (friend == null || gift == null) throw StateError('not logged in');
+    final resp = await gift.giveGift(
+      opUin: desUin,
+      itemId: itemId,
+      num: num,
+      type: payType,
+      roleName: myNickname,
+    );
+    final code = resp['ret'] ?? resp['code'];
+    if (code == null || '$code' != '0') return false;
+
+    final data = resp['data'];
+    final token = data is Map ? (data['token']?.toString() ?? '') : '';
+    final extend = _giftExtendData(
+      itemId: itemId,
+      num: num,
+      addValue: addValue,
+      desUin: desUin,
+      token: token,
+    );
+    // 低版本提示文案（GetS(70974) 取逗号前那段），正文只为兼容旧客户端。
+    final text = '收到来自「$myNickname」的默契礼物';
+    try {
+      await friend.sendChatMsg(desUin: desUin, msg: text, extendData: extend);
+    } catch (_) {
+      // 礼物已送出，卡片发失败不影响结果
+    }
+    _upserter.upsertFriend(
+      desUin,
+      ChatMessage(
+        uin: myUin,
+        text: text,
+        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        isSuccess: true,
+        extendData: extend,
+        type: ChatMsgType.custom,
+        isLive: true,
+      ),
+    );
+    return true;
+  }
+
+  /// 礼物卡的 extend_data：`url_encode(base64(JSON{Type:"SendFriendGift",...}))`。
+  String _giftExtendData({
+    required int itemId,
+    required int num,
+    required int addValue,
+    required int desUin,
+    required String token,
+  }) {
+    final t = <String, Object?>{
+      'Type': 'SendFriendGift',
+      'itemid': itemId,
+      'num': num,
+      'addValue': addValue,
+      'des_uin': desUin,
+      'src_uin': myUin,
+      'src_name': myNickname,
+      'token': token,
+    };
+    return Uri.encodeQueryComponent(
+      base64Encode(utf8.encode(jsonEncode(t))),
+    );
+  }
+
+  /// 组装带 [interCode] 的 extend_data：`url_encode(base64(JSON{...}))`
+  /// （与 `ChatCommandClient.buildExtendData` 同一格式，额外带上 interCode）。
+  String _emojiExtendData(String interCode) {
+    final tShare = <String, Object?>{
+      'nickname': myNickname,
+      'shareType': 0, // ShareType.TEXT
+      'bubble': 0,
+      'interCode': interCode,
+    };
+    return Uri.encodeQueryComponent(
+      base64Encode(utf8.encode(jsonEncode(tShare))),
+    );
+  }
+
+  static final Random _random = Random();
+
+  // ── 好友标签 / 分组（对齐 newfriendservice.lua:597-760）────────────────
+
+  /// 批量设置好友上线通知（cmd=batch_set_online_notify_flag）。
+  Future<Map<String, Object?>> setOnlineNotifyBatch(
+    List<int> uins, {
+    required bool on,
+  }) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.batchSetOnlineNotifyFlag(uins, on: on);
+  }
+
+  /// 好友标签池（cmd=query_friend_label_pool）。
+  Future<Map<String, Object?>> friendLabelPool() {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.queryFriendLabelPool();
+  }
+
+  /// 新增（[opType]=1，需 [label]）/ 删除（=0，需 [tagId]）标签池里的标签。
+  Future<Map<String, Object?>> setFriendLabelPool({
+    required int opType,
+    String? label,
+    int? tagId,
+  }) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.setFriendLabelPool(
+      opType: opType,
+      label: label,
+      tagId: tagId,
+    );
+  }
+
+  /// 给好友批量打（[opType]=1）/ 去掉（=2）某个标签。
+  Future<Map<String, Object?>> setFriendLabels(
+    List<int> uins, {
+    required int opType,
+    int? tagId,
+  }) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.batchSetFriendLabel(uins, opType: opType, tagId: tagId);
+  }
+
+  /// 批量清除这些好友的全部标签。
+  Future<Map<String, Object?>> clearFriendLabels(List<int> uins) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.batchClearFriendLabels(uins);
+  }
+
+  /// 查询「拒绝陌生人加好友」开关（cmd=get_closeapply_flag）。开启返回 true。
+  Future<bool> closeapplyEnabled() async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    final resp = await friend.getCloseapplyFlag();
+    final flag = resp['flag'] ?? resp['data'];
+    return flag == 1 || flag == true || flag == '1';
+  }
+
+  /// 设置「拒绝陌生人加好友」开关（cmd=set_closeapply_flag）。
+  Future<Map<String, Object?>> setCloseapplyEnabled({required bool on}) {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.setCloseapplyFlag(on: on);
+  }
+
   /// 拉取好友离线/最近聊天记录（buddysvr chat_query）。
   ///
   /// 独立客户端**不走 WS RPC**：反编译源码 `buddymanager.lua` 中
@@ -829,6 +1157,10 @@ class ChatService {
     _messageCenter = null;
     _socialSign = null;
     _playerHome = null;
+    _emoji = null;
+    _bubble = null;
+    _gift = null;
+    _redPacket = null;
     _syncCommandClient();
     _friendSessions.clear();
     _groupSessions.clear();

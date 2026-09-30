@@ -20,6 +20,28 @@ class FriendRequestPage extends ConsumerStatefulWidget {
 }
 
 class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
+  bool _busy = false;
+
+  /// 一键拒绝全部好友申请（cmd=reject_apply_all）。
+  Future<void> _rejectAll() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(chatServiceProvider).rejectAllFriendRequests();
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(const SnackBar(content: Text('已拒绝全部好友申请')));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -27,6 +49,12 @@ class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('申请列表'),
+          actions: [
+            TextButton(
+              onPressed: _busy ? null : _rejectAll,
+              child: const Text('全部拒绝'),
+            ),
+          ],
           bottom: const TabBar(
             tabs: [
               Tab(text: '好友申请'),
@@ -34,16 +62,19 @@ class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
             ],
           ),
         ),
-        body: TabBarView(
+        body: const TabBarView(
           children: [
-            const _FriendApplyTab(),
-            _GroupApplyTab(onChanged: () {}),
+            _FriendApplyTab(),
+            _GroupApplyTab(onChanged: _noop),
           ],
         ),
       ),
     );
   }
 }
+
+/// 占位回调（const 构造需要顶层/静态函数）。
+void _noop() {}
 
 /// 好友申请 tab。
 class _FriendApplyTab extends ConsumerWidget {

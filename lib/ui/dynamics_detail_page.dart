@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,9 +8,20 @@ import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart' show buildRichSpans, RichTextView;
 import 'widgets/image_viewer.dart' show openImageViewer;
+import 'widgets/session_player_info_popup.dart';
 import '../core/services/image_disk_cache.dart';
 
 /// 动态详情页 —— 左侧动态全文，右侧评论区；窄屏上下堆叠。
+/// 点头像弹玩家卡片：由页面注入（带被点对象的资料 + 指针全局坐标）。
+typedef PlayerCardTap =
+    void Function(
+      int uin,
+      String name,
+      String? avatar,
+      int? headFrameId,
+      Offset position,
+    );
+
 class DynamicsDetailPage extends ConsumerStatefulWidget {
   final DynamicsPost post;
 
@@ -19,6 +32,28 @@ class DynamicsDetailPage extends ConsumerStatefulWidget {
 }
 
 class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
+  /// 点头像 → 玩家卡片（与会话页同一个浮窗）。
+  void _showPlayerCard(
+    int uin,
+    String name,
+    String? avatar,
+    int? headFrameId,
+    Offset position,
+  ) {
+    unawaited(
+      showSessionPlayerInfoPopup(
+        context,
+        ref,
+        uin: uin,
+        name: name,
+        anchor: Rect.fromLTWH(position.dx, position.dy, 1, 1),
+        avatarUrl: avatar,
+        headFrameId: headFrameId,
+        showActions: uin != ref.read(myUinProvider),
+      ),
+    );
+  }
+
   DynamicsClient? _client;
   List<DynamicsComment> _comments = [];
   bool _loadingComments = true;
@@ -299,10 +334,16 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Expanded(child: _PostPanel(post: widget.post)),
+                Expanded(
+                  child: _PostPanel(
+                    post: widget.post,
+                    onAvatarTap: _showPlayerCard,
+                  ),
+                ),
                 const VerticalDivider(width: 1),
                 Expanded(
                   child: _CommentPanel(
+                    onAvatarTap: _showPlayerCard,
                     fill: true, // 双栏：占满高度，评论区内滚
                     comments: _comments,
                     loading: _loadingComments,
@@ -326,9 +367,13 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
                 Expanded(
                   child: ListView(
                     children: [
-                      _PostPanel(post: widget.post),
+                      _PostPanel(
+                        post: widget.post,
+                        onAvatarTap: _showPlayerCard,
+                      ),
                       const Divider(),
                       _CommentPanel(
+                        onAvatarTap: _showPlayerCard,
                         fill: false, // 内联：随页面滚动
                         comments: _comments,
                         loading: _loadingComments,
@@ -356,7 +401,10 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
 class _PostPanel extends StatelessWidget {
   final DynamicsPost post;
 
-  const _PostPanel({required this.post});
+  /// 点头像 → 玩家卡片。
+  final PlayerCardTap? onAvatarTap;
+
+  const _PostPanel({required this.post, this.onAvatarTap});
 
   @override
   Widget build(BuildContext context) {
@@ -376,12 +424,23 @@ class _PostPanel extends StatelessWidget {
           // 作者
           Row(
             children: [
-              AvatarView(
-            name: name,
-            avatarUrl: post.avatar,
-            radius: 22,
-            frameId: post.headFrameId,
-          ),
+              GestureDetector(
+                onTapUp: onAvatarTap == null
+                    ? null
+                    : (d) => onAvatarTap!(
+                        post.uin,
+                        name,
+                        post.avatar,
+                        post.headFrameId,
+                        d.globalPosition,
+                      ),
+                child: AvatarView(
+                  name: name,
+                  avatarUrl: post.avatar,
+                  radius: 22,
+                  frameId: post.headFrameId,
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Column(
@@ -531,6 +590,9 @@ class _CommentPanel extends StatelessWidget {
   final Set<int> expandedReplies;
   final void Function(int) onToggleReplies;
 
+  /// 点头像 → 玩家卡片（透传给每条评论）。
+  final PlayerCardTap? onAvatarTap;
+
   const _CommentPanel({
     required this.fill,
     required this.comments,
@@ -545,6 +607,7 @@ class _CommentPanel extends StatelessWidget {
     required this.replyLoading,
     required this.expandedReplies,
     required this.onToggleReplies,
+    this.onAvatarTap,
   });
 
   @override
@@ -591,6 +654,7 @@ class _CommentPanel extends StatelessWidget {
                 expanded: expandedReplies.contains(i),
                 replyLoading: replyLoading.contains(i),
                 onToggleReplies: () => onToggleReplies(i),
+                onAvatarTap: onAvatarTap,
               );
             },
           );
@@ -671,12 +735,16 @@ class _CommentTile extends StatelessWidget {
   final bool replyLoading;
   final VoidCallback onToggleReplies;
 
+  /// 点头像 → 玩家卡片。
+  final PlayerCardTap? onAvatarTap;
+
   const _CommentTile({
     required this.comment,
     required this.replies,
     required this.expanded,
     required this.replyLoading,
     required this.onToggleReplies,
+    this.onAvatarTap,
   });
 
   @override
@@ -694,11 +762,22 @@ class _CommentTile extends StatelessWidget {
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          AvatarView(
-            name: name,
-            avatarUrl: comment.avatar,
-            radius: 18,
-            frameId: comment.headFrameId,
+          GestureDetector(
+            onTapUp: onAvatarTap == null
+                ? null
+                : (d) => onAvatarTap!(
+                    comment.uin,
+                    name,
+                    comment.avatar,
+                    comment.headFrameId,
+                    d.globalPosition,
+                  ),
+            child: AvatarView(
+              name: name,
+              avatarUrl: comment.avatar,
+              radius: 18,
+              frameId: comment.headFrameId,
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(

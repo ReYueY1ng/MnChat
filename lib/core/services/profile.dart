@@ -8,10 +8,11 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
 
-import '../crypto/md5_sign.dart' show httpGetParamMd5, httpGetS1Map;
+import '../crypto/md5_sign.dart' show httpGetS1Map;
 import '../net/config.dart' show kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import 'gateway.dart' show buildMiniwParamMd5Url;
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
@@ -715,21 +716,16 @@ class ProfileClient {
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadData`。响应 `{data:[{id,time},...]}`
   /// 或 `{data:{...}}`；`time==-1` 永久，`>0` 为到期时间戳。
   Future<List<PortraitItem>> getOwnedPortraits() async {
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final base = baseUrl.endsWith('/')
-        ? baseUrl.substring(0, baseUrl.length - 1)
-        : baseUrl;
-    final params = <String, String>{'act': 'query_portrait'};
-    final md5 = httpGetParamMd5(params, timeVal: now, s2: s2, s2t: s2t);
-    final parts = <String>[
-      ...params.entries.map(
-        (e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}',
-      ),
-      'time=$now',
-      's2t=$s2t',
-      'encrypt_ver=3',
-    ];
-    final url = '$base/miniw/business?${parts.join('&')}&md5=$md5';
+    // 走共享构造器：真机请求会带上 uin/ver/apiid/lang/country/server_ts 全局参数
+    // （见 buildMiniwParamMd5Url），漏掉会 400 或 md5 对不上。
+    final url = buildMiniwParamMd5Url(
+      baseUrl: baseUrl,
+      path: '/miniw/business',
+      params: const {'act': 'query_portrait'},
+      uin: uin,
+      s2: s2,
+      s2t: s2t,
+    );
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);

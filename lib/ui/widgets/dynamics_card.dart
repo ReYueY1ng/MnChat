@@ -9,6 +9,7 @@ import '../../state/providers.dart';
 import '../dynamics_detail_page.dart';
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
+import 'session_player_info_popup.dart';
 import 'head_frame.dart';
 import 'image_viewer.dart';
 import 'rich_text_view.dart';
@@ -62,12 +63,16 @@ class DynamicsCard extends ConsumerWidget {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  AvatarView(
-            name: name,
-            avatarUrl: post.avatar,
-            radius: 20,
-            frameId: post.headFrameId,
-          ),
+                  GestureDetector(
+                    // 点头像 → 玩家卡片；点别处仍是进动态详情。
+                    onTapUp: (d) => _showPlayerCard(context, ref, d.globalPosition),
+                    child: AvatarView(
+                      name: name,
+                      avatarUrl: post.avatar,
+                      radius: 20,
+                      frameId: post.headFrameId,
+                    ),
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -148,6 +153,23 @@ class DynamicsCard extends ConsumerWidget {
   }
 
   /// 打开动态详情页。
+  /// 点头像弹玩家卡片（锚在指针处；自己则显示不带好友操作的本人卡）。
+  void _showPlayerCard(BuildContext context, WidgetRef ref, Offset position) {
+    unawaited(
+      showSessionPlayerInfoPopup(
+        context,
+        ref,
+        uin: post.uin,
+        name: post.nickname ?? '${post.uin}',
+        anchor: Rect.fromLTWH(position.dx, position.dy, 1, 1),
+        avatarUrl: post.avatar,
+        headFrameId: post.headFrameId,
+        // 别人：带好友操作；自己：只有「个人主页」入口。
+        showActions: !isMine,
+      ),
+    );
+  }
+
   void _openDetail(BuildContext context) {
     Navigator.of(
       context,

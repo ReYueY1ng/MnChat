@@ -54,7 +54,7 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('有等级+拍档的行显示 Lv 与默契度；非拍档行不显示默契度', (tester) async {
+  testWidgets('有等级+拍档的行显示 Lv 与默契度；非拍档行也显示默契度 0', (tester) async {
     await pumpFriends(
       tester,
       const PartnerDirectory(
@@ -74,9 +74,10 @@ void main() {
     // 两行都有等级徽标。
     expect(find.text('Lv12'), findsOneWidget);
     expect(find.text('Lv7'), findsOneWidget);
-    // 只有拍档行有默契度数值 / 徽标。
+    // 默契度是每个好友都有的（非拍档显示 0），所以两行都有徽标。
+    expect(find.byType(TacitBadge), findsNWidgets(2));
     expect(find.text('345'), findsOneWidget);
-    expect(find.byType(TacitBadge), findsOneWidget);
+    expect(find.text('0'), findsOneWidget);
 
     final partnerTile = find.ancestor(
       of: find.text('Lv12'),
@@ -92,7 +93,7 @@ void main() {
     );
     expect(
       find.descendant(of: normalTile, matching: find.byType(TacitBadge)),
-      findsNothing,
+      findsOneWidget,
     );
   });
 

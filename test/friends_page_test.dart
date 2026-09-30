@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/chat_service.dart' show SessionSnapshot;
+import 'package:mnchat/core/services/partner.dart'
+    show PartnerDirectory, PartnerInfo;
 import 'package:mnchat/state/providers.dart';
 import 'package:mnchat/ui/friends_page.dart';
 import 'package:mnchat/ui/theme/app_theme.dart';
@@ -29,14 +31,23 @@ void main() {
 
   /// pump 真实好友页：会话流直接用 [count] 个好友接管，避免依赖
   /// ChatService / 网络。
-  Future<void> pumpFriendsPage(WidgetTester tester, {int count = 20}) async {
+  Future<void> pumpFriendsPage(
+    WidgetTester tester, {
+    int count = 20,
+    List<ChatSession>? sessions,
+    PartnerDirectory? directory,
+  }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           sessionListProvider.overrideWith(
-            (_) => Stream.value(SessionSnapshot(friends(count), const [])),
+            (_) => Stream.value(
+              SessionSnapshot(sessions ?? friends(count), const []),
+            ),
           ),
           friendRequestCountProvider.overrideWithValue(0),
+          if (directory != null)
+            partnerDirectoryProvider.overrideWith((_) async => directory),
         ],
         child: MaterialApp(
           theme: buildAppTheme(Brightness.light),
@@ -55,7 +66,7 @@ void main() {
     // 取工具条 ColoredBox（"在线 N / N" 文本最近的 ColoredBox 祖先）。
     final toolbarFinder = find
         .ancestor(
-          of: find.text('在线 0 / 20'),
+          of: find.text('在线好友 0/20'),
           matching: find.byType(ColoredBox),
         )
         .first;
@@ -68,6 +79,94 @@ void main() {
       tester.getRect(toolbarFinder).bottom,
       tester.getRect(find.byType(Divider).first).top,
     );
+  });
+
+  testWidgets('排序：默契度从高到低（对齐游戏 sortType 2）', (tester) async {
+    // 三个好友，只有 10001/10003 是拍档，默契度 3 > 1。
+    final sessions = [
+      for (final id in [10000, 10001, 10002, 10003])
+        ChatSession(
+          id: id,
+          type: ChatSessionType.friend,
+          name: '好友${id - 10000}',
+          relation: 8,
+        ),
+    ];
+    await pumpFriendsPage(
+      tester,
+      sessions: sessions,
+      directory: const PartnerDirectory(
+        partners: {
+          10001: PartnerInfo(bestUin: 10001, lab: 1, tacitnum: 1),
+          10003: PartnerInfo(bestUin: 10003, lab: 1, tacitnum: 900),
+        },
+      ),
+    );
+
+    await tester.tap(find.byTooltip('排序方式'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('默契度从高到低'));
+    await tester.pumpAndSettle();
+
+    double topOf(String name) => tester.getTopLeft(find.text(name)).dy;
+    expect(topOf('好友3'), lessThan(topOf('好友1')));
+    expect(topOf('好友1'), lessThan(topOf('好友0')));
+  });
+
+  testWidgets('排序：登录从近到远 / 从远到近（对齐 sortType 3/4）', (tester) async {
+    final sessions = [
+      for (final (i, t) in [(0, 100), (1, 300), (2, 200)])
+        ChatSession(
+          id: 10000 + i,
+          type: ChatSessionType.friend,
+          name: '好友$i',
+          relation: 8,
+          lastLoginTime: t,
+        ),
+    ];
+    await pumpFriendsPage(tester, sessions: sessions, directory: const PartnerDirectory());
+
+    Future<void> pick(String label) async {
+      await tester.tap(find.byTooltip('排序方式'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text(label));
+      await tester.pumpAndSettle();
+    }
+
+    await pick('登录从近到远');
+    double topOf(String name) => tester.getTopLeft(find.text(name)).dy;
+    expect(topOf('好友1'), lessThan(topOf('好友2')));
+    expect(topOf('好友2'), lessThan(topOf('好友0')));
+
+    await pick('登录从远到近');
+    expect(topOf('好友0'), lessThan(topOf('好友2')));
+    expect(topOf('好友2'), lessThan(topOf('好友1')));
+  });
+
+  testWidgets('筛选：勾「在线好友」后只留在线好友（对齐 NewFriendsMgrFilterFrame）', (tester) async {
+    final sessions = [
+      for (final i in [0, 1, 2])
+        ChatSession(
+          id: 10000 + i,
+          type: ChatSessionType.friend,
+          name: '好友$i',
+          relation: 8,
+          isOnline: i == 1,
+        ),
+    ];
+    await pumpFriendsPage(tester, sessions: sessions, directory: const PartnerDirectory());
+    expect(find.text('好友0'), findsOneWidget);
+
+    await tester.tap(find.byTooltip('筛选'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('在线好友'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('筛选').last); // 对话框里的「筛选」按钮
+    await tester.pumpAndSettle();
+
+    expect(find.text('好友1'), findsOneWidget);
+    expect(find.text('好友0'), findsNothing);
+    expect(find.text('好友2'), findsNothing);
   });
 
   testWidgets('列表上下留白：首/末卡片与工具栏、窗口边缘各留 AppSpacing.sm', (tester) async {

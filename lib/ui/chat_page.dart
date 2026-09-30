@@ -5,20 +5,29 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_bridge.dart' show ChatBridge;
 import '../chat/message_adapter.dart';
-import '../core/chat_emoji.dart' show kGameEmojiCodes;
-import '../core/emoticon.dart' show EmoticonImage;
+import '../core/emoticon.dart' show ImfcEmojiImage;
 // 只取会话类型/会话模型：`messages.dart` 的 `ChatMessage` 与 flutter_chat_ui
 // 导出的消息组件同名，隐藏它以保证本文件里的 `ChatMessage` 指 UI 组件。
-import '../core/models/messages.dart' show ChatSession, ChatSessionType;
+import '../core/models/emoji_catalog.dart'
+    show ImfcEmoji, isDynamicEmojiHint, parseImfc;
+import '../core/models/messages.dart'
+    show
+        ChatSession,
+        ChatSessionType,
+        decodeChatExtendData,
+        emojiCodeForMessage;
 import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart' show DynamicsClient;
-import '../core/services/rich_media.dart' show RichMedia;
+import '../core/services/rich_media.dart' show RichMedia, ShareType;
 import '../core/storage/settings_store.dart' show SettingsKeys;
 import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'group_detail_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/emoji_code_image.dart' show EmojiCodeImage;
+import 'widgets/emoji_picker.dart' show showEmojiPicker;
+import 'widgets/gift_picker.dart' show showGiftPicker;
 import 'widgets/rich_text_view.dart';
 import '../core/services/image_disk_cache.dart';
 
@@ -68,6 +77,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   /// 「进入会话自动已读」设置解析结果；dispose 时据此决定是否补标已读。
   bool _autoRead = true;
+
+  /// 是否**真的**进过后台（paused / hidden）。
+  ///
+  /// 桌面端窗口失焦只会上报 `inactive`，不算后台；用它区分「真后台回来」
+  /// 与「窗口重新聚焦」。
+  bool _wasBackground = false;
 
   /// 本会话的聊天控制器。在 [initState] 中一次性取得（[ChatBridge.controllerFor]
   /// 有创建/缓存副作用，不能在 build 中调用），build 直接复用。
@@ -128,19 +143,25 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   /// 前后台切换：退到后台就不再算「正在查看」，否则后台期间到达的消息不会
-  /// 计入未读、回前台也不会亮红点（用户可能真漏消息）。回到前台重新登记。
+  /// 计入未读、回前台也不会亮红点（用户可能真漏消息）。**真正**回到前台才重新登记
+  /// —— 桌面端窗口聚焦也会上报 resumed，若不区分，每次点回窗口都会重标已读并
+  /// 重新发一次会话快照（表现为列表无谓刷新）。
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     switch (state) {
-      case AppLifecycleState.resumed:
-        _service.setViewing(
-          widget.type,
-          widget.sessionId,
-          autoRead: _autoRead,
-        );
       case AppLifecycleState.paused:
       case AppLifecycleState.hidden:
+        _wasBackground = true;
         _service.setViewing(null, null, autoRead: false);
+      case AppLifecycleState.resumed:
+        if (_wasBackground) {
+          _wasBackground = false;
+          _service.setViewing(
+            widget.type,
+            widget.sessionId,
+            autoRead: _autoRead,
+          );
+        }
       case AppLifecycleState.inactive:
       case AppLifecycleState.detached:
         break;
@@ -271,6 +292,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     topWidget: _ComposerBar(
                       onInsert: _insertText,
                       phrases: _phrases,
+                      onImfc: _sendImfc,
                     ),
                   ),
                   // 消息外框统一换成 _ChatMessageRow：保留 ChatMessage 原有的
@@ -480,6 +502,27 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  /// 发送互动表情（骰子 / 猜拳）：结果由服务端消息携带、点按即发（不经过输入框）。
+  Future<void> _sendImfc(ImfcEmoji emoji) async {
+    if (widget.type != ChatSessionType.friend) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('互动表情暂仅支持好友会话')),
+      );
+      return;
+    }
+    try {
+      await ref
+          .read(chatServiceProvider)
+          .sendImfcEmoji(widget.sessionId, emoji);
+      // 成功后由本地乐观回显的聊天气泡展示结果图，无需额外提示。
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    }
+  }
+
   /// 点击分享的动态卡片 → 拉取动态后打开详情页。
   Future<void> _openSharedDynamics(String pid) async {
     final auth = ref.read(chatServiceProvider).auth;
@@ -554,15 +597,22 @@ class _EmptyChatState extends StatelessWidget {
   }
 }
 
-/// 表情按钮：收起为一个按钮，点击弹出游戏表情面板（#A1xx 代码，非标准 emoji）。
-class _ComposerBar extends StatelessWidget {
+/// 表情按钮：弹出游戏表情面板（「基础」内置表情 + 「我的」服务端表情包）。
+class _ComposerBar extends ConsumerWidget {
   final ValueChanged<String> onInsert;
   final List<String> phrases;
 
-  const _ComposerBar({required this.onInsert, required this.phrases});
+  /// 互动表情（骰子/猜拳）：点按即发送，不走输入框。
+  final ValueChanged<ImfcEmoji>? onImfc;
+
+  const _ComposerBar({
+    required this.onInsert,
+    required this.phrases,
+    this.onImfc,
+  });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -602,12 +652,14 @@ class _ComposerBar extends StatelessWidget {
               _ToolBtn(
                 tooltip: '表情',
                 icon: Icons.emoji_emotions_outlined,
-                onTap: () => _showEmojiPicker(context),
+                anchorKey: _emojiKey,
+                onTap: () => _showEmojiPicker(context, ref),
               ),
               _ToolBtn(
                 tooltip: '礼物',
                 icon: Icons.card_giftcard_outlined,
-                onTap: () => _placeholder(context, '礼物'),
+                anchorKey: _giftKey,
+                onTap: () => _showGiftPicker(context, ref),
               ),
             ],
           ),
@@ -616,43 +668,45 @@ class _ComposerBar extends StatelessWidget {
     );
   }
 
-  void _placeholder(BuildContext context, String name) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text('$name 功能暂未接入')));
+  /// 表情 / 礼物按钮的锚点：浮动面板要贴在按钮上方。
+  static final GlobalKey _emojiKey = GlobalKey();
+  static final GlobalKey _giftKey = GlobalKey();
+
+  Rect? _anchorOf(GlobalKey key) {
+    final box = key.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return null;
+    return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  void _showEmojiPicker(BuildContext context) {
-    // kGameEmojiCodes 是 Set（O(1) contains）；选择器需按下标遍历，取一次有序快照。
-    final codes = kGameEmojiCodes.toList();
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: GridView.builder(
-            shrinkWrap: true,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 6,
-              mainAxisSpacing: 6,
-              crossAxisSpacing: 6,
-              childAspectRatio: 1,
-            ),
-            itemCount: codes.length,
-            itemBuilder: (context, i) {
-              final code = codes[i];
-              return InkWell(
-                borderRadius: BorderRadius.circular(6),
-                onTap: () {
-                  Navigator.of(ctx).pop();
-                  onInsert(code); // 插入 #A1xx 代码（游戏客户端渲染成它自己的图标）
-                },
-                child: Center(child: EmoticonImage(code: code, size: 34)),
-              );
-            },
-          ),
-        ),
-      ),
+  void _showEmojiPicker(BuildContext context, WidgetRef ref) {
+    showEmojiPicker(
+      context,
+      ref,
+      onPick: onInsert,
+      onImfc: onImfc,
+      anchor: _anchorOf(_emojiKey),
+    );
+  }
+
+  /// 当前会话的对方 uin（礼物只能送给好友）。群聊 / 未选中时不弹面板。
+  void _showGiftPicker(BuildContext context, WidgetRef ref) {
+    final active = ref.read(activeSessionProvider);
+    if (active == null || active.type != ChatSessionType.friend) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('礼物只能送给好友会话')),
+      );
+      return;
+    }
+    showGiftPicker(
+      context,
+      ref,
+      uin: active.id,
+      name: ref.read(sessionListProvider).asData?.value.sessions
+              .where((s) => s.type == active.type && s.id == active.id)
+              .firstOrNull
+              ?.name ??
+          '${active.id}',
+      anchor: _anchorOf(_giftKey),
     );
   }
 }
@@ -662,15 +716,20 @@ class _ToolBtn extends StatelessWidget {
   final IconData icon;
   final VoidCallback onTap;
 
+  /// 浮动面板的锚点（面板贴这个按钮弹出）。
+  final Key? anchorKey;
+
   const _ToolBtn({
     required this.tooltip,
     required this.icon,
     required this.onTap,
+    this.anchorKey,
   });
 
   @override
   Widget build(BuildContext context) {
     return IconButton(
+      key: anchorKey,
       tooltip: tooltip,
       visualDensity: adaptiveDensity(context),
       icon: Icon(icon, size: 22),
@@ -713,6 +772,10 @@ class _InlineEmojiBubble extends StatelessWidget {
 
   const _InlineEmojiBubble({required this.message, required this.isSentByMe});
 
+  /// 只有「本进程运行期间到的」（新收到 / 自己刚发）才播动画；
+  /// 历史消息直接显示结果帧 —— 骰子/猜拳是即时反馈，翻旧记录不该重播。
+  bool get _animateEmoji => message.metadata?['live'] == true;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -723,6 +786,11 @@ class _InlineEmojiBubble extends StatelessWidget {
           SystemMessage m => m.text,
           _ => '',
         };
+    // 动态/互动表情的真身在 extend_data.interCode 里（文本只是低版本提示文案）。
+    final emojiCode = emojiCodeForMessage(
+      text: raw,
+      interCode: message.metadata?['interCode']?.toString(),
+    );
     final maxWidth =
         MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor;
     return Align(
@@ -743,17 +811,26 @@ class _InlineEmojiBubble extends StatelessWidget {
                 : CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
-              // @提及 等（见 rich_text_view.dart）。
-              Text.rich(
-                TextSpan(
-                  children: buildRichSpans(
-                    raw,
-                    context: context,
-                    emojiSize: 20,
+              // 动态/互动表情：渲染成图，不显示低版本提示文案或 JSON 原文。
+              if (emojiCode != null)
+                _EmojiMessageBody(code: emojiCode, animate: _animateEmoji)
+              else if (isDynamicEmojiHint(raw))
+                // 解不出表情代码（老数据 / 离线历史 / 素材缺失）时，也别把
+                // 那句「请升级到最新版本查看」当正文显示 —— 给个中性提示。
+                const _DynamicEmojiHintChip()
+              else
+                // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
+                // @提及 等（见 rich_text_view.dart）。
+                Text.rich(
+                  TextSpan(
+                    children: buildRichSpans(
+                      raw,
+                      context: context,
+                      emojiSize: 24,
+                      emojiAnimate: _animateEmoji,
+                    ),
                   ),
                 ),
-              ),
             ],
           ),
         ),
@@ -787,12 +864,15 @@ String _fmtDividerTime(DateTime dt) {
 /// - 地图分享（shareType 1）→ 地图卡
 /// - 链接（shareType 9）→ 链接卡
 /// - 其余 → 回退为纯文本卡片。
-class _RichMediaBubble extends StatelessWidget {
+class _RichMediaBubble extends ConsumerWidget {
   final CustomMessage message;
   final bool isSentByMe;
 
   /// 点击动态卡片回调（仅好友会话有效；群会话不跳动态详情）。
   final ValueChanged<String>? onOpenDynamics;
+
+  /// 同上：只有运行期间新到的才播动画。
+  bool get _isLive => message.metadata?['live'] == true;
 
   const _RichMediaBubble({
     required this.message,
@@ -801,7 +881,7 @@ class _RichMediaBubble extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final rawExt = message.metadata?['extend']?.toString();
     final media = RichMedia.decode(rawExt);
@@ -823,6 +903,8 @@ class _RichMediaBubble extends StatelessWidget {
           ),
           child: media == null
               ? _plainText()
+              : media.isFriendGift
+              ? _giftCard(context, ref, media, theme)
               : (media.isMap || media.isRoomInvite)
               ? _mapCard(context, media, theme)
               : _card(context, media, theme),
@@ -831,8 +913,126 @@ class _RichMediaBubble extends StatelessWidget {
     );
   }
 
+  /// 礼物卡：礼物图（目录里的道具图标）+ 名称 + 数量 + 默契度。
+  ///
+  /// 名称/图标来自服务端 visual-cfg（`new_give_gift_config` + `items`），
+  /// 还没加载出来时退回「礼物 #id」+ 通用礼物图标。
+  Widget _giftCard(
+    BuildContext context,
+    WidgetRef ref,
+    RichMedia media,
+    ThemeData theme,
+  ) {
+    final gift = ref
+        .watch(giftCatalogProvider)
+        .asData
+        ?.value
+        .byId(media.giftItemId);
+    final name = gift?.displayName ?? '礼物 ${media.giftItemId}';
+    final icon = gift?.icon;
+    final num = media.giftNum > 0 ? media.giftNum : 1;
+    final who = media.giftSrcName.isNotEmpty
+        ? media.giftSrcName
+        : media.nickname;
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.card_giftcard, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                '默契礼物',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Center(
+                  child: icon != null && icon.startsWith('http')
+                      ? Image.network(
+                          icon,
+                          width: 44,
+                          height: 44,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) =>
+                              const Icon(Icons.card_giftcard, size: 28),
+                        )
+                      : const Icon(Icons.card_giftcard, size: 28),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '$name ×$num',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    if (who.isNotEmpty)
+                      Text(
+                        who,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.outline,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          if (media.giftAddValue > 0) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Icon(
+                  Icons.hexagon,
+                  size: 12,
+                  color: theme.colorScheme.primary,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  '默契度 +${media.giftAddValue}',
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   /// 无法解码 → 回退纯文本卡。
+  ///
+  /// 但动态表情要先看一眼 `extend_data.interCode`：它可能被归成 share/custom
+  /// 类型走到这里，此时正文只是「请升级到最新版本查看」，必须改成渲染表情。
   Widget _plainText() {
+    final code = _emojiCodeOrNull;
     return Padding(
       padding: const EdgeInsets.all(12),
       child: Column(
@@ -841,12 +1041,29 @@ class _RichMediaBubble extends StatelessWidget {
             : CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            customMessageText(message),
-            style: const TextStyle(fontStyle: FontStyle.italic),
-          ),
+          if (code != null)
+            _EmojiMessageBody(code: code, animate: _isLive)
+          else if (isDynamicEmojiHint(customMessageText(message)))
+            const _DynamicEmojiHintChip()
+          else
+            Text(
+              customMessageText(message),
+              style: const TextStyle(fontStyle: FontStyle.italic),
+            ),
         ],
       ),
+    );
+  }
+
+  /// 本条消息应渲染的表情代码（interCode 优先，其次动态表情的 JSON 信封）。
+  String? get _emojiCodeOrNull {
+    final ext = message.metadata?['extend']?.toString();
+    final interCode =
+        message.metadata?['interCode']?.toString() ??
+        decodeChatExtendData(ext)?['interCode']?.toString();
+    return emojiCodeForMessage(
+      text: message.metadata?['text']?.toString() ?? ext,
+      interCode: interCode,
     );
   }
 
@@ -1024,6 +1241,16 @@ class _RichMediaBubble extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
               ),
+            // 拍一拍 / 自定义面板：正文取 tapText / customData.strContent。
+            if ((media.isPat || media.isCustomPanel) &&
+                media.content.isEmpty &&
+                media.subtitle.isNotEmpty)
+              Text(
+                media.subtitle,
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
+              ),
             if (media.isUrl && media.url.isNotEmpty)
               Text(
                 media.url,
@@ -1048,12 +1275,78 @@ class _RichMediaBubble extends StatelessWidget {
   }
 
   IconData _iconFor(RichMedia media) {
+    if (media.isFriendGift) return Icons.card_giftcard;
     if (media.isRedPacket) return Icons.redeem;
     if (media.isRoomInvite) return Icons.videogame_asset_outlined;
+    if (media.isPat) return Icons.touch_app_outlined;
+    if (media.isAchieve) return Icons.emoji_events_outlined;
+    if (media.isCustomPanel) return Icons.style_outlined;
     if (media.isDynamicNotice || media.isDynamics) return Icons.public;
     if (media.isMap) return Icons.map_outlined;
     if (media.isUrl) return Icons.link;
+    if (media.shareType == ShareType.role) return Icons.person_outline;
+    if (media.shareType == ShareType.skin ||
+        media.shareType == ShareType.chameleon) {
+      return Icons.checkroom_outlined;
+    }
+    if (media.shareType == ShareType.ride) return Icons.directions_car_outlined;
+    if (media.shareType == ShareType.weapon) return Icons.hardware_outlined;
+    if (media.shareType == ShareType.avatar) return Icons.account_circle_outlined;
     return Icons.article_outlined;
+  }
+}
+
+/// 把表情代码渲染成消息里的图。
+///
+/// 互动表情（骰子/猜拳 `@IMFC&N_M`）用图集结果帧/动图；动态表情（`[mdemo]...`）
+/// 用内置动图。
+class _EmojiMessageBody extends StatelessWidget {
+  /// 气泡里表情的渲染尺寸（比行内表情大得多，和游戏里一致）。
+  static const double kSize = 96;
+
+  final String code;
+
+  /// 是否播动画：新收到/刚发的播，历史消息直接显示结果帧。
+  final bool animate;
+
+  const _EmojiMessageBody({required this.code, this.animate = true});
+
+  @override
+  Widget build(BuildContext context) {
+    final imfc = parseImfc(code);
+    return imfc != null
+        ? ImfcEmojiImage(ref: imfc, size: kSize, animate: animate)
+        : EmojiCodeImage(code: code, size: kSize, animate: animate);
+  }
+}
+
+/// 「拿不到表情代码的动态表情」的中性提示。
+///
+/// 老数据 / 离线历史（`chat_query` 只回三元组）/ 游戏本身就缺素材的那一个，
+/// 都解不出 interCode —— 此时不要把「请升级到最新版本查看」当正文显示。
+class _DynamicEmojiHintChip extends StatelessWidget {
+  const _DynamicEmojiHintChip();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(
+          Icons.emoji_emotions_outlined,
+          size: 18,
+          color: theme.colorScheme.outline,
+        ),
+        const SizedBox(width: 6),
+        Text(
+          '动态表情',
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.outline,
+          ),
+        ),
+      ],
+    );
   }
 }
 

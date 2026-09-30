@@ -11,6 +11,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import '../../models/emoji_catalog.dart' show isDynamicEmojiHint;
 import '../../models/messages.dart';
 import '../chatpush.dart';
 import '../../protocol/lua_table.dart' show decodeHttpResponse;
@@ -107,12 +108,27 @@ class ChatPushDispatcher {
         final time = toNum(data['send_time']) != 0
             ? toNum(data['send_time'])
             : toNum(data['ts']);
+        final ext = data['extend_data']?.toString();
+        // 动态表情 / 互动表情的真身在 extend_data.interCode 里（chat_msg 只是
+        // 低版本提示文案）—— 不解出来气泡就只能显示那句提示。
+        final interCode = data['inter_code']?.toString() ??
+            decodeChatExtendData(ext)?['interCode']?.toString();
         final m = ChatMessage(
           uin: src,
           text: data['chat_msg']?.toString() ?? '',
           time: time,
-          extendData: data['extend_data']?.toString(),
+          extendData: ext,
+          interCode: interCode,
+          isLive: true,
         );
+        // 诊断：动态表情只该从 interCode 渲染。若正文是那句低版本提示却解不出
+        // interCode，把原始 extend_data 打出来（便于定位是服务端没带、还是解码失败）。
+        if ((interCode ?? '').isEmpty && isDynamicEmojiHint(m.text)) {
+          log.warn(
+            '动态表情缺 interCode：extend_data=${ext == null || ext.isEmpty ? "(空)" : ext}',
+            tag: _logTag,
+          );
+        }
         _upsertFriendMessage(src, m);
         // 推送携带好友在线状态（online 字段）→ 更新会话在线标识。
         final onlineVal = data['online'];
@@ -270,6 +286,22 @@ class ChatPushDispatcher {
     _friendReqsCache = null;
   }
 
+  /// 把当前所有 pending 申请标记为 rejected（一键拒绝后调用）。
+  void rejectAllPending() {
+    for (var i = 0; i < _friendRequests.length; i++) {
+      final r = _friendRequests[i];
+      if (r.status != FriendRequestStatus.pending) continue;
+      _friendRequests[i] = FriendRequest(
+        uin: r.uin,
+        name: r.name,
+        avatar: r.avatar,
+        time: r.time,
+        status: FriendRequestStatus.rejected,
+      );
+    }
+    emitFriendRequests();
+  }
+
   /// 关闭好友申请流控制器（dispose 时调用）。
   Future<void> dispose() async {
     await _friendReqCtrl.close();
@@ -285,6 +317,22 @@ class ChatPushDispatcher {
   }
 
   /// 从好友记录提取 uin（兼容嵌套 baseinfo 结构）。
+  /// 好友上次登录时间（`baseinfo.LastLoginTime`，秒；取不到返回 null）。
+  ///
+  /// 对齐 `friendservice.lua:3690`：`fridData.lastLoginTime = data.baseinfo.LastLoginTime`。
+  static int? friendLastLoginTime(Map<String, Object?> m) {
+    for (final key in ['baseinfo', 'base_info', 'baseInfo']) {
+      final b = m[key];
+      if (b is! Map) continue;
+      final v = b['LastLoginTime'] ?? b['last_login_time'];
+      final n = toNum(v);
+      if (n > 0) return n;
+    }
+    final direct = m['LastLoginTime'] ?? m['last_login_time'];
+    final n = toNum(direct);
+    return n > 0 ? n : null;
+  }
+
   static int friendUin(Map<String, Object?> m) {
     final outer = m['Uin'] ?? m['uin'];
     if (outer is num) return outer.toInt();

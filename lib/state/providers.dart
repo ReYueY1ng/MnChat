@@ -8,14 +8,20 @@ import 'dart:ui' show Color;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_bridge.dart';
+import '../core/models/friend_tag.dart' show FriendTag, parseFriendTagPool;
+import '../core/models/gift_catalog.dart' show GiftCatalog;
 import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart';
+import '../core/services/emoji_store.dart';
+import '../core/services/gift_config.dart' show GiftConfigClient;
 import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/partner.dart';
+import '../core/services/social_sign.dart'
+    show DeclarationCatalog, DeclarationConfigClient;
 import '../core/services/profile.dart';
 import '../core/storage/app_database.dart' show AppDatabase;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
@@ -49,6 +55,17 @@ final databaseProvider = Provider<AppDatabase>(
 final settingsProvider = Provider<SettingsStore>(
   (ref) => SettingsStore(ref.read(databaseProvider)),
 );
+
+// ── 表情仓库 ─────────────────────────────────────────────────────────────
+
+/// 表情仓库（表情包配置 / 已拥有 / 素材下载缓存）。
+/// 未登录或表情客户端尚未建立时返回 null。
+final emojiStoreProvider = Provider<EmojiStore?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  final client = ref.read(chatServiceProvider).emoji;
+  if (auth == null || client == null) return null;
+  return EmojiStore(client: client);
+});
 
 // ── 认证状态 ─────────────────────────────────────────────────────────────
 
@@ -886,6 +903,33 @@ final partnerLevelConfigProvider =
         const <(int, int)>[],
       );
     });
+
+/// 好友标签池（服务端 `query_friend_label_pool`）。
+///
+/// 增删标签 / 给好友打标签之后 `ref.invalidate(friendTagPoolProvider)` 刷新。
+final friendTagPoolProvider = FutureProvider<List<FriendTag>>((ref) async {
+  try {
+    final svc = ref.watch(chatServiceProvider);
+    return parseFriendTagPool(await svc.friendLabelPool());
+  } catch (_) {
+    return const <FriendTag>[];
+  }
+});
+
+/// 礼物目录（服务端 visual-cfg `new_give_gift_config` + `items`）。
+///
+/// 拉不到时返回空目录，赠送面板会提示「取不到礼物配置」而不是瞎编列表。
+final giftCatalogProvider = FutureProvider<GiftCatalog>((ref) async {
+  return GiftConfigClient().catalog();
+});
+
+/// 交友宣言标签表（服务端 visual-cfg `FriendShipDeclaration`）。
+///
+/// 「想要…/喜欢…」的文案**由服务端下发**，不是客户端写死的；拉不到时返回空目录，
+/// 调用方回退内置表（见 `core/services/social_sign.dart`）。
+final declarationCatalogProvider = FutureProvider<DeclarationCatalog>((ref) async {
+  return DeclarationConfigClient().catalog();
+});
 
 /// 本人拍档的资料（昵称 / 头像 / 头像框），供拍档卡片渲染。
 final partnerProfilesProvider =

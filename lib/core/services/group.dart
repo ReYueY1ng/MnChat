@@ -213,6 +213,84 @@ class GroupClient {
     });
   }
 
+  // ── 群设置 / 成员管理（对齐 friendservice.lua ReqGotoTopGroup 等）──────────
+
+  /// 群置顶/取消置顶 (act=set_group_top)。对齐 ReqGotoTopGroup (6805)。
+  Future<Map<String, Object?>> setGroupTop(Object groupId,
+          {required bool top}) =>
+      _call('set_group_top', {
+        'group_id': '$groupId',
+        'status': top ? '1' : '0',
+        'json': '1',
+      });
+
+  /// 禁言/取消禁言群成员 (act=set_silent)。
+  /// 对齐 ReqGroupChatSetSilent (5782)：status=1 禁言。
+  Future<Map<String, Object?>> setSilent(
+    Object groupId, {
+    required Object opUin,
+    required bool silent,
+  }) =>
+      _call('set_silent', {
+        'group_id': '$groupId',
+        'op_uin': '$opUin',
+        'status': silent ? '1' : '0',
+        'json': '1',
+      });
+
+  /// 屏蔽/取消屏蔽某成员消息 (act=set_ban)。
+  /// 对齐 ReqIgnoreSomeGroupMember (6685)：ban=1 屏蔽。
+  Future<Map<String, Object?>> setBan(
+    Object groupId, {
+    required Object opUin,
+    required bool ban,
+  }) =>
+      _call('set_ban', {
+        'group_id': '$groupId',
+        'op_uin': '$opUin',
+        'ban': ban ? '1' : '0',
+        'json': '1',
+      });
+
+  /// 举报群成员 (act=report_group_user)。对齐 ReqGroupChatReport (6912)。
+  Future<Map<String, Object?>> reportGroupUser(
+    Object groupId, {
+    required Object opUin,
+  }) =>
+      _call('report_group_user', {
+        'group_id': '$groupId',
+        'op_uin': '$opUin',
+        'json': '1',
+        'pushchannel': '1',
+      });
+
+  /// 一键拒绝全部入群申请 (act=reject_group_apply_all)。
+  /// 对齐 ReqRejectAllAddGroup (6875)。
+  Future<Map<String, Object?>> rejectGroupApplyAll(Object groupId) =>
+      _call('reject_group_apply_all', {'group_id': '$groupId', 'json': '1'});
+
+  /// 查询退群记录 (act=query_user_groups_quit_list)。
+  /// 对齐 friendservice.lua:5917。用于"被移出/退出的群"提醒列表。
+  Future<Map<String, Object?>> queryUserGroupsQuitList() =>
+      _call('query_user_groups_quit_list', {'json': '1'});
+
+  /// 设置是否允许群成员邀请我入群 (act=update_user_groups, auto_join)。
+  /// 对齐 ReqOpenAutoEnterToGroup (6596)。
+  Future<Map<String, Object?>> updateUserGroupsAutoJoin(
+          {required bool allow}) =>
+      _call('update_user_groups', {
+        'json': '1',
+        'auto_join': allow ? '1' : '0',
+      });
+
+  /// 设置是否允许他人邀请我入群 (act=update_user_groups, join)。
+  /// 对齐 friendservice.lua:6646。
+  Future<Map<String, Object?>> updateUserGroupsJoin({required bool allow}) =>
+      _call('update_user_groups', {
+        'json': '1',
+        'join': allow ? '1' : '0',
+      });
+
   // ── 内部 ─────────────────────────────────────────────────────────────────
 
   Future<Map<String, Object?>> _call(String act, [Map<String, String> params = const {}]) =>

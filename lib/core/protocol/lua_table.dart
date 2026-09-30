@@ -64,6 +64,9 @@ class _Parser {
     final ch = _peek;
     if (ch == '{') return _parseTable();
     if (ch == '"' || ch == "'") return _parseString();
+    // Lua 长括号字符串 `[[...]]` / `[==[...]==]`（emoji_system 配置里用它写中文说明，
+    // 例如 `Access = [[花小楼换装舞会活动获得]]`）。
+    if (_isLongBracketStart()) return _parseLongBracket();
     if (ch == 'n' && _text.startsWith('nil', _pos)) {
       _pos += 3;
       return null;
@@ -80,6 +83,38 @@ class _Parser {
     throw LuaTableDecodeError("unexpected character '$ch' at offset $_pos: ${_text.substring(0, _text.length > 60 ? 60 : _text.length)}");
   }
 
+  /// 当前位置是否是长括号字符串开头（`[[` 或 `[=*[`）。
+  bool _isLongBracketStart() {
+    if (_peek != '[') return false;
+    var i = _pos + 1;
+    while (i < _text.length && _text[i] == '=') {
+      i++;
+    }
+    return i < _text.length && _text[i] == '[';
+  }
+
+  /// 解析长括号字符串：`[[内容]]` / `[=[内容]=]`（等号个数须与开头一致）。
+  /// 按 Lua 语义，开头紧跟的第一个换行会被忽略。
+  String _parseLongBracket() {
+    _pos++; // 开头的 '['
+    var level = 0;
+    while (!_eof && _peek == '=') {
+      level++;
+      _pos++;
+    }
+    _expect('[');
+    if (_peek == '\n') _pos++; // Lua: 跳过紧随其后的换行
+
+    final close = ']${'=' * level}]';
+    final end = _text.indexOf(close, _pos);
+    if (end < 0) {
+      throw LuaTableDecodeError('unterminated long string at offset $_pos');
+    }
+    final value = _text.substring(_pos, end);
+    _pos = end + close.length;
+    return value;
+  }
+
   Object? _parseTable() {
     _expect('{');
     _skipWs();
@@ -94,7 +129,9 @@ class _Parser {
         break;
       }
 
-      if (_peek == '[') {
+      // `[` 只有当它不是长括号字符串（`[[` / `[=[`）时才是「显式键」；
+      // 否则（如 `{ [[a]] }`）走隐式下标，交给 parseValue 解析。
+      if (_peek == '[' && !_isLongBracketStart()) {
         _pos++;
         final key = _parseKey();
         _expect(']');

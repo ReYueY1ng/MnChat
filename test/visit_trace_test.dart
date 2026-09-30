@@ -1,7 +1,43 @@
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/services/player_home.dart';
+import 'package:mnchat/core/storage/app_database.dart';
+import 'package:mnchat/core/storage/settings_store.dart';
 
 void main() {
+  group('留下踪迹开关读的是持久化值', () {
+    // 回归：曾经读 `leaveVisitTraceProvider`，而它的 build() 先同步返回默认 true，
+    // 持久化的值要等异步加载才写回 —— 冷启动后先去别人主页时开关被无视。
+    test('未设置过默认开启；关掉之后就是关闭', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final store = SettingsStore(db);
+
+      expect(await PlayerHomeClient.leaveTraceEnabled(store), isTrue);
+      await store.setBool(SettingsKeys.leaveVisitTrace, false);
+      expect(await PlayerHomeClient.leaveTraceEnabled(store), isFalse);
+      await store.setBool(SettingsKeys.leaveVisitTrace, true);
+      expect(await PlayerHomeClient.leaveTraceEnabled(store), isTrue);
+    });
+
+    test('关掉开关后 shouldRecordVisit 一律不上报（含首次访问）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final store = SettingsStore(db);
+      await store.setBool(SettingsKeys.leaveVisitTrace, false);
+
+      final leaveTrace = await PlayerHomeClient.leaveTraceEnabled(store);
+      expect(
+        PlayerHomeClient.shouldRecordVisit(
+          leaveTrace: leaveTrace,
+          lastSentAt: 0,
+          now: 1000000,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('PlayerHomeClient.shouldRecordVisit 访客记录去重', () {
     test('关闭"留下踪迹"时即便从未发送过也不上报', () {
       expect(

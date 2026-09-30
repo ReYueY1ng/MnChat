@@ -2,6 +2,8 @@
 /// 移植自 MNClient `services/friend.py`（NewFriendClient + CreateFriendRequest）。
 library;
 
+import 'dart:convert';
+
 import '../crypto/md5_sign.dart' show httpGetRealNameMobileSum, md5Token;
 import 'gateway.dart';
 
@@ -314,9 +316,267 @@ class FriendClient {
     final url = buildFriendRequestUrl(
       server: _gw.resolve('HttpFriend'),
       path: kFriendPath,
-      cmd: 'get_user_fans_list',
       params: params,
+      cmd: 'get_user_fans_list',
     );
     return _get(url);
+  }
+
+  // ── 好友设置服务端同步（对齐 friendservice.lua / newfriendservice.lua）────
+  //
+  // 说明：下面多数 cmd 的真实客户端参数集为
+  //   apiid / cmd / des_uin / flag / s2t / src_uin / time / token / uin / ver
+  // 签名规则见 CreateFriendRequest（friendservice.lua:962-1040）：参数按 key
+  // 排序，非 notAuth 参数拼 `k=v` 后追加房间密钥做 md5。
+
+  /// 通用带签名 GET（[params] 为业务参数，cmd 由本方法补）。
+  Future<Map<String, Object?>> _call(
+    String cmd,
+    Map<String, String> params, {
+    Set<String>? notAuthKeys,
+  }) =>
+      _get(
+        buildFriendRequestUrl(
+          server: _gw.resolve('HttpFriend'),
+          path: kFriendPath,
+          cmd: cmd,
+          params: params,
+          notAuthKeys: notAuthKeys,
+        ),
+      );
+
+  /// 通用带签名 POST（JSON body，如 batch_* 系列）。
+  Future<Map<String, Object?>> _callPost(
+    String cmd,
+    Map<String, String> params,
+    String jsonBody, {
+    Set<String>? notAuthKeys,
+  }) =>
+      _gw.post(
+        buildFriendRequestUrl(
+          server: _gw.resolve('HttpFriend'),
+          path: kFriendPath,
+          cmd: cmd,
+          params: params,
+          notAuthKeys: notAuthKeys,
+        ),
+        data: jsonBody,
+        contentType: 'application/json',
+      );
+
+  /// 好友置顶/取消置顶 (cmd=set_sort_flag)。[flag]=1 置顶。
+  /// 对齐 friendservice.lua ReqFriendTop (7425)。
+  Future<Map<String, Object?>> setSortFlag(Object desUin, {required bool top}) =>
+      _call('set_sort_flag', {
+        'apiid': apiId,
+        'des_uin': '$desUin',
+        'flag': top ? '1' : '0',
+        ..._signed(),
+      });
+
+  /// 设置单个好友的上线提醒 (cmd=set_online_notify_flag)。[flag]=1 开启。
+  /// 对齐 friendservice.lua ReqSetFriendOnlineNotifyFlag (7530)。
+  Future<Map<String, Object?>> setOnlineNotifyFlag(
+    Object desUin, {
+    required bool on,
+  }) =>
+      _call('set_online_notify_flag', {
+        'apiid': apiId,
+        'des_uin': '$desUin',
+        'flag': on ? '1' : '0',
+        ..._signed(),
+      });
+
+  /// 批量设置上线提醒 (cmd=batch_set_online_notify_flag)。
+  /// 对齐 friendservice.lua ReqSetFriendOnlineNotifyFlagBatch (7563)：
+  /// query 带 flag/签名，body 为 `{"des_uin_list":[...]}`（POST JSON）。
+  Future<Map<String, Object?>> batchSetOnlineNotifyFlag(
+    List<int> uins, {
+    required bool on,
+  }) =>
+      _callPost(
+        'batch_set_online_notify_flag',
+        {
+          'apiid': apiId,
+          'flag': on ? '1' : '0',
+          ..._signed(),
+        },
+        jsonEncode({'des_uin_list': uins}),
+      );
+
+  /// 修改好友备注 (cmd=set_note)。[note] 为空表示清除备注。
+  /// 对齐 friendservice.lua ReqModifyFriendNote (7628)。
+  Future<Map<String, Object?>> setNote(Object desUin, String note) =>
+      _call('set_note', {
+        'apiid': apiId,
+        'des_uin': '$desUin',
+        'note': note,
+        ..._signed(),
+      });
+
+  /// 查询"拒绝陌生人加好友"开关 (cmd=get_closeapply_flag)。
+  /// 对齐 friendservice.lua ReqGetFriendApply (7711)：country/lang 为 notAuth。
+  Future<Map<String, Object?>> getCloseapplyFlag() => _call(
+    'get_closeapply_flag',
+    {'apiid': apiId, 'country': country, 'lang': lang, ..._signed()},
+    notAuthKeys: {'country', 'lang'},
+  );
+
+  /// 设置"拒绝陌生人加好友"开关 (cmd=set_closeapply_flag)。[flag]=1 开启。
+  /// 对齐 friendservice.lua ReqSetFriendApply (7734)：country/lang 为 notAuth。
+  Future<Map<String, Object?>> setCloseapplyFlag({required bool on}) => _call(
+    'set_closeapply_flag',
+    {
+      'apiid': apiId,
+      'country': country,
+      'flag': on ? '1' : '0',
+      'lang': lang,
+      ..._signed(),
+    },
+    notAuthKeys: {'country', 'lang'},
+  );
+
+  /// 一键拒绝全部好友申请 (cmd=reject_apply_all)。
+  /// 对齐 friendservice.lua ReqRejectAllAddFriend (2504)：无 s2t/token。
+  Future<Map<String, Object?>> rejectApplyAll() => _call('reject_apply_all', {
+    'pushchannel': pushChannel,
+    'src_uin': '$uin',
+    'game_session_id': gameSessionId,
+    'cid': cid,
+  });
+
+  /// 拍一拍 (cmd=take_pat)。对齐 friendservice.lua ReqSendPat (2935)：
+  /// 仅 cmd/des_uin/s2t/time/token/uin（无 apiid/ver/src_uin）。
+  Future<Map<String, Object?>> takePat(Object desUin) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    return _call('take_pat', {
+      'des_uin': '$desUin',
+      's2t': s2t,
+      'time': '$now',
+      'token': token,
+      'uin': '$uin',
+    });
+  }
+
+  /// 附近的人 (cmd=get_nearby)。[page] 从 1 起。
+  /// 对齐 friendservice.lua ReqNearbyFriends (1283) / nearbyfriendserver.lua:33。
+  Future<Map<String, Object?>> getNearby({
+    required int page,
+    required double latitude,
+    required double longitude,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    return _call('get_nearby', {
+      'cur_page': '$page',
+      'latitude': '$latitude',
+      'longitude': '$longitude',
+      'uin': '$uin',
+      's2t': s2t,
+      'time': '$now',
+      'token': token,
+    });
+  }
+
+  /// 上报定位 (cmd=report_location)。对齐 nearbyfriendserver.lua:201。
+  Future<Map<String, Object?>> reportLocation({
+    required double latitude,
+    required double longitude,
+  }) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    return _call('report_location', {
+      'latitude': '$latitude',
+      'longitude': '$longitude',
+      'uin': '$uin',
+      's2t': s2t,
+      'time': '$now',
+      'token': token,
+    });
+  }
+
+  /// 是否允许附近的人加我 (cmd=allow_add_by_nearby)。对齐 nearbyfriendserver.lua:238。
+  Future<Map<String, Object?>> allowAddByNearby({required bool allow}) async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    return _call('allow_add_by_nearby', {
+      'flag': allow ? '1' : '0',
+      'uin': '$uin',
+      's2t': s2t,
+      'time': '$now',
+      'token': token,
+    });
+  }
+
+  // ── 好友标签 / 分组（对齐 newfriendservice.lua:597-760）──────────────────
+  //
+  // 标签文案在协议里是 base64 编码（EncodeFriendLabel/DecodeFriendLabel）；
+  // 标签池 query_friend_label_pool → {result:0, label_list:[{tag_id,label,uin_list}]}。
+
+  /// 查询标签池 (cmd=query_friend_label_pool)。
+  Future<Map<String, Object?>> queryFriendLabelPool() =>
+      _call('query_friend_label_pool', {'apiid': apiId, ..._signed()});
+
+  /// 新增/删除标签池中的标签 (cmd=set_friend_label_pool)。
+  /// [opType]=1 新增（需 [label]）；[opType]=0 删除（需 [tagId]）。
+  Future<Map<String, Object?>> setFriendLabelPool({
+    required int opType,
+    String? label,
+    int? tagId,
+  }) {
+    final params = <String, String>{
+      'apiid': apiId,
+      'op_type': opType == 1 ? '1' : '0',
+      ..._signed(),
+    };
+    if (opType == 1) {
+      params['label'] = base64Encode(utf8.encode(label ?? ''));
+    } else if (tagId != null) {
+      params['tag_id'] = '$tagId';
+    }
+    return _call('set_friend_label_pool', params);
+  }
+
+  /// 批量给好友打/去标签 (cmd=batch_set_friend_label)。
+  /// [opType]=1 打标签（需 [tagId]）/ 0 去标签。body `{"des_uin_list":[...]}`。
+  Future<Map<String, Object?>> batchSetFriendLabel(
+    List<int> uins, {
+    required int opType,
+    int? tagId,
+  }) {
+    final params = <String, String>{
+      'apiid': apiId,
+      'op_type': opType == 1 ? '1' : '0',
+      'src_uin': '$uin',
+      ..._signed(),
+    };
+    if (tagId != null) params['tag_id'] = '$tagId';
+    return _callPost(
+      'batch_set_friend_label',
+      params,
+      jsonEncode({'des_uin_list': uins}),
+    );
+  }
+
+  /// 批量清除好友标签 (cmd=batch_clear_friend_labels)。
+  Future<Map<String, Object?>> batchClearFriendLabels(List<int> uins) =>
+      _callPost(
+        'batch_clear_friend_labels',
+        {'apiid': apiId, 'src_uin': '$uin', ..._signed()},
+        jsonEncode({'des_uin_list': uins}),
+      );
+
+  /// 好友设置类 cmd 的公共签名参数（s2t/src_uin/time/token/uin/ver）。
+  Map<String, String> _signed() {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return {
+      's2t': s2t,
+      'src_uin': '$uin',
+      'time': '$now',
+      'token': md5Token(now, s2, uin),
+      'uin': '$uin',
+      'ver': ver,
+    };
   }
 }
