@@ -12,6 +12,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/friend_tag.dart';
+import '../../core/services/request_errors.dart' show responseOk;
 import '../../state/providers.dart';
 import 'friend_filter_dialog.dart' show showCreateFriendTagDialog;
 
@@ -128,15 +129,16 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
   }
 
   Future<void> _toggleTag(FriendTag t, {required bool add}) async {
-    await _run(() async {
-      await ref
+    await _run(
+      () => ref
           .read(chatServiceProvider)
           .setFriendLabels(
             widget.uins,
             opType: add ? 1 : 2,
             tagId: t.tagId,
-          );
-    }, add ? '已打标签' : '已取消标签');
+          ),
+      add ? '已打标签' : '已取消标签',
+    );
   }
 
   Future<void> _clearAll() async {
@@ -184,11 +186,26 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
     );
   }
 
-  Future<void> _run(Future<void> Function() action, String okText) async {
+  /// 执行一次标签写入；[okText] 只在**服务端确实受理**时才提示。
+  ///
+  /// 原先只 catch 异常就报成功 —— 而 `{"result":N}` 里的业务失败不会抛，
+  /// 所以删/建失败也照样显示「已创建」。现在用 [responseOk] 看业务码，
+  /// 失败时把码原样显示出来。
+  Future<void> _run(
+    Future<Map<String, Object?>> Function() action,
+    String okText,
+  ) async {
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
-      await action();
+      final resp = await action();
+      if (!responseOk(resp)) {
+        final code = resp['result'] ?? resp['code'] ?? resp['ret'];
+        messenger.showSnackBar(
+          SnackBar(content: Text('服务端未受理（result=$code）')),
+        );
+        return;
+      }
       ref.invalidate(friendTagPoolProvider);
       messenger.showSnackBar(SnackBar(content: Text(okText)));
     } catch (e) {
