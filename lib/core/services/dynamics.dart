@@ -14,6 +14,7 @@ import '../net/config.dart' show kApiId, kClientVersionStr, kDefaultBase, kDefau
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import 'request_errors.dart' show reportIfFailed;
 
 /// 本模块日志标签。
 const String _logTag = 'Dynamics';
@@ -618,6 +619,7 @@ class DynamicsClient {
     } else {
       decoded = raw;
     }
+    reportIfFailed(url, decoded);
 
     if (decoded is! Map) {
       log.warn('$act decoded not Map: ${decoded.runtimeType}', tag: _logTag);
@@ -731,6 +733,7 @@ class DynamicsClient {
     log.debug('comment RAW: $raw', tag: _logTag);
 
     Object? decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
     if (decoded is! Map) return [];
     final m = decoded.cast<String, Object?>();
     final ret = m['ret'] ?? m['code'];
@@ -790,6 +793,7 @@ class DynamicsClient {
     final resp = await _dio.get(url);
     final raw = resp.data;
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
     if (decoded is! Map) return null;
     final m = decoded.cast<String, Object?>();
     final ret = m['ret'] ?? m['code'];
@@ -986,6 +990,7 @@ class DynamicsClient {
     final raw = resp.data;
     log.debug('get_comment_rep RAW: $raw', tag: _logTag);
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
     if (decoded is! Map) return [];
     final m = decoded.cast<String, Object?>();
     final ret = m['ret'] ?? m['code'];
@@ -1038,6 +1043,7 @@ class DynamicsClient {
     final resp = await _dio.get(url);
     final raw = resp.data;
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
   }

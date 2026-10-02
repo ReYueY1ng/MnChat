@@ -24,6 +24,7 @@ import '../net/config.dart'
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import 'request_errors.dart' show reportIfFailed;
 
 /// 本模块日志标签。
 const String _logTag = 'MsgBox';
@@ -477,7 +478,9 @@ class MsgBoxClient {
     final resp = await _dio.get(url);
     final raw = resp.data;
     log.debug('$act RAW: $raw', tag: _logTag);
-    return raw is String ? decodeHttpResponse(raw) : raw;
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
+    return decoded;
   }
 
   /// 拉某频道通知列表（act=get_channel_msg_list）。失败 → 空页。

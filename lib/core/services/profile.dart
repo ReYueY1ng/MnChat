@@ -13,6 +13,7 @@ import '../net/config.dart' show kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import 'gateway.dart' show buildMiniwParamMd5Url;
+import 'request_errors.dart' show reportIfFailed;
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
@@ -378,6 +379,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
 
     // LuaTable 数组 → List；{code,data:[...]} → data
     Object? data = decoded;
@@ -416,6 +418,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
 
     final data = decoded is Map ? decoded['data'] : null;
     if (data is! Map) return out;
@@ -449,6 +452,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is! Map) return null;
     final m = decoded.cast<String, Object?>();
     // 兼容两种信封：`{profile:{...}}` 与 `{data:{profile:{...}}}`（不同网关/版本
@@ -483,6 +487,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is Map) {
       final ret = decoded['ret'];
       if (ret is num) return ret.toInt() == 0;
@@ -507,6 +512,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is! Map) return null;
     final data = decoded['data'];
     if (data is! Map) return null;
@@ -549,6 +555,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is Map) {
       final code = decoded['code'];
       if (code is num) return code.toInt() == 0;
@@ -575,6 +582,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     final data = decoded is Map ? decoded['data'] : null;
     if (data is! Map) return out;
 
@@ -615,6 +623,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     final data = decoded is Map ? decoded['data'] : null;
     if (data is! Map) return null;
     return parseDiyHeadInfo(data['$uin']);
@@ -687,6 +696,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is Map) {
       final ret = decoded['ret'] ?? decoded['code'];
       if (ret is num) return ret.toInt() == 0;
@@ -730,6 +740,7 @@ class ProfileClient {
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     final data = decoded is Map ? decoded['data'] : null;
 
     final out = <PortraitItem>[];

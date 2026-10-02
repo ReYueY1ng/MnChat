@@ -17,6 +17,7 @@ import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
+import 'request_errors.dart' show reportIfFailed;
 import 'title_config.dart' show extractLuaBlock, parseConfigIndex;
 import 'config_text_cache.dart' show ConfigTextCache;
 import '../utils/log.dart';
@@ -248,6 +249,7 @@ class SocialSignClient {
     final raw = resp.data;
     log.debug('$act RAW: $raw', tag: _logTag);
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
   }

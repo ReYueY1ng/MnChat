@@ -10,6 +10,7 @@ import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart';
+import 'request_errors.dart' show reportIfFailed;
 
 /// 网关响应解码：先 JSON 后 LuaTable，异常时返回 null 结构。
 Object? decodeGatewayResponse(String text) {
@@ -135,20 +136,24 @@ class GatewayClient {
   String resolve(String key) => _urls[key] ?? kDefaultBase;
 
   /// GET 并解码响应（JSON → LuaTable 兼容）。
+  ///
+  /// 业务码非 0（`code`/`ret`/`result`）会上报给 UI 的请求失败提示。
   Future<Map<String, Object?>> get(String url,
       {Map<String, String>? query}) async {
     final resp = await _dio.get(url, queryParameters: query);
     final data = decodeGatewayResponse(resp.data as String? ?? '');
+    reportIfFailed(url, data);
     if (data is Map) return data.cast<String, Object?>();
     return <String, Object?>{};
   }
 
-  /// POST 并解码响应。
+  /// POST 并解码响应。业务码非 0 同样上报。
   Future<Map<String, Object?>> post(String url,
       {Object? data, String? contentType}) async {
     final resp = await _dio.post(url,
         data: data, options: Options(contentType: contentType));
     final decoded = decodeGatewayResponse(resp.data as String? ?? '');
+    reportIfFailed(url, decoded);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
   }

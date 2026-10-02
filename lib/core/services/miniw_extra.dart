@@ -21,6 +21,7 @@ import '../net/http_factory.dart' show createDio;
 import 'gateway.dart' show buildMiniwParamMd5Url;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import 'request_errors.dart' show reportIfFailed;
 
 /// 本模块日志标签。
 const String _logTag = 'MiniwExtra';
@@ -83,6 +84,7 @@ class MiniwParamClient {
     final raw = resp.data;
     final text = raw is String ? raw : jsonEncode(raw);
     final decoded = decodeHttpResponse(text);
+    reportIfFailed(url, decoded);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
   }

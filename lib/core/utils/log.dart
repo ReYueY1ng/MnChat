@@ -99,6 +99,9 @@ void _write(LogLevel level, String tag, String message) {
 const Set<String> _sensitiveQueryKeys = {
   's2',
   's2t',
+  // s7 是整段 query 的自定义 base64（里面就带着 s2t 与 auth），同样敏感。
+  's7',
+  's7t',
   'md5',
   'sign',
   'signature',

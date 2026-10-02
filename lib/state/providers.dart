@@ -20,6 +20,7 @@ import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/partner.dart';
+import '../core/services/request_errors.dart' show RequestErrorBus;
 import '../core/services/social_sign.dart'
     show DeclarationCatalog, DeclarationConfigClient;
 import '../core/services/profile.dart';
@@ -794,6 +795,16 @@ final profileClientProvider = Provider<ProfileClient?>((ref) {
   return ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 });
 
+// ── 请求失败提示 ────────────────────────────────────────────────────────
+
+/// 请求失败总线：UI（角标 + 详情弹窗 + 吐司）用它显示「哪个请求失败了」。
+///
+/// 业务码失败由各 client 上报（见 [PartnerClient]），传输层失败由 `createDio`
+/// 的拦截器上报；测试可 override 成干净实例。
+final requestErrorBusProvider = Provider<RequestErrorBus>(
+  (ref) => RequestErrorBus.instance,
+);
+
 // ── 最佳拍档 / 玩家等级 / 大会员 ─────────────────────────────────────────
 
 /// 拍档/等级/大会员客户端（未登录返回 null）。
@@ -814,10 +825,13 @@ PartnerClient? _tryPartnerClient(Ref ref) {
 }
 
 /// 忽略失败的异步读取：网络/解析异常时退回 [fallback]。
-Future<T> _partnerGuard<T>(Future<T> Function() run, T fallback) async {
+Future<T> _partnerGuard<T>(Ref ref, String label, Future<T> Function() run, T fallback) async {
   try {
     return await run();
-  } catch (_) {
+  } catch (e) {
+    // 静默降级会让"默契度全是 0"看起来像服务端没数据 —— 日志 + UI 都要能看到。
+    log.warn('拍档目录部分数据拉取失败: $e', tag: 'Partner');
+    ref.read(requestErrorBusProvider).report(label: label, endpoint: '', message: '$e');
     return fallback;
   }
 }
@@ -837,14 +851,20 @@ final partnerDirectoryProvider = FutureProvider<PartnerDirectory>((ref) async {
   final client = _tryPartnerClient(ref);
   if (client == null) return PartnerDirectory.empty;
   final levels = await _partnerGuard(
+    ref,
+    '平台等级',
     () => client.getPlatformLevels(uins),
     const <int, int>{},
   );
   final partners = await _partnerGuard(
+    ref,
+    '拍档列表',
     () => client.getPartnerList(),
     const <PartnerInfo>[],
   );
   final vip = await _partnerGuard(
+    ref,
+    '大会员',
     () => client.getVipExpiry(uins),
     const <int, int>{},
   );
@@ -855,11 +875,21 @@ final partnerDirectoryProvider = FutureProvider<PartnerDirectory>((ref) async {
   );
 });
 
-/// 本人拍档列表。
+/// 本人**拍档**列表（只含已建立关系的 `lab > 0`）。
+///
+/// 注意：`get_list` 会给每个好友都下发一条带 `tacitnum` 的记录，没建立关系的
+/// `lab == 0`（只有默契值）——那些不算拍档，不能进这个列表（否则「可建立拍档数」
+/// 会算错、头像/等级也会多拉一批）。只有默契值的好友见 [partnerDirectoryProvider]。
 final myPartnerListProvider = FutureProvider<List<PartnerInfo>>((ref) async {
   final client = _tryPartnerClient(ref);
   if (client == null) return const <PartnerInfo>[];
-  return _partnerGuard(() => client.getPartnerList(), const <PartnerInfo>[]);
+  final all = await _partnerGuard(
+    ref,
+    '拍档列表',
+    () => client.getPartnerList(),
+    const <PartnerInfo>[],
+  );
+  return all.where((p) => PartnerLab.isPartnerLab(p.lab)).toList();
 });
 
 /// 本人拍档槽位（可建立拍档数上限）。
@@ -867,14 +897,14 @@ final partnerSlotProvider = FutureProvider<PartnerSlotInfo?>((ref) async {
   final uin = ref.watch(myUinProvider);
   final client = _tryPartnerClient(ref);
   if (client == null || uin <= 0) return null;
-  return _partnerGuard(() => client.getPartnerSlot(uin), null);
+  return _partnerGuard(ref, '拍档槽位', () => client.getPartnerSlot(uin), null);
 });
 
 /// 拍档红点数量。
 final partnerRedDotProvider = FutureProvider<int>((ref) async {
   final client = _tryPartnerClient(ref);
   if (client == null) return 0;
-  return _partnerGuard(() => client.getRedDotCount(), 0);
+  return _partnerGuard(ref, '拍档红点', () => client.getRedDotCount(), 0);
 });
 
 /// 本人拍档的平台等级（拍档页 `Lv<N>`）。
@@ -885,6 +915,8 @@ final partnerLevelsProvider = FutureProvider<Map<int, int>>((ref) async {
   if (client == null) return const <int, int>{};
   final uins = partners.map((p) => p.bestUin).toList();
   return _partnerGuard(
+    ref,
+    '平台等级',
     () => client.getPlatformLevels(uins),
     const <int, int>{},
   );
@@ -899,6 +931,8 @@ final partnerLevelConfigProvider =
       final client = _tryPartnerClient(ref);
       if (client == null) return const <(int, int)>[];
       return _partnerGuard(
+        ref,
+        '关系等级配置',
         () => client.getPartnerLevels(),
         const <(int, int)>[],
       );

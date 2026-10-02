@@ -10,6 +10,8 @@ import 'friends_page.dart';
 import 'session_list_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/account_menu.dart';
+import 'widgets/request_error_indicator.dart'
+    show RequestErrorIndicator, RequestErrorListener;
 
 /// 主界面：会话 / 好友 / 动态 三入口。
 ///
@@ -162,9 +164,11 @@ class _MainShellState extends ConsumerState<MainShell> {
             NativeBridge.moveTaskToBack();
           }
         },
-        child: isLandscape
+        child: RequestErrorListener(
+          child: isLandscape
             // 横屏：常驻侧边栏 + 内容区
             ? Scaffold(
+                floatingActionButton: const RequestErrorIndicator(),
                 body: Row(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
@@ -182,11 +186,13 @@ class _MainShellState extends ConsumerState<MainShell> {
               )
             // 竖屏：底部栏（聊天打开时隐藏，最大化聊天区域）
             : Scaffold(
+                floatingActionButton: const RequestErrorIndicator(),
                 body: _buildTabBody(sessionsTab, friendsTab, dynamicsTab),
                 bottomNavigationBar: chatOpen
                     ? null
                     : _buildBottomBar(),
               ),
+        ),
       );
     });
   }

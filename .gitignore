@@ -18,6 +18,8 @@ build/
 *.log
 session.json
 config.yaml
+.env
+
 # Widget Preview related
 .widget_preview/
 
