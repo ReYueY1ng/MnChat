@@ -14,6 +14,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/messages.dart';
+import '../../core/models/nickname.dart' show plainNickname;
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
@@ -244,7 +245,7 @@ Future<void> _confirmRemoveFriend(
       final theme = Theme.of(ctx);
       return AlertDialog(
         title: const Text('删除好友'),
-        content: Text('确定删除好友「$name」吗？'),
+        content: Text('确定删除好友「${plainNickname(name)}」吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),

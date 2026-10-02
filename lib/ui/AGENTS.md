@@ -26,7 +26,8 @@ App UI layer: `MainShell` is the entry widget imported by `main.dart`, plus one 
 - Chat state is preserved by `MainShell._chatInstance`, keyed `ValueKey(sessionKeyOf(type, id))` (format defined in `core/models/session_key.dart`); `IndexedStack` swaps list vs chat on narrow widths.
 - Responsive checks come from `theme/app_tokens.dart` (`isCompactWidth`, `adaptiveDensity`), not raw `MediaQuery` arithmetic.
 - Clamp content width with `AppSizes.narrowContent` (760) for single-column settings/detail/profile pages and `AppSizes.listContent` (1000) for list pages; never hard-code widths.
-- 服务端昵称带富文本标记（`[i][color][b]顾念`）与反斜杠转义（`我\n的轨迹`）。**不走富文本的地方必须先过 `plainNickname`**（`utils/…`→ `core/models/nickname.dart`）：AppBar 标题、各种名牌、列表行都算。需要富文本的地方用 `RichTextView`（它内部会做转义归一）。两处都漏过同一个坑：主页头卡渲染正常、标题却是 `[i][color][b]顾念`。
+- 服务端昵称带富文本标记（`[i][color][b]顾念`）与反斜杠转义（`我\n的轨迹`）。**不走富文本的地方必须先过 `plainNickname`**（`core/models/nickname.dart`）：AppBar 标题、各种名牌、确认弹窗、列表行、赠送面板标题都算。需要富文本的地方用 `RichTextView`（内部会做转义归一），`AvatarView` 内部已自带清洗。
+  这个坑反复出现——同一屏里头卡渲染正常、标题却是 `[i][color][b]顾念`。排查方式：`grep -n "'\$name" lib/ui` 与 `grep -rn 'Text(\(widget\.\)\?name' lib/ui`，逐个看是不是人昵称。已知修过：主页 AppBar / 名牌、赠送面板标题、删除好友确认框（两处）、好友选择器与群成员选择器、家族成员列表。
 
 ## ANTI-PATTERNS
 - **Never start the foreground keep-alive service from `MainShell`** — it only stops it. Starting on foreground entry shows a permanent notification the user explicitly rejected; start/stop belongs to the app lifecycle callbacks.

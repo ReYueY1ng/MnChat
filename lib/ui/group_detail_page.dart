@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/models/nickname.dart' show plainNickname;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
@@ -197,9 +198,8 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                     itemCount: contacts.length,
                     itemBuilder: (ctx, i) {
                       final c = contacts[i];
-                      final name = c.nickname.isNotEmpty
-                          ? c.nickname
-                          : '${c.uin}';
+                      final plainName = plainNickname(c.nickname);
+                      final name = plainName.isEmpty ? '${c.uin}' : plainName;
                       final checked = selected.contains(c.uin);
                       return CheckboxListTile(
                         value: checked,
@@ -411,7 +411,11 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            ListTile(title: Text(name), dense: true, enabled: false),
+            ListTile(
+              title: Text(plainNickname(name)),
+              dense: true,
+              enabled: false,
+            ),
             const Divider(height: 1),
             if (isOwner)
               ListTile(

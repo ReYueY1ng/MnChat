@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/models/nickname.dart' show plainNickname;
 import '../../state/providers.dart';
 import '../family_page.dart';
 import '../mail_page.dart';
@@ -195,9 +196,12 @@ Future<void> _showCreateGroupDialog(
                           ),
                         ),
                         ...contacts.map((c) {
-                          final name = c.nickname.isNotEmpty
-                              ? c.nickname
-                              : '${c.uin}';
+                          // 昵称来自服务端，可能带 `[i][color][b]` 这类标记；
+                          // 这是纯文本，洗完为空才回退迷你号。
+                          final plainName = plainNickname(c.nickname);
+                          final name = plainName.isEmpty
+                              ? '${c.uin}'
+                              : plainName;
                           return CheckboxListTile(
                             dense: true,
                             value: selected.contains(c.uin),

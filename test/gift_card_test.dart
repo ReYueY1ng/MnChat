@@ -1,9 +1,14 @@
 import 'dart:convert';
 
+import 'package:material_ui/material_ui.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/models/gift_catalog.dart';
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/chat/online_notify.dart';
 import 'package:mnchat/core/services/rich_media.dart';
+import 'package:mnchat/state/providers.dart' show giftCatalogProvider;
+import 'package:mnchat/ui/widgets/gift_picker.dart' show GiftPickerPanel;
 
 /// 礼物卡（`Type = SendFriendGift`）与好友上线通知。
 void main() {
@@ -91,6 +96,53 @@ void main() {
       expect(newlyOnlineFriends({1}, {1, 2}), {2});
       expect(newlyOnlineFriends({1, 2}, {1}), isEmpty);
       expect(newlyOnlineFriends(<int>{}, {5}), {5});
+    });
+  });
+
+  /// 赠送面板的标题是纯文本，收礼人名字必须洗过 —— 线上真机踩到过
+  /// 「赠送礼物给 [i][color][b]顾念」。
+  group('礼物面板标题的昵称清洗', () {
+    Future<void> pumpPanel(
+      WidgetTester tester, {
+      required int uin,
+      required String name,
+    }) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            giftCatalogProvider.overrideWith((ref) => GiftCatalog.empty),
+          ],
+          child: MaterialApp(
+            home: Consumer(
+              builder: (context, ref, _) => Scaffold(
+                body: GiftPickerPanel(
+                  hostRef: ref,
+                  uin: uin,
+                  name: name,
+                  onDone: () {},
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+    }
+
+    testWidgets('富文本标记被清掉', (tester) async {
+      await pumpPanel(tester, uin: 4242, name: '[i][color][b]顾念');
+      expect(find.text('赠送礼物给 顾念'), findsOneWidget);
+      expect(find.textContaining('['), findsNothing);
+    });
+
+    testWidgets('昵称只由标记组成时回退迷你号', (tester) async {
+      await pumpPanel(tester, uin: 4242, name: '[i][b]');
+      expect(find.text('赠送礼物给 4242'), findsOneWidget);
+    });
+
+    testWidgets('正常昵称原样显示', (tester) async {
+      await pumpPanel(tester, uin: 4242, name: '小明');
+      expect(find.text('赠送礼物给 小明'), findsOneWidget);
     });
   });
 }

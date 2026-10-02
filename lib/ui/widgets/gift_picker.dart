@@ -13,6 +13,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/gift_catalog.dart';
+import '../../core/models/nickname.dart' show plainNickname;
 import '../../state/providers.dart';
 import 'floating_panel.dart';
 
@@ -57,6 +58,13 @@ class GiftPickerPanel extends ConsumerStatefulWidget {
 class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
   bool _sending = false;
 
+  /// 收礼人展示名：服务端昵称带 `[i][color][b]` 这类富文本标记，这里是纯文本，
+  /// 必须先过 plainNickname；洗完为空（昵称只由标记组成）时退回迷你号。
+  String get _displayName {
+    final plain = plainNickname(widget.name);
+    return plain.isEmpty ? '${widget.uin}' : plain;
+  }
+
   /// 支付方式（见文件头）。
   static int _payTypeOf(GiftItem g) => g.ad
       ? 2
@@ -76,7 +84,10 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
             children: [
               Expanded(
                 child: Text(
-                  '赠送礼物给 ${widget.name}',
+                  // 收礼人名字来自服务端昵称，可能带 `[i][color][b]` 这类标记；
+                  // 这里是纯文本，不过 plainNickname 就会显示成
+                  // 「赠送礼物给 [i][color][b]顾念」（真机实测踩到过）。
+                  '赠送礼物给 $_displayName',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall,

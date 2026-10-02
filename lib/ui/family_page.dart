@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/models/nickname.dart' show plainNickname;
 import '../core/services/family.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
@@ -208,7 +209,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               final uin = (a['uin'] ?? a['Uin'] ?? 0) is num
                   ? ((a['uin'] ?? a['Uin']) as num).toInt()
                   : int.tryParse('${a['uin'] ?? a['Uin'] ?? 0}') ?? 0;
-              final name = a['NickName']?.toString() ?? '$uin';
+              // 服务端 NickName 带富文本标记，纯文本处必须先洗；洗完为空回退迷你号。
+              final plainName = plainNickname(a['NickName']?.toString());
+              final name = plainName.isEmpty ? '$uin' : plainName;
               return ListTile(
                 leading: AvatarView(name: name),
                 title: Text(name),
