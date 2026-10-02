@@ -299,8 +299,13 @@ class PlayerHomeClient {
   /// `build()` 会先同步返回默认值 `true`，持久化的值要等异步加载完才写回 state。
   /// 冷启动后先去别人的主页时，`ref.read` 拿到的就是这个默认 `true`，
   /// 于是「关闭留下踪迹」被无视、照样上报了访问记录。
+  /// 「访问主页留下踪迹」是否开启。
+  ///
+  /// 默认**关**：开启后看一眼别人主页就会在对方访客记录里留一条，属于会通知到
+  /// 第三方的动作，不该默默替用户选上（fallback 与 [LeaveVisitTraceNotifier]
+  /// 必须一致，否则设置页显示关、请求却照发）。
   static Future<bool> leaveTraceEnabled(SettingsStore store) =>
-      store.getBool(SettingsKeys.leaveVisitTrace, fallback: true);
+      store.getBool(SettingsKeys.leaveVisitTrace, fallback: false);
 
   /// 访问主页（act=add_visit_record）。[prize]=1 附带送花等。
   Future<bool> addVisitRecord(int targetUin, {int prize = 0}) async {

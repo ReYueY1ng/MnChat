@@ -649,8 +649,11 @@ final leaveVisitTraceProvider =
 class LeaveVisitTraceNotifier extends _BoolSettingNotifier {
   @override
   String get key => SettingsKeys.leaveVisitTrace;
+
+  // 默认关：这个开关一开，看一眼别人的主页就会在对方访客记录里留一条。
+  // 「会通知到第三方」的动作不该默默替用户选上 —— 想留痕的自己打开。
   @override
-  bool get fallback => true;
+  bool get fallback => false;
 }
 
 /// 聊天字号缩放（[ChatFontScaleNotifier.min] ~ [ChatFontScaleNotifier.max]）。
