@@ -320,9 +320,16 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                 _switchCard(
                   icon: Icons.close_fullscreen_outlined,
                   title: '关闭到托盘',
-                  subtitle: '关闭窗口时最小化到系统托盘而非退出',
+                  // 托盘注册失败时（Linux 上没跑 StatusNotifierWatcher）启动阶段已
+                  // 自动关掉它；这里把原因写出来，否则用户会以为是设置没保存。
+                  subtitle: TrayService.trayAvailable
+                      ? '关闭窗口时最小化到系统托盘而非退出'
+                      : '当前桌面没有可用的系统托盘，关闭窗口会直接退出（已自动关闭）',
                   value: ref.watch(closeToTrayProvider),
-                  onChanged: _toggleCloseToTray,
+                  // 没有托盘就不允许打开：否则关窗后应用既不可见也召不回来。
+                  onChanged: TrayService.trayAvailable
+                      ? _toggleCloseToTray
+                      : null,
                 ),
 
               // ── 消息与通知 ──────────────────────────────────────────

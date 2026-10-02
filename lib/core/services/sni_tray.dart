@@ -63,6 +63,14 @@ class SniTray {
 
   DBusClient? _client;
 
+  /// 是否真的在宿主那里登记上了。
+  ///
+  /// 没有 StatusNotifierWatcher（没跑带托盘区的状态栏）时登记会失败，但
+  /// [start] 不会报错 —— 只是图标永远不会出现。调用方要靠这个标志决定
+  /// 要不要保留「关闭到托盘」，否则关窗就再也找不回来。
+  bool _registeredWithWatcher = false;
+  bool get registeredWithWatcher => _registeredWithWatcher;
+
   Future<void> start() async {
     final client = DBusClient.session();
     _client = client;
@@ -99,6 +107,7 @@ class SniTray {
           path: DBusObjectPath.unchecked(entry.$2),
         ).callMethod('org.kde.StatusNotifierWatcher',
             'RegisterStatusNotifierItem', [DBusString(name)]);
+        _registeredWithWatcher = true;
         return;
       } catch (e) {
         lastError = e;

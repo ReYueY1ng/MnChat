@@ -48,10 +48,25 @@ Future<void> main() async {
 /// 避免影响已经渲染出来的界面。
 Future<void> _initDesktopShell(AppDatabase db) async {
   try {
-    final closeToTray = await SettingsStore(
-      db,
-    ).getBool(SettingsKeys.closeToTray, fallback: true);
-    await TrayService.init(closeToTray: closeToTray);
+    final store = SettingsStore(db);
+    final closeToTray = await store.getBool(
+      SettingsKeys.closeToTray,
+      fallback: true,
+    );
+    final trayReady = await TrayService.init(closeToTray: closeToTray);
+    // 只有桌面端才谈得上「托盘注册失败」；Android 上 init 直接返回 false，
+    // 那不是失败，别去改设置。
+    if (TrayService.isDesktop && !trayReady && closeToTray) {
+      // 没有可用托盘（Linux 上是 StatusNotifierWatcher 缺失）却还拦截关窗：
+      // 关窗后应用既不可见也召不回来。降级为「关窗即退出」，并把设置写回去，
+      // 设置页会显示为已关闭；下次启动就不会再拦。
+      await TrayService.setCloseToTray(false);
+      await store.setBool(SettingsKeys.closeToTray, false);
+      log.warn(
+        '系统托盘不可用，已自动关闭「关闭到托盘」（关窗现在会直接退出）',
+        tag: _logTag,
+      );
+    }
   } catch (e) {
     log.warn('桌面壳层初始化失败（已忽略）: $e', tag: _logTag);
   }

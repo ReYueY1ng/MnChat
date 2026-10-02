@@ -34,6 +34,15 @@ class TrayService {
 
   static bool _initialized = false;
   static bool _closeToTray = true;
+
+  /// 托盘是否真的注册成功（[init] 的返回值）。
+  ///
+  /// Linux 上没有 StatusNotifierWatcher（等于没跑有托盘区的状态栏/waybar）时注册
+  /// 会失败，此时必须把「关闭到托盘」关掉 —— 否则关窗后应用既不可见也没法召回。
+  /// 设置页用 [trayAvailable] 把这条降级告诉用户。
+  static bool _trayReady = false;
+  static bool get trayAvailable => _trayReady;
+
   static _WindowCloseListener? _windowListener;
   static _TrayClickListener? _trayListener;
   static sni.SniTray? _sni;
@@ -44,11 +53,20 @@ class TrayService {
 
   static bool get _isDesktop => _isLinux || _isWindows;
 
+  /// 当前平台是否有系统托盘这一套（linux / windows）。
+  ///
+  /// 非桌面端 [init] 直接返回 false，调用方不要把它当成「注册失败」去降级。
+  static bool get isDesktop => _isDesktop;
+
   /// 初始化托盘与窗口关闭拦截；仅在桌面端生效。
   ///
   /// [closeToTray] 为 true 时，关闭窗口仅隐藏到托盘；否则直接退出。
-  static Future<void> init({bool closeToTray = true}) async {
-    if (!_isDesktop || _initialized) return;
+  ///
+  /// 返回**托盘是否真的注册成功**。调用方在 false 且用户本意是「关闭到托盘」时
+  /// 必须降级：没有可点的托盘图标还拦截关窗，应用会变成关不掉又找不回来的幽灵。
+  static Future<bool> init({bool closeToTray = true}) async {
+    if (!_isDesktop) return false;
+    if (_initialized) return _trayReady;
     _closeToTray = closeToTray;
 
     try {
@@ -60,22 +78,19 @@ class TrayService {
       log.warn('window_manager 初始化失败: $e', tag: _logTag);
     }
 
-    if (_isLinux) {
-      await _initLinux();
-    } else {
-      await _initWindows();
-    }
+    _trayReady = _isLinux ? await _initLinux() : await _initWindows();
     _initialized = true;
+    return _trayReady;
   }
 
   // ── Linux：自研 SNI ────────────────────────────────────────────────────
 
-  static Future<void> _initLinux() async {
+  static Future<bool> _initLinux() async {
     try {
       final icon = await loadIconArgb();
       if (icon == null) {
         log.warn('托盘图标解码失败，跳过 Linux 托盘', tag: _logTag);
-        return;
+        return false;
       }
       final tray = sni.SniTray(
         title: 'MnChat',
@@ -100,8 +115,19 @@ class TrayService {
       );
       await tray.start();
       _sni = tray;
+      if (!tray.registeredWithWatcher) {
+        // start() 不会因此报错（它只在自己那边记一条 onError），但图标永远不出
+        // 现 —— 对调用方而言这就是失败。
+        log.warn(
+          '系统里没有 StatusNotifierWatcher，托盘图标不会显示',
+          tag: _logTag,
+        );
+        return false;
+      }
+      return true;
     } catch (e) {
       log.warn('Linux 托盘初始化失败: $e', tag: _logTag);
+      return false;
     }
   }
 
@@ -163,13 +189,13 @@ class TrayService {
 
   // ── Windows：tray_manager ──────────────────────────────────────────────
 
-  static Future<void> _initWindows() async {
+  static Future<bool> _initWindows() async {
     try {
       // setIcon 会把相对路径解析到 `data/flutter_assets/` 下。
       await tm.trayManager.setIcon('assets/tray_icon.png');
     } catch (e) {
       log.warn('setIcon 失败: $e', tag: _logTag);
-      return; // 连图标都没有，后续无意义
+      return false; // 连图标都没有，后续无意义
     }
 
     try {
@@ -194,6 +220,7 @@ class TrayService {
     } catch (e) {
       log.warn('setToolTip 失败: $e', tag: _logTag);
     }
+    return true;
   }
 
   /// 运行期切换「关闭到托盘」（设置页调用）。

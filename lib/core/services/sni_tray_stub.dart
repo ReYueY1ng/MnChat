@@ -28,4 +28,7 @@ class SniTray {
 
   Future<void> start() async {}
   Future<void> stop() async {}
+
+  /// 与真实实现同名同义；桩环境永远登不上。
+  bool get registeredWithWatcher => false;
 }
