@@ -47,6 +47,7 @@ import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/homepage_modules.dart';
+import '../core/models/nickname.dart' show plainNickname;
 import '../core/models/skin_head_catalog.dart';
 import '../core/services/name_rules.dart'
     show renameErrorText, validateNickname;
@@ -147,7 +148,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isSelf ? '个人主页' : name),
+        title: Text(_isSelf ? '个人主页' : _plainName),
         actions: [
           if (_isSelf)
             IconButton(

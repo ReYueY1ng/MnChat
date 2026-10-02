@@ -37,15 +37,30 @@ final RegExp _emojiCodeRe = RegExp(r'#A\d{3}|\[mdemo\]|@IMFC&\d+_\d+');
 ///
 /// 若清洗后为空（例如昵称只由标记组成），返回空字符串 —— 调用方应回退到
 /// 迷你号，而不是把 `[i]` 之类的标记显示出来。
+final RegExp _escapeSpaceRe = RegExp(r'\\[nrt]');
+
+/// 把反斜杠写的空白转义（`\n` / `\r` / `\t`）换成**空格**。
+///
+/// 服务端下发的昵称里会带这种写法（线上实例：动态卡片上的昵称
+/// `我\n的轨\n迹`）。所有展示位几乎都是单行（列表行 / 标题 / 名牌 / 卡片标题），
+/// 所以统一换成空格而不是真换行 —— 单行控件里换行只会被 ellipsis 吃掉，
+/// 等于丢字。真正的换行码是 `#n`（见 ubbcodeparser / [buildRichSpans]），
+/// 与本转义无关。
+///
+/// 富文本与纯文本两条渲染路径共用此函数，避免只修一边。
+String normalizeTextEscapes(String s) => s.replaceAll(_escapeSpaceRe, ' ');
+
+/// 去掉富文本标记，返回可直接显示的纯文本。
+///
+/// 若清洗后为空（例如昵称只由标记组成），返回空字符串 —— 调用方应回退到
+/// 迷你号，而不是把 `[i]` 之类的标记显示出来。
 String plainNickname(String? raw) {
   if (raw == null) return '';
   final trimmed = raw.trim();
   if (trimmed.isEmpty) return '';
-  return trimmed
-      .replaceAll(_markupRe, '')
-      .replaceAll(_colorCodeRe, '')
-      .replaceAll('#n', '')
-      .trim();
+  return normalizeTextEscapes(
+    trimmed.replaceAll(_markupRe, '').replaceAll(_colorCodeRe, ''),
+  ).replaceAll('#n', '').trim();
 }
 
 /// 是否包含富文本标记（用于判断是否需要走富文本渲染）。

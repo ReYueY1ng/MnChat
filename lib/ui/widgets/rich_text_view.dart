@@ -46,9 +46,13 @@ List<InlineSpan> buildRichSpans(
 
   void addPlain(String text) {
     if (text.isEmpty) return;
+    // `\n` `\r` `\t` 这类反斜杠转义先换成空格：单行控件里真换行会被 ellipsis
+    // 吃掉，等于丢字（线上实例：昵称 `我\n的轨\n迹`）。与 plainNickname 同一口径。
+    final shown = normalizeTextEscapes(text);
+    if (shown.isEmpty) return;
     spans.add(
       TextSpan(
-        text: text,
+        text: shown,
         style: TextStyle(
           color: color == Colors.transparent ? null : color,
           fontWeight: bold ? FontWeight.bold : null,

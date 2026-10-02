@@ -33,6 +33,17 @@ void main() {
       expect(plainNickname('[i][b]'), '');
     });
 
+    test('反斜杠空白转义换成空格（线上实例：昵称 `我\\n的轨\\n迹`）', () {
+      // 单行控件里真换行会被 ellipsis 吃掉，等于丢字，所以统一变空格。
+      expect(plainNickname(r'我\n的轨\n迹'), '我 的轨 迹');
+      expect(plainNickname(r'a\tb'), 'a b');
+      expect(plainNickname(r'a\rb'), 'a b');
+      // 与标记 / 颜色码同时出现时也要洗掉。
+      expect(plainNickname(r'[b]我\n的轨迹'), '我 的轨迹');
+      // 正常昵称不受影响（除了首尾空白）。
+      expect(plainNickname('顾念'), '顾念');
+    });
+
     test('null / 空白 → 空串', () {
       expect(plainNickname(null), '');
       expect(plainNickname('   '), '');

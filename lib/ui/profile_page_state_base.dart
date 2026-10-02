@@ -30,6 +30,18 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     return '$_target';
   }
 
+  /// 纯文本昵称：给 AppBar / 名牌这类**不走富文本**的地方用。
+  ///
+  /// 服务端 `NickName` 会带 `[i][color][b]…` 这类标记（资料头卡里的
+  /// `RichTextView` 会把它渲染出来），不走富文本的地方必须先过
+  /// [plainNickname]，否则标记会原样显示 —— 主页标题与交友宣言的名牌就
+  /// 踩过这个坑，同一屏里头卡显示「顾念」、标题却是 `[i][color][b]顾念`。
+  /// 清洗后为空（昵称只由标记组成）时回退迷你号。
+  String get _plainName {
+    final plain = plainNickname(_displayName);
+    return plain.isEmpty ? '$_target' : plain;
+  }
+
   /// 主页主人。自己的话就是登录账号。
   int get _target =>
       widget.targetUin ?? (ref.read(authProvider).auth?.uin ?? 0);

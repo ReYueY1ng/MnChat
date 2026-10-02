@@ -402,6 +402,8 @@ class _NameTag extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
+    // 名牌走纯文本，必须先清洗掉 `[i][color][b]` 这类标记。
+    final label = plainNickname(name);
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.md,
@@ -412,7 +414,7 @@ class _NameTag extends StatelessWidget {
         borderRadius: AppRadius.pillR,
       ),
       child: Text(
-        name.isEmpty ? '未命名' : name,
+        label.isEmpty ? '未命名' : label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelMedium?.copyWith(
