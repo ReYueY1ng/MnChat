@@ -32,4 +32,5 @@ HTTP service clients plus the realtime chat pipeline. Every `/miniw/*` and `/ser
 - No DI container. Clients are built by hand in state/providers.dart — new dependencies must be threaded through there.
 - A response body that is neither JSON nor LuaTable used to be swallowed into `{}` by `decodeGatewayResponse` — callers could not tell "empty" from "unparsable". That hole is closed (it reports to `RequestErrorBus`). Don't open a new one: if you add a decode path, surface the failure rather than returning an empty map.
 - sni_tray_stub.dart mirrors `SniTray`'s API but no-ops; platform-check before `start()`/`stop()`.
+- `/server/friend` 的信封是 `{"result":N}`，那个 N 是**好友服务自己的**码表；网关码表（`errorcode.lua`，2 = UNKNOW_SERVICE）只适用于 `code`/`ret`。别把 `result:2` 读成「服务未注册」去改地址 —— 实测该 cmd 是**被识别的**（回业务信封），而把 cmd 拼错时回的是**空 body**。
 - Zero `TODO`/`FIXME`/`// ignore:` markers in scope today; don't add the first one.

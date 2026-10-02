@@ -515,11 +515,31 @@ class FriendClient {
   // 标签池 query_friend_label_pool → {result:0, label_list:[{tag_id,label,uin_list}]}。
 
   /// 查询标签池 (cmd=query_friend_label_pool)。
-  Future<Map<String, Object?>> queryFriendLabelPool() =>
-      _call('query_friend_label_pool', {'apiid': apiId, ..._signed()});
+  ///
+  /// **不能带 `src_uin`。** 2026-10-02 真实账号实测（同一链路先用
+  /// `query_friend_list` 做阳性对照，3/3 成功；每个形状重复 3 次、间隔 2.5s
+  /// 以避开网关按账号排队）：
+  /// - 带 `src_uin`（原形状）→ `{"result":2}`，稳定复现；
+  /// - 去掉 `src_uin` → `{"result":0,"label_list":{…}}`，拿到真实负载；
+  /// - 补 `country`/`lang`/`encrypt_ver`/`op_type`/`tag_id`、或改走 POST，
+  ///   都不改变 result=2；而把命令名拼错（get_friend_label_pool 等）返回的是
+  ///   **空 body**。
+  ///
+  /// 另一个坑：`{"result":2}` 里的 2 是**好友服务自己的**业务码，不是网关的
+  /// UNKNOW_SERVICE（网关码表在 `errorcode.lua`，只有 `code`/`ret` 适用）。
+  Future<Map<String, Object?>> queryFriendLabelPool() => _call(
+    'query_friend_label_pool',
+    {'apiid': apiId, ..._signed(includeSrcUin: false)},
+  );
 
   /// 新增/删除标签池中的标签 (cmd=set_friend_label_pool)。
   /// [opType]=1 新增（需 [label]）；[opType]=0 删除（需 [tagId]）。
+  ///
+  /// 与 [queryFriendLabelPool] 同一个坑：**不能带 `src_uin`**。实测（同日同账号，
+  /// 每个形状 2-4 次）带 `src_uin` 回 `{"result":2}`；去掉后换成另一个业务码
+  /// （用不存在的 tag_id 试删除时是 45），说明至少已经过了那道门。
+  /// 注意：**本 cmd 的成功码没有验证过** —— 验证它需要真的写一个标签，
+  /// 而那是会改动账号状态的操作，没有做。
   Future<Map<String, Object?>> setFriendLabelPool({
     required int opType,
     String? label,
@@ -528,7 +548,7 @@ class FriendClient {
     final params = <String, String>{
       'apiid': apiId,
       'op_type': opType == 1 ? '1' : '0',
-      ..._signed(),
+      ..._signed(includeSrcUin: false),
     };
     if (opType == 1) {
       params['label'] = base64Encode(utf8.encode(label ?? ''));
@@ -568,11 +588,15 @@ class FriendClient {
       );
 
   /// 好友设置类 cmd 的公共签名参数（s2t/src_uin/time/token/uin/ver）。
-  Map<String, String> _signed() {
+  /// 通用签名参数。
+  ///
+  /// [includeSrcUin] 默认带 `src_uin`；少数 cmd 带上它反而被服务端拒
+  /// （见 [queryFriendLabelPool]），由调用方显式关掉。
+  Map<String, String> _signed({bool includeSrcUin = true}) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     return {
       's2t': s2t,
-      'src_uin': '$uin',
+      if (includeSrcUin) 'src_uin': '$uin',
       'time': '$now',
       'token': md5Token(now, s2, uin),
       'uin': '$uin',
