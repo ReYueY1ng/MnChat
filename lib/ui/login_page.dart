@@ -307,7 +307,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     child: CircularProgressIndicator(strokeWidth: 2),
                   )
                 : const Icon(Icons.login),
-            label: Text(_busy ? '登录中…' : '登录并添加'),
+            label: Text(
+              _busy
+                  ? '登录中…'
+                  // 首装（还没有任何保存的账号）时“登录并添加”读起来别扭；
+                  // 只有已经有账号列表时才是“添加”。
+                  : (_accounts.isEmpty ? '登录' : '登录并添加'),
+            ),
           ),
           if (_accounts.isNotEmpty) ...[
             const SizedBox(height: 8),

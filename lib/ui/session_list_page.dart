@@ -513,6 +513,16 @@ class _EmptySessions extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           const Text('暂无会话\n聊过天的人会出现在这里'),
+          const SizedBox(height: AppSpacing.xs),
+          // 说清楚为什么好友列了一屏、会话却是空的：会话只从本机历史与实时推送
+          // 来，服务端不会把“我最近跟谁聊过”下发回来。
+          Text(
+            '历史消息只保留本机聊过的会话',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.outline,
+            ),
+          ),
           const SizedBox(height: 8),
           TextButton.icon(
             onPressed: onAddFriend,
