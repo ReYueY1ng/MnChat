@@ -24,8 +24,8 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
 
   // 话题
   final _topicCtrl = TextEditingController();
-  List<Map<String, Object?>> _topicResults = [];
-  Map<String, Object?>? _selectedTopic;
+  List<DynamicsTopic> _topicResults = [];
+  DynamicsTopic? _selectedTopic;
 
   // 投票
   bool _withVote = false;
@@ -61,19 +61,9 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
     final q = _topicCtrl.text.trim();
     if (client == null || q.isEmpty) return;
     try {
-      final resp = await client.searchTopic(q);
-      final data = resp['data'];
-      final list = <Map<String, Object?>>[];
-      if (data is Map) {
-        final raw = data['topic_list'] ?? data['list'];
-        if (raw is List) {
-          for (final e in raw) {
-            if (e is Map) list.add(e.cast<String, Object?>());
-          }
-        }
-      }
+      final topics = await client.searchTopic(q);
       if (!mounted) return;
-      setState(() => _topicResults = list);
+      setState(() => _topicResults = topics);
     } catch (_) {
       if (!mounted) return;
       setState(() => _topicResults = []);
@@ -114,31 +104,29 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
           multiMode: _voteMulti ? 1 : 0,
           voteMode: 0,
         );
-        final vdata = voteResp['data'];
-        if (vdata is Map) {
-          final vi = vdata['vote_info'];
-          if (vi is Map) voteId = '${vi['vote_id']}';
-        }
-        if (voteId == null || voteId == 'null') {
+        voteId = voteResp.voteInfo?.voteId;
+        if (voteId == null || voteId.isEmpty || voteId == 'null') {
           _toast('投票创建失败');
           return;
         }
       }
-      Map<String, Object?> params = {
+      final topic = _selectedTopic;
+      final params = <String, Object?>{
         'content': Uri.encodeQueryComponent(text),
         'from': '0',
         'homepage_hide': '0',
       };
-      if (_selectedTopic != null) {
-        params['topic_list'] =
-            '[{"topic_id":${_selectedTopic!['topic_id']},"title":"${_selectedTopic!['title']}"}]';
+      if (topic != null) {
+        params.addAll({
+          'topic_list':
+              '[{"topic_id":${topic.topicId},"title":"${topic.title}"}]',
+        });
       }
-      if (voteId != null) params['vote_id'] = voteId;
+      if (voteId != null) params.addAll({'vote_id': voteId});
       final resp = await client.addPostingRaw(params);
       if (!mounted) return;
-      final ret = resp['ret'] ?? resp['code'];
-      if (ret is num && ret != 0) {
-        _toast('发布失败: ret=$ret ${resp['msg'] ?? ''}');
+      if (resp.code != 0) {
+        _toast('发布失败: ret=${resp.code} ${resp.message}');
         return;
       }
       _toast('发布成功');
@@ -211,7 +199,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: InputChip(
-                      label: Text('#${_selectedTopic!['title']}'),
+                      label: Text('#${_selectedTopic!.title}'),
                       onDeleted: () => setState(() => _selectedTopic = null),
                     ),
                   ),
@@ -220,7 +208,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                   ..._topicResults.take(5).map((t) => ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
-                        title: Text('#${t['title']}'),
+                        title: Text('#${t.title}'),
                         onTap: () => setState(() {
                           _selectedTopic = t;
                           _topicResults = [];

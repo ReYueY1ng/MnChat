@@ -62,6 +62,20 @@ enum DynamicsFeedType {
   final String act;
 }
 
+/// 从多候选键取首个数值（数值或数值字符串）；都没有 → 0。
+/// 宽松解析：脏/缺省数据一律降级为 0，绝不抛。
+int _pickInt(Map<String, Object?> m, List<String> keys) {
+  for (final k in keys) {
+    final v = m[k];
+    if (v is num) return v.toInt();
+    if (v is String) {
+      final n = int.tryParse(v);
+      if (n != null) return n;
+    }
+  }
+  return 0;
+}
+
 /// 一条动态。
 /// 从头像框字段解析 head_frame_id（数值或字符串；缺省/0 视为无框）。
 int? _headFrameId(Map<String, Object?> m) {
@@ -459,6 +473,209 @@ class DynamicsNotice {
   }
 }
 
+/// 写操作统一确认（like_posting / add_posting / delete_posting / set_top /
+/// create_topic / create_vote / vote / add_comment 等）。
+///
+/// 服务端响应 `{ret|code, msg, data?}`：
+/// - [code]：`ret` 优先、其次 `code`；缺省或非数值 → 0（宽松语义，视为成功）；
+/// - [message]：`msg`/`message` 文案，缺省空串；
+/// - [voteInfo]：仅 create_vote 的 `data.vote_info` 载荷，其它写接口为 null。
+///
+/// 与 player_home.dart 的 `SetTopFlagResult` 同款：小结果对象，解析不抛。
+class DynamicsAck {
+  /// 业务码（0 或缺省即成功）。
+  final int code;
+
+  /// 服务端文案（msg/message）；无则空串。
+  final String message;
+
+  /// 原始 data 载荷（非 Map 或缺失时为空 map）。
+  final Map<String, Object?> _data;
+
+  /// 完整响应 map（供红点等顶层字段兜底）；不外泄。
+  final Map<String, Object?> _raw;
+
+  const DynamicsAck({this.code = 0, this.message = ''})
+      : _data = const {},
+        _raw = const {};
+
+  const DynamicsAck._full(this.code, this.message, this._data, this._raw);
+
+  /// 业务码为 0（或缺失/非数值）即视为成功。
+  bool get ok => code == 0;
+
+  /// create_vote 返回的投票信息（`data.vote_info`）；其它写接口为 null。
+  DynamicsVoteInfo? get voteInfo => DynamicsVoteInfo.fromMap(_data);
+
+  /// 从响应解码结果构造；脏/缺省数据降级，绝不抛。
+  static DynamicsAck fromMap(Map<String, Object?> m) {
+    final raw = m['ret'] ?? m['code'];
+    final data = m['data'];
+    final msg = m['msg'] ?? m['message'];
+    return DynamicsAck._full(
+      raw is num ? raw.toInt() : 0,
+      msg?.toString() ?? '',
+      data is Map ? data.cast<String, Object?>() : const {},
+      m,
+    );
+  }
+}
+
+/// 话题条目（search_topic 响应 data.topic_list / data.list 的一项）。
+class DynamicsTopic {
+  /// 话题 id（topic_id/topicId/id）。
+  final int topicId;
+
+  /// 话题标题。
+  final String title;
+
+  const DynamicsTopic({this.topicId = 0, this.title = ''});
+
+  /// 解析 data 中的话题列表；候选键 topic_list/list；脏条目跳过。
+  static List<DynamicsTopic> parseList(Map<String, Object?> data) {
+    final raw = data['topic_list'] ?? data['list'];
+    if (raw is! List) return const [];
+    final out = <DynamicsTopic>[];
+    for (final e in raw) {
+      if (e is! Map) continue;
+      final t = fromItem(e.cast<String, Object?>());
+      if (t != null) out.add(t);
+    }
+    return out;
+  }
+
+  /// 单条话题；id 与标题皆空视为脏数据 → null。
+  static DynamicsTopic? fromItem(Map<String, Object?> m) {
+    final id = _pickInt(m, ['topic_id', 'topicId', 'id']);
+    final title = m['title']?.toString() ?? m['topic_name']?.toString() ?? '';
+    if (id == 0 && title.isEmpty) return null;
+    return DynamicsTopic(topicId: id, title: title);
+  }
+}
+
+/// 投票选项（get_vote_info / create_vote 的选项）。
+class DynamicsVoteOption {
+  /// 1-based 序号。
+  final int index;
+
+  /// 选项文案。
+  final String text;
+
+  /// 得票数。
+  final int count;
+
+  const DynamicsVoteOption({this.index = 0, this.text = '', this.count = 0});
+
+  /// 单条选项；[fallbackIndex] 为条目在列表中的 1-based 位置。
+  static DynamicsVoteOption? fromItem(
+    Map<String, Object?> m,
+    int fallbackIndex,
+  ) {
+    final index = _pickInt(m, ['index', 'idx', 'op_index', 'id']);
+    final text = m['text']?.toString() ??
+        m['title']?.toString() ??
+        m['name']?.toString() ??
+        m['op']?.toString() ??
+        '';
+    final count = _pickInt(m, ['count', 'num', 'vote_num', 'prize', 'total']);
+    if (text.isEmpty && count == 0) return null;
+    return DynamicsVoteOption(
+      index: index != 0 ? index : fallbackIndex,
+      text: text,
+      count: count,
+    );
+  }
+}
+
+/// 投票信息（get_vote_info 的 data / create_vote 的 data.vote_info）。
+class DynamicsVoteInfo {
+  final String voteId;
+  final String title;
+  /// 结束时间（秒）。
+  final int endTime;
+  /// 多选模式。
+  final int multiMode;
+  /// 0=公开。
+  final int mode;
+  final List<DynamicsVoteOption> options;
+
+  const DynamicsVoteInfo({
+    this.voteId = '',
+    this.title = '',
+    this.endTime = 0,
+    this.multiMode = 0,
+    this.mode = 0,
+    this.options = const [],
+  });
+
+  /// 从响应 data 解出：优先 `data.vote_info`，否则 data 本身（get_vote_info
+  /// 与 create_vote 两种包裹形态）。无有效信息 → null。
+  static DynamicsVoteInfo? fromMap(Map<String, Object?> data) {
+    if (data.isEmpty) return null;
+    final vi = data['vote_info'];
+    final m = vi is Map ? vi.cast<String, Object?>() : data;
+    return fromItem(m);
+  }
+
+  /// 单条投票信息；无 vote_id 且无选项 → null。
+  static DynamicsVoteInfo? fromItem(Map<String, Object?> m) {
+    final voteId =
+        (m['vote_id'] ?? m['voteId'] ?? m['id'])?.toString() ?? '';
+    final raw = m['option_list'] ??
+        m['opt_list'] ??
+        m['options'] ??
+        m['list'] ??
+        m['opts'];
+    final options = <DynamicsVoteOption>[];
+    if (raw is List) {
+      var i = 0;
+      for (final e in raw) {
+        i++;
+        if (e is! Map) continue;
+        final o =
+            DynamicsVoteOption.fromItem(e.cast<String, Object?>(), i);
+        if (o != null) options.add(o);
+      }
+    }
+    if (voteId.isEmpty && options.isEmpty) return null;
+    return DynamicsVoteInfo(
+      voteId: voteId,
+      title: m['title']?.toString() ?? '',
+      endTime: _pickInt(m, ['end_time', 'endTime']),
+      multiMode: _pickInt(m, ['multi_mode', 'multiMode']),
+      mode: _pickInt(m, ['mode']),
+      options: options,
+    );
+  }
+}
+
+/// 动态红点（get_redpoint_notice_info）。
+///
+/// 字段可直接在响应顶层，也可包在 `data` 下；缺省 → 0。
+class DynamicsRedpointNotice {
+  /// 未读动态通知数（new_posting_notice）。
+  final int newPostingNotice;
+
+  /// 动态编辑信息（posting_edit_info）。
+  final int postingEditInfo;
+
+  const DynamicsRedpointNotice({
+    this.newPostingNotice = 0,
+    this.postingEditInfo = 0,
+  });
+
+  /// 从完整响应解出；脏/缺省数据降级为 0，绝不抛。
+  static DynamicsRedpointNotice fromResponse(Map<String, Object?> m) {
+    final data = m['data'];
+    final src = data is Map ? data.cast<String, Object?>() : m;
+    return DynamicsRedpointNotice(
+      newPostingNotice:
+          _pickInt(src, ['new_posting_notice', 'newPostingNotice']),
+      postingEditInfo: _pickInt(src, ['posting_edit_info', 'postingEditInfo']),
+    );
+  }
+}
+
 /// 动态客户端。
 class DynamicsClient {
   final int uin;
@@ -781,9 +998,9 @@ class DynamicsClient {
     return out;
   }
 
-  /// 点赞（act=like_posting）。返回服务器原始 map（含 ret）。
-  Future<Map<String, Object?>> likePosting(String pid) =>
-      _getMap(_url('like_posting', {'pid': pid}));
+  /// 点赞（act=like_posting）。返回统一写操作确认。
+  Future<DynamicsAck> likePosting(String pid) =>
+      _getAck(_url('like_posting', {'pid': pid}));
 
   /// 按 pid 拉单条动态（act=get_posting）。返回 null 表示失败/不存在。
   /// 对齐反编译 dynamicsdatamanager.lua ReqPostingInfo (act="get_posting")。
@@ -812,7 +1029,7 @@ class DynamicsClient {
   /// [content] 正文；[topicId]/[topicName] 选填话题；[question]=true 发布为
   /// 问答动态。对齐 AddPosting：content url_encode 参与签名（content 在
   /// md5 exclude list 中，实际不参与），from 默认 0。
-  Future<Map<String, Object?>> addPosting(
+  Future<DynamicsAck> addPosting(
     String content, {
     int? topicId,
     String? topicName,
@@ -830,34 +1047,36 @@ class DynamicsClient {
       ]);
     }
     if (question) params['question'] = '1';
-    return _getMap(_url('add_posting', params));
+    return _getAck(_url('add_posting', params));
   }
 
   /// 删除动态（act=delete_posting）。
-  Future<Map<String, Object?>> deletePosting(String pid) =>
-      _getMap(_url('delete_posting', {'pid': pid}));
+  Future<DynamicsAck> deletePosting(String pid) =>
+      _getAck(_url('delete_posting', {'pid': pid}));
 
   /// 用原始参数发布动态（act=add_posting）。供发布页组合
   /// content/topic_list/vote_id/question 等字段。
-  Future<Map<String, Object?>> addPostingRaw(Map<String, Object?> params) =>
-      _getMap(_url('add_posting', params.map((k, v) => MapEntry(k, '$v'))));
+  Future<DynamicsAck> addPostingRaw(Map<String, Object?> params) =>
+      _getAck(_url('add_posting', params.map((k, v) => MapEntry(k, '$v'))));
 
   /// 置顶/取消置顶动态（act=set_top）。[top]=true 置顶。
-  Future<Map<String, Object?>> setTop(String pid, {bool top = true}) =>
-      _getMap(_url('set_top', {'pid': pid, 'top': top ? '1' : '0'}));
+  Future<DynamicsAck> setTop(String pid, {bool top = true}) =>
+      _getAck(_url('set_top', {'pid': pid, 'top': top ? '1' : '0'}));
 
   // ── 话题（对齐 posting_topic 接口）─────────────────────────────────────
 
-  /// 搜索话题（act=search_topic，路径 /miniw/posting_topic）。
-  Future<Map<String, Object?>> searchTopic(String title, {int offset = 0}) =>
-      _getMap(_url2('posting_topic', 'search_topic', {
-        'title': Uri.encodeQueryComponent(title),
-        'offset': '$offset',
-      }));
+  /// 搜索话题（act=search_topic，路径 /miniw/posting_topic）。失败/空载荷 → 空列表。
+  Future<List<DynamicsTopic>> searchTopic(String title, {int offset = 0}) async {
+    final ack = await _getAck(_url2('posting_topic', 'search_topic', {
+      'title': Uri.encodeQueryComponent(title),
+      'offset': '$offset',
+    }));
+    return DynamicsTopic.parseList(ack._data);
+  }
 
   /// 创建话题（act=create_topic，路径 /miniw/posting_topic）。
-  Future<Map<String, Object?>> createTopic(String title) =>
-      _getMap(_url2('posting_topic', 'create_topic', {
+  Future<DynamicsAck> createTopic(String title) =>
+      _getAck(_url2('posting_topic', 'create_topic', {
         'title': Uri.encodeQueryComponent(title),
       }));
 
@@ -865,7 +1084,7 @@ class DynamicsClient {
 
   /// 创建投票（act=create_vote）。[opts] 选项文本（≤4）；[multiMode] 多选；
   /// [voteMode] 0=公开。返回响应（含 data.vote_info.vote_id）。
-  Future<Map<String, Object?>> createVote({
+  Future<DynamicsAck> createVote({
     required String title,
     required int endTime,
     required List<String> opts,
@@ -885,11 +1104,11 @@ class DynamicsClient {
     for (var i = 0; i < opts.length; i++) {
       params['op${i + 1}'] = Uri.encodeQueryComponent(opts[i]);
     }
-    return _getMap(_url3('customize_vote/', 'create_vote', params));
+    return _getAck(_url3('customize_vote/', 'create_vote', params));
   }
 
   /// 投票（act=vote）。[opts] 逗号分隔选项序号（如 "1,3"）。
-  Future<Map<String, Object?>> vote({
+  Future<DynamicsAck> vote({
     required String voteId,
     required String opts,
     String? pid,
@@ -904,12 +1123,17 @@ class DynamicsClient {
       'from': '0',
     };
     if (pid != null) params['from_id'] = pid;
-    return _getMap(_url3('customize_vote/', 'vote', params));
+    return _getAck(_url3('customize_vote/', 'vote', params));
   }
 
-  /// 查询投票信息（act=get_vote_info）。
-  Future<Map<String, Object?>> getVoteInfo(String voteId) =>
-      _getMap(_url3('customize_vote/', 'get_vote_info', {'vote_id': voteId}));
+  /// 查询投票信息（act=get_vote_info）。无有效数据 → null。
+  Future<DynamicsVoteInfo?> getVoteInfo(String voteId) async {
+    final ack =
+        await _getAck(_url3('customize_vote/', 'get_vote_info', {
+      'vote_id': voteId,
+    }));
+    return DynamicsVoteInfo.fromMap(ack._data);
+  }
 
   // ── 动态通知（对齐 /miniw/msg_box get_channel_msg_list）─────────────────
 
@@ -919,18 +1143,16 @@ class DynamicsClient {
     String channel, {
     int offset = 0,
   }) async {
-    final ret = await _getMap(_url4('miniw/msg_box', 'get_channel_msg_list', {
+    final ret = await _getAck(_url4('miniw/msg_box', 'get_channel_msg_list', {
       'uin': '$uin',
       'channel': channel,
       'offset': '$offset',
     }));
-    if ((ret['code'] ?? ret['ret']) is num &&
-        (ret['code'] ?? ret['ret']) != 0) {
+    final code = ret._raw['code'] ?? ret._raw['ret'];
+    if (code is num && code != 0) {
       return (<DynamicsNotice>[], 0);
     }
-    final data = ret['data'];
-    if (data is! Map) return (<DynamicsNotice>[], 0);
-    final dm = data.cast<String, Object?>();
+    final dm = ret._data;
     final nextOffset = (dm['next_offset'] is num
             ? (dm['next_offset'] as num)
             : int.tryParse('${dm['next_offset']}') ?? 0)
@@ -951,23 +1173,26 @@ class DynamicsClient {
   /// 标记频道通知已读（act=read_channel_msg）。
   Future<bool> readChannelNotice(String channel, List<String> msgIds) async {
     if (msgIds.isEmpty) return true;
-    final ret = await _getMap(_url4('miniw/msg_box', 'read_channel_msg', {
+    final ret = await _getAck(_url4('miniw/msg_box', 'read_channel_msg', {
       'uin': '$uin',
       'channel': channel,
       'msg_id_list': msgIds.join(','),
     }));
-    return (ret['code'] ?? ret['ret']) is num &&
-        (ret['code'] ?? ret['ret']) == 0;
+    final code = ret._raw['code'] ?? ret._raw['ret'];
+    return code is num && code == 0;
   }
 
   /// 动态红点（act=get_redpoint_notice_info，/miniw/posting）。
-  /// 返回 {new_posting_notice, posting_edit_info}。
-  Future<Map<String, Object?>> fetchRedpointNotice(String source) =>
-      _getMap(_url('get_redpoint_notice_info', {'source': source}));
+  /// 返回 {new_posting_notice, posting_edit_info}（顶层或 data 下均可）。
+  Future<DynamicsRedpointNotice> fetchRedpointNotice(String source) async {
+    final ack =
+        await _getAck(_url('get_redpoint_notice_info', {'source': source}));
+    return DynamicsRedpointNotice.fromResponse(ack._raw);
+  }
 
   /// 发表评论（act=add_comment）。
-  Future<Map<String, Object?>> addComment(String pid, String content) =>
-      _getMap(_url('add_comment', {'pid': pid, 'content': content}));
+  Future<DynamicsAck> addComment(String pid, String content) =>
+      _getAck(_url('add_comment', {'pid': pid, 'content': content}));
 
   /// 拉取某条评论的回复（act=get_comment_rep）。
   ///
@@ -1039,12 +1264,12 @@ class DynamicsClient {
 
   // ── 内部 ──────────────────────────────────────────────────────────────
 
-  Future<Map<String, Object?>> _getMap(String url) async {
+  Future<DynamicsAck> _getAck(String url) async {
     final resp = await _dio.get(url);
     final raw = resp.data;
     final decoded = raw is String ? decodeHttpResponse(raw) : raw;
     reportIfFailed(url, decoded);
-    if (decoded is Map) return decoded.cast<String, Object?>();
-    return <String, Object?>{};
+    if (decoded is Map) return DynamicsAck.fromMap(decoded.cast<String, Object?>());
+    return const DynamicsAck();
   }
 }

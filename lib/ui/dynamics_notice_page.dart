@@ -182,7 +182,7 @@ class _DynamicsNoticePageState extends ConsumerState<DynamicsNoticePage>
   }
 
   String _summary(DynamicsNotice n) {
-    final type = n.data['msg_type'] ?? n.msgType;
+    final type = n.msgType;
     if (type == 'fans_change') return '关注了你';
     if (type == 'post_prize') return '赞了你的动态';
     if (type == 'post_rep') return '评论了你的动态';

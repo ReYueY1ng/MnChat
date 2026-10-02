@@ -50,7 +50,12 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   final ScrollController _scroll = ScrollController();
 
   static const _feedTypes = [DynamicsFeedType.hot, DynamicsFeedType.recommend, DynamicsFeedType.official, DynamicsFeedType.mine];
-  static const _feedLabels = ['热门', '关注', '官方', '我的'];
+  static const _feedLabels = [
+    '热门',
+    '关注',
+    '官方',
+    '我的',
+  ];
 
   /// 只看某个玩家的动态时：固定用「我的」这个 act（`get_posting_list`），
   /// 只是把 `op_uin` 换成对方 —— 服务端同一个接口既能查自己也能查别人。
