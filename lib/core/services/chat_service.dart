@@ -11,6 +11,7 @@ import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models/emoji_catalog.dart' show ImfcEmoji, imfcInterCode, imfcMessageText;
 import '../models/messages.dart';
+import '../models/session_key.dart' show sessionKeyOf;
 import '../storage/app_database.dart';
 import 'auth.dart';
 import 'chat/command_client.dart';
@@ -30,6 +31,7 @@ import 'miniw_extra.dart';
 import 'name_rules.dart';
 import 'player_home.dart';
 import 'profile.dart';
+import 'request_errors.dart' show responseOk;
 import 'social_sign.dart';
 import '../utils/log.dart';
 
@@ -177,10 +179,8 @@ class ChatService {
     MessageCenterClient? messageCenterClient,
     SocialSignClient? socialSignClient,
     PlayerHomeClient? playerHomeClient,
-    Future<(String, String)> Function(MiniAuth auth)? heartbeatOverride,
-  })  : _db = db,
-        // ignore: prefer_initializing_formals
-        _heartbeatOverride = heartbeatOverride {
+    this._heartbeatOverride,
+  }) : _db = db {
     _login = loginClient ?? LoginClient();
     _chatpush = chatPushClient ?? ChatPushClient();
     _friend = friendClient;
@@ -356,16 +356,14 @@ class ChatService {
   /// 红包客户端（登录后可用，未登录返回 null）。
   RedPacketClient? get redPacket => _redPacket;
 
-  /// 会话消息历史（按时间升序）。key = sessionKey(type, id)。
+  /// 会话消息历史（按时间升序）。key = sessionKeyOf(type, id)。
   /// 返回稳定升序副本（缓存以升序为规范，此处兜底保证对外契约）。
   List<ChatMessage> historyOf(ChatSessionType type, int id) =>
       List.unmodifiable(
         sortMessagesAscending(
-          _messagesCache[_sessionKey(type, id)] ?? const [],
+          _messagesCache[sessionKeyOf(type, id)] ?? const [],
         ),
       );
-
-  static String _sessionKey(ChatSessionType type, int id) => '${type.name}_$id';
 
   // ── 认证流程 ───────────────────────────────────────────────────────────
 
@@ -736,12 +734,16 @@ class ChatService {
   }
 
   /// 拍一拍好友（cmd=take_pat）。成功后本地回显一条拍一拍消息。
-  Future<Map<String, Object?>> patFriend(int desUin, {String? myName}) async {
+  /// 拍一拍（`cmd=take_pat`）。返回服务端是否受理。
+  ///
+  /// 信封解析留在这里：受理（[responseOk]）才把这条本地回显插进会话。
+  /// 页面只拿 bool —— 页面不该知道服务端返回了 `result` 还是 `ret`。
+  Future<bool> patFriend(int desUin, {String? myName}) async {
     final friend = _friend;
     if (friend == null) throw StateError('not logged in');
     final resp = await friend.takePat(desUin);
-    final code = resp['result'] ?? resp['ret'];
-    if (code is num && code == 0) {
+    final ok = responseOk(resp);
+    if (ok) {
       final me = myName ?? myNickname;
       final m = ChatMessage(
         uin: myUin,
@@ -751,7 +753,7 @@ class ChatService {
       );
       _upserter.upsertFriend(desUin, m);
     }
-    return resp;
+    return ok;
   }
 
   /// 发送互动表情「骰子 / 猜拳」。

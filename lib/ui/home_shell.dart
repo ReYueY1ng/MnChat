@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/messages.dart';
+import '../core/models/session_key.dart' show sessionKeyOf;
 import '../core/services/native_bridge.dart';
 import '../state/providers.dart';
 import 'chat_page.dart';
@@ -118,7 +119,7 @@ class _MainShellState extends ConsumerState<MainShell> {
     // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）。
     if (activeSession != null) {
       _chatInstance = ChatPage(
-        key: ValueKey('${activeSession.type.name}_${activeSession.id}'),
+        key: ValueKey(sessionKeyOf(activeSession.type, activeSession.id)),
         type: activeSession.type,
         sessionId: activeSession.id,
         name: session?.name ?? '',

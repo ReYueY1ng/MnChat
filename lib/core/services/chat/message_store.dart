@@ -11,14 +11,11 @@ import '../../utils/log.dart';
 /// 依赖经构造注入（db、当前账号 uin、好友/群会话表）。
 class MessageStore {
   MessageStore({
-    required AppDatabase? Function() getDb,
-    required int Function() getMyUin,
-    required Map<int, ChatSession> friendSessions,
-    required Map<int, ChatSession> groupSessions,
-  }) : _getDb = getDb,
-       _getMyUin = getMyUin,
-       _friendSessions = friendSessions,
-       _groupSessions = groupSessions;
+    required this._getDb,
+    required this._getMyUin,
+    required this._friendSessions,
+    required this._groupSessions,
+  });
 
   final AppDatabase? Function() _getDb;
   final int Function() _getMyUin;
@@ -27,8 +24,8 @@ class MessageStore {
 
   static const String _logTag = 'MessageStore';
 
-  /// 会话主键：`<type>_<id>`。
-  static String sessionKey(ChatSessionType type, int id) => '${type.name}_$id';
+  /// 会话主键：`<type>_<id>`。格式定义见 [sessionKeyOf]（models/session_key.dart）。
+  static String sessionKey(ChatSessionType type, int id) => sessionKeyOf(type, id);
 
   /// 持久化一条消息 + 更新会话行。
   void persistMessage(ChatSessionType type, int id, ChatMessage m) {

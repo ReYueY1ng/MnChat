@@ -64,6 +64,34 @@ bool reportIfFailed(
   return true;
 }
 
+/// 响应是否**明确**业务成功。
+///
+/// 与 [reportIfFailed] 同一组状态键、同一套数值口径（只认数字/数字字符串），
+/// 判定为：至少有一个状态键的值为 0，**且**没有任何状态键为非 0。
+///
+/// 为什么不再让调用方自己写 `resp['result'] ?? resp['ret']`：那种写法散在页面
+/// 里，字段顺序或口径一旦和 [reportIfFailed] 分叉，就会出现「UI 说成功、失败
+/// 角标同时在报」的相互矛盾提示（例：`{code=0, ret=9}` 旧写法取到 code=0 便
+/// 算成功，上报那侧却按 ret=9 记了失败）。
+///
+/// 刻意保守：状态键缺失、值是业务对象（`result` 直接放载荷）、或响应不是 Map
+/// 都返回 false，以免把「空表 / 解析失败」误当成功。
+bool responseOk(
+  Object? decoded, {
+  Set<String> statusKeys = const <String>{'code', 'ret', 'result'},
+}) {
+  if (decoded is! Map) return false;
+  var sawZero = false;
+  for (final key in statusKeys) {
+    final v = decoded[key];
+    final n = v is num ? v.toInt() : (v is String ? int.tryParse(v) : null);
+    if (n == null) continue;
+    if (n != 0) return false;
+    sawZero = true;
+  }
+  return sawZero;
+}
+
 /// 一次请求失败记录。
 @immutable
 class RequestFailure {

@@ -4,7 +4,12 @@ library;
 import 'package:drift/drift.dart';
 
 import '../models/messages.dart';
+import '../models/session_key.dart';
 import 'app_database.dart';
+
+/// [sessionKeyOf] 的唯一定义在 `models/session_key.dart`；本文件转出它，
+/// `import 'chat_mapper.dart'` 的调用方（如 chat/offline_cache.dart）无需改动。
+export '../models/session_key.dart' show sessionKeyOf;
 
 /// ChatMessage → ChatMessagesCompanion（插入用）。
 /// [sessionKey] 如 `friend_123` / `group_456`。
@@ -87,9 +92,6 @@ ChatSession chatSessionFromRecord(ChatSessionRecord r) {
         : null,
   );
 }
-
-/// 会话的存储 key。
-String sessionKeyOf(ChatSessionType type, int id) => '${type.name}_$id';
 
 String _sessionKeyOf(ChatSession s) => sessionKeyOf(s.type, s.id);
 

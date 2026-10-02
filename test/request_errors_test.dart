@@ -181,6 +181,41 @@ void main() {
       expect(f.label, 'x');
       expect(f.message, '');
     });
+
+    test('responseOk：有明确的 0 才算成功，任一状态键非 0 即不算成功', () {
+      expect(responseOk(const {'code': 0}), isTrue);
+      expect(responseOk(const {'result': 0}), isTrue);
+      expect(responseOk(const {'ret': '0'}), isTrue);
+
+      expect(responseOk(const {'code': 9}), isFalse);
+      // 旧写法 `resp['result'] ?? resp['ret']` 在这里会取到 code=0 而误判成功。
+      expect(responseOk(const {'code': 0, 'ret': 9}), isFalse);
+
+      // 刻意保守：状态键缺失 / 值是业务对象 / 非 Map 都不算成功。
+      expect(responseOk(const <String, Object?>{}), isFalse);
+      expect(responseOk(const {'result': {'list': <Object>[]}}), isFalse);
+      expect(responseOk(const <Object>[]), isFalse);
+      expect(responseOk(null), isFalse);
+    });
+
+    test('responseOk 与 reportIfFailed 不会互相矛盾', () {
+      for (final decoded in const <Object?>[
+        {'code': 0},
+        {'code': 9},
+        {'code': 0, 'ret': 9},
+        {'result': 2},
+        {'result': {'x': 1}},
+        <String, Object?>{},
+      ]) {
+        clearBus();
+        final failed = reportIfFailed('https://h/miniw/x', decoded);
+        expect(
+          failed && responseOk(decoded),
+          isFalse,
+          reason: '同一份响应不能既算成功又记失败: $decoded',
+        );
+      }
+    });
   });
 
   group('业务客户端上报', () {

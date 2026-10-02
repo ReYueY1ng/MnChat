@@ -8,13 +8,15 @@ import 'package:flutter_chat_core/flutter_chat_core.dart';
 
 import '../core/chat_emoji.dart' show decodeEmojiCodes;
 import '../core/models/messages.dart';
+import '../core/models/session_key.dart' show sessionKeyOf;
 import '../core/services/rich_media.dart' show RichMedia;
 
 /// 会话存储 key，格式 `'${type.name}_$id'`（`friend_123` / `group_456`）。
 ///
-/// 与 `lib/core/storage/chat_mapper.dart` 的 [sessionKeyOf] 格式完全一致
-/// （不复用它是为了避免把 drift 拖进这个纯映射模块）。
-String sessionKey(ChatSessionType type, int id) => '${type.name}_$id';
+/// 转发 [sessionKeyOf]：字符串格式只在 `core/models/session_key.dart` 定义一次。
+/// 以前这里手抄了一份（怕把 drift 拖进这个纯映射模块），但 session_key.dart
+/// 只依赖 `models/messages.dart`，没有 drift。
+String sessionKey(ChatSessionType type, int id) => sessionKeyOf(type, id);
 
 /// 生成确定性的、无冲突的消息 id。
 ///

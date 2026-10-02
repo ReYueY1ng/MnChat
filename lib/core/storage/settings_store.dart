@@ -7,6 +7,7 @@ library;
 import 'dart:convert';
 
 import '../crypto/credential_cipher.dart' show decryptPassword, encryptPassword;
+import '../models/session_key.dart' show sessionKeyFor;
 import 'app_database.dart' show AppDatabase;
 
 /// 设置项 key 常量。
@@ -52,7 +53,10 @@ class SettingsKeys {
   static const String closeToTray = 'close_to_tray'; // 关闭到托盘 '1'/'0'
 
   /// 会话设置 key（免打扰/置顶），形如 "friend_123" / "group_456"。
-  static String sessionKey(String type, int id) => '${type}_$id';
+  ///
+  /// 会话 key 格式唯一定义在 `models/session_key.dart`；这里转调 [sessionKeyFor]，
+  /// 因为设置表存的是类型名而不是 `ChatSessionType` 枚举。
+  static String sessionKey(String type, int id) => sessionKeyFor(type, id);
 }
 
 /// 自动登录凭据。
