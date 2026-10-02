@@ -3,12 +3,9 @@
 /// - [showSessionPlayerInfoPopup]：在头像附近弹出的浮动信息卡（等级 / 默契度 /
 ///   冒险家 / 称号 / 勋章 + 个人中心 / 置顶 / 赠送 / 更多），替代原先的全屏
 ///   底部弹窗；
-/// - 拉取结果放进程内缓存 [_playerInfoCache]（uin → 快照），重开同一玩家直接
-///   命中、不再请求；进行中的请求用 [_playerInfoPending] 合并。
-///
-/// 内容与 `player_info_sheet.dart` 的底部弹窗同源（同一批 ChatService 接口 +
-/// 同一套主页字段解析）；该文件的渲染与解析辅助均为私有且不在本次改动范围，
-/// 因此这里按浮窗布局重新实现，数据口径保持一致。
+/// - 内容片段与会话缓存复用 `player_info_common.dart`（与
+///   `player_info_sheet.dart` 的底部弹窗同源，不再各自实现解析）。
+///   [SessionPlayerInfo] 由此文件继续对外暴露。
 library;
 
 import 'dart:async' show unawaited;
@@ -16,95 +13,17 @@ import 'dart:async' show unawaited;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../core/models/medal_catalog.dart';
 import '../../core/models/messages.dart';
-import '../../core/services/partner.dart' show PartnerDirectory;
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
 import '../profile_page.dart';
 import '../theme/app_tokens.dart';
-import 'avatar_view.dart';
 import 'gift_picker.dart' show showGiftPicker;
+import 'player_info_common.dart';
 import 'player_info_sheet.dart' show showFriendMenu;
-import 'rich_text_view.dart';
 
-/// 玩家信息快照：浮窗展示所需的一次性拉取结果。
-class SessionPlayerInfo {
-  /// 平台等级（`platformLevel`；0 = 未知）。
-  final int level;
-
-  /// 个人主页数据（`userHomepage`：默契度 / 勋章 / 称号等）。
-  final Map<String, Object?>? home;
-
-  /// 冒险家评分（`otherPlayerScore`；null = 未知）。
-  final Map<String, Object?>? score;
-
-  /// 当前佩戴称号名（`titleName`；null = 未佩戴）。
-  final String? title;
-
-  const SessionPlayerInfo({
-    required this.level,
-    required this.home,
-    required this.score,
-    required this.title,
-  });
-
-  /// 拉取失败 / 无数据时的占位快照。
-  static const SessionPlayerInfo empty = SessionPlayerInfo(
-    level: 0,
-    home: null,
-    score: null,
-    title: null,
-  );
-}
-
-/// 玩家信息进程内缓存（uin → 快照）。
-///
-/// 重开同一玩家的浮窗时直接命中，不再发请求（需求：缓存 medals / 等级 /
-/// 称号等）。仅在进程内有效，随账号切换不清理（uin 全局唯一，无串号风险）。
-final Map<int, SessionPlayerInfo> _playerInfoCache = <int, SessionPlayerInfo>{};
-
-/// 进行中的拉取（uin → future）：同一玩家并发打开时复用同一请求。
-final Map<int, Future<SessionPlayerInfo>> _playerInfoPending =
-    <int, Future<SessionPlayerInfo>>{};
-
-/// 取玩家信息：命中缓存 → 复用进行中的请求 → 新请求。
-Future<SessionPlayerInfo> _playerInfoOf(WidgetRef ref, int uin) {
-  final cached = _playerInfoCache[uin];
-  if (cached != null) return Future<SessionPlayerInfo>.value(cached);
-  final pending = _playerInfoPending[uin];
-  if (pending != null) return pending;
-  final future = _fetchPlayerInfo(ref, uin);
-  _playerInfoPending[uin] = future;
-  return future;
-}
-
-/// 拉取玩家信息（等级 / 主页 / 冒险家 / 称号）并写入缓存。
-///
-/// 失败返回 [SessionPlayerInfo.empty] 且**不写缓存**，下次打开可重试。
-Future<SessionPlayerInfo> _fetchPlayerInfo(WidgetRef ref, int uin) async {
-  try {
-    final svc = ref.read(chatServiceProvider);
-    final level = await svc.platformLevel(uin);
-    final home = await svc.userHomepage(uin);
-    final score = await svc.otherPlayerScore(uin);
-    final tid = _useTitleId(home);
-    final title = tid > 0 ? await svc.titleName(tid) : null;
-    final info = SessionPlayerInfo(
-      level: level,
-      home: home,
-      score: score,
-      title: title,
-    );
-    _playerInfoCache[uin] = info;
-    return info;
-  } catch (_) {
-    return SessionPlayerInfo.empty;
-  } finally {
-    _playerInfoPending.remove(uin);
-  }
-}
+export 'player_info_common.dart' show SessionPlayerInfo;
 
 /// 在 [anchor]（头像的屏幕矩形）附近弹出玩家信息浮窗。
 ///
@@ -355,116 +274,19 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 头部：头像 + 昵称 + 迷你号
-            Row(
-              children: [
-                AvatarView(
-                  avatarUrl: widget.avatarUrl,
-                  name: widget.name,
-                  radius: 32,
-                  headType: widget.headType,
-                  headId: widget.headId,
-                  frameId: widget.headFrameId,
-                ),
-                const SizedBox(width: AppSpacing.lg),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      RichTextView(
-                        widget.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: AppSpacing.xs),
-                      Text(
-                        'Uin: ${widget.uin}',
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+            // 头部：头像 + 昵称 + 迷你号（与底部弹窗共用）
+            PlayerInfoHeader(
+              uin: widget.uin,
+              name: widget.name,
+              avatarUrl: widget.avatarUrl,
+              headType: widget.headType,
+              headId: widget.headId,
+              headFrameId: widget.headFrameId,
+              radius: 32,
             ),
             const SizedBox(height: AppSpacing.md),
             // 等级 + 默契度 + 冒险家 + 称号 + 勋章（命中缓存时不重新请求）
-            FutureBuilder<SessionPlayerInfo>(
-              future: _playerInfoOf(widget.ref, widget.uin),
-              builder: (context, snap) {
-                final info = snap.data ?? SessionPlayerInfo.empty;
-                final tacit = _tacitnumFor(widget.ref, widget.uin);
-                final adv = info.score == null
-                    ? '--'
-                    : '${info.score!['name'] ?? ''} ${info.score!['level'] ?? ''}'
-                          .trim();
-                final medals = _medalList(info.home);
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      spacing: AppSpacing.md,
-                      runSpacing: AppSpacing.xs,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        if (info.level > 0)
-                          _infoChip(
-                            theme,
-                            Icons.workspace_premium_outlined,
-                            'Lv${info.level}',
-                            color: theme.colorScheme.tertiary,
-                          ),
-                        _infoChip(
-                          theme,
-                          Icons.favorite_border,
-                          '默契度：$tacit',
-                          color: Colors.pinkAccent,
-                        ),
-                        _infoChip(
-                          theme,
-                          Icons.military_tech_outlined,
-                          '冒险家：$adv',
-                          color: theme.colorScheme.primary,
-                        ),
-                        _infoChip(
-                          theme,
-                          Icons.local_police_outlined,
-                          '称号：${info.title ?? '未佩戴'}',
-                          color: theme.colorScheme.tertiary,
-                        ),
-                      ],
-                    ),
-                    // 勋章行（最多 6 枚，图标 + 等级边框）
-                    if (medals.isNotEmpty) ...[
-                      const SizedBox(height: AppSpacing.sm),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: theme.colorScheme.secondaryContainer
-                              .withValues(alpha: 0.4),
-                          borderRadius: AppRadius.inputR,
-                        ),
-                        child: Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: [
-                            for (final m in medals.take(6))
-                              _medalBadge(theme, m.$1, m.$2),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ],
-                );
-              },
-            ),
+            PlayerInfoStats(ref: widget.ref, uin: widget.uin),
             const SizedBox(height: AppSpacing.lg),
             if (widget.showActions) ...[
               const Divider(height: 1),
@@ -475,19 +297,19 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: _isSelf
                     ? [
-                        _CircleAction(
+                        PlayerCircleAction(
                           icon: Icons.account_circle_outlined,
                           label: '个人主页',
                           onTap: _openHomePage,
                         ),
                       ]
                     : [
-                        _CircleAction(
+                        PlayerCircleAction(
                           icon: Icons.person_outline,
                           label: '个人中心',
                           onTap: _openHomePage,
                         ),
-                        _CircleAction(
+                        PlayerCircleAction(
                           icon: pinned
                               ? Icons.push_pin
                               : Icons.push_pin_outlined,
@@ -495,12 +317,12 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
                           highlighted: pinned,
                           onTap: () => unawaited(_togglePinned()),
                         ),
-                        _CircleAction(
+                        PlayerCircleAction(
                           icon: Icons.card_giftcard,
                           label: '赠送',
                           onTap: _gift,
                         ),
-                        _CircleAction(
+                        PlayerCircleAction(
                           icon: Icons.more_horiz,
                           label: '更多',
                           onTap: () => unawaited(_openMoreMenu()),
@@ -511,155 +333,6 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// 与指定好友的默契度。
-///
-/// 用**我自己的**拍档目录（`get_list` 对每个好友都会返回 `tacitnum`，
-/// 非拍档是 `lab == 0`），而不是对方主页的 `partner` 模块 —— 那是**他**的拍档，
-/// 不是我和他的默契度。
-int _tacitnumFor(WidgetRef ref, int uin) {
-  final directory =
-      ref.watch(partnerDirectoryProvider).asData?.value ??
-      PartnerDirectory.empty;
-  return directory.tacitOf(uin);
-}
-
-/// 从主页 `title` 模块取当前佩戴称号 id（`title.data.match_title.use_title.id`）。
-int _useTitleId(Map<String, Object?>? home) {
-  final title = home?['title'];
-  if (title is! Map) return 0;
-  final data = title['data'];
-  if (data is! Map) return 0;
-  final match = data['match_title'];
-  if (match is! Map) return 0;
-  final use = match['use_title'];
-  if (use is! Map) return 0;
-  final id = use['id'] ?? use['ID'];
-  if (id is num) return id.toInt();
-  return int.tryParse('$id') ?? 0;
-}
-
-/// 信息行内的小项：图标 + 文本。
-Widget _infoChip(ThemeData theme, IconData icon, String text, {Color? color}) {
-  return Row(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, size: 16, color: color ?? theme.colorScheme.primary),
-      const SizedBox(width: AppSpacing.xs),
-      Text(text, style: theme.textTheme.bodySmall),
-    ],
-  );
-}
-
-/// 从主页 `achieve` 模块取勋章列表（`achieve.data.medal_list` → [(id, level)]）。
-List<(int, int)> _medalList(Map<String, Object?>? home) {
-  final achieve = home?['achieve'];
-  if (achieve is! Map) return const [];
-  final data = achieve['data'];
-  if (data is! Map) return const [];
-  final list = data['medal_list'];
-  if (list is! List) return const [];
-  final out = <(int, int)>[];
-  for (final e in list) {
-    if (e is! Map) continue;
-    final m = e.cast<String, Object?>();
-    final id = m['id'];
-    final lv = m['level'];
-    final idv = id is num ? id.toInt() : int.tryParse('$id') ?? 0;
-    final lvv = lv is num ? lv.toInt() : int.tryParse('$lv') ?? 0;
-    if (idv > 0) out.add((idv, lvv));
-  }
-  return out;
-}
-
-/// 单枚勋章：普通勋章=图标+等级边框；isNew 勋章=按等级的徽章图标（40×40）。
-Widget _medalBadge(ThemeData theme, int id, int level) {
-  final lvlIcons = kMedalLevelIcons[id];
-  if (lvlIcons != null && lvlIcons.isNotEmpty) {
-    final idx = (level >= 1 && level <= lvlIcons.length) ? level - 1 : 0;
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Image.asset(
-        medalIconAsset(lvlIcons[idx]),
-        fit: BoxFit.contain,
-        errorBuilder: (_, _, _) => const SizedBox.shrink(),
-      ),
-    );
-  }
-  final icon = kMedalIconName[id];
-  final frame = (level >= 1 && level <= kMedalFrameByLevel.length)
-      ? kMedalFrameByLevel[level - 1]
-      : null;
-  return SizedBox(
-    width: 40,
-    height: 40,
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        if (icon != null)
-          Image.asset(
-            medalIconAsset(icon),
-            width: 30,
-            height: 30,
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
-          ),
-        if (frame != null)
-          Image.asset(
-            medalIconAsset(frame),
-            width: 40,
-            height: 40,
-            fit: BoxFit.contain,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
-          ),
-      ],
-    ),
-  );
-}
-
-/// 信息卡操作按钮：圆形图标 + 文字标签。
-class _CircleAction extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  /// 激活态（如已置顶）用主题色高亮。
-  final bool highlighted;
-
-  const _CircleAction({
-    required this.icon,
-    required this.label,
-    required this.onTap,
-    this.highlighted = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        IconButton.filledTonal(
-          onPressed: onTap,
-          tooltip: label,
-          style: IconButton.styleFrom(
-            shape: const CircleBorder(),
-            backgroundColor: highlighted
-                ? theme.colorScheme.primaryContainer
-                : null,
-            foregroundColor: highlighted
-                ? theme.colorScheme.onPrimaryContainer
-                : null,
-          ),
-          icon: Icon(icon),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(label, style: theme.textTheme.labelMedium),
-      ],
     );
   }
 }

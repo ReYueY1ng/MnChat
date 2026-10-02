@@ -137,9 +137,7 @@ Future<void> showSessionMenu(
     case _SessionMenuAction.pat:
       var ok = false;
       try {
-        final resp = await ref.read(chatServiceProvider).patFriend(uin);
-        final code = resp['result'] ?? resp['ret'];
-        ok = code is num && code == 0;
+        ok = await ref.read(chatServiceProvider).patFriend(uin);
       } catch (_) {
         ok = false;
       }
