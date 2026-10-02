@@ -43,13 +43,20 @@ bool reportIfFailed(
 }) {
   if (decoded is! Map) return false;
   int? code;
+  String? statusKey;
   for (final key in statusKeys) {
     final v = decoded[key];
     if (v is num) {
-      if (v != 0) code = v.toInt();
+      if (v != 0) {
+        code = v.toInt();
+        statusKey = key;
+      }
     } else if (v is String) {
       final n = int.tryParse(v);
-      if (n != null && n != 0) code = n;
+      if (n != null && n != 0) {
+        code = n;
+        statusKey = key;
+      }
     }
     if (code != null) break;
   }
@@ -59,6 +66,7 @@ bool reportIfFailed(
     label: label ?? labelFromUrl(url),
     endpoint: redactUrl(url),
     code: code,
+    statusKey: statusKey,
     message: '$msg',
   );
   return true;
@@ -104,6 +112,16 @@ class RequestFailure {
   /// 服务端业务码 / HTTP 状态码；传输异常为 null。
   final int? code;
 
+  /// 这个码是从响应的哪个字段读出来的：`code` / `ret` / `result`。
+  ///
+  /// 关键区别：`code`/`ret` 是**网关**的码（[describeRequestCode] 那张取自
+  /// `errorcode.lua` 的表就是它的）；而 `/server/friend` 这类服务返回的信封是
+  /// `{"result":N}`，`result` 是**服务自己的**业务码，同一个 2 在那里不代表
+  /// `UNKNOW_SERVICE`（实测：`query_friend_label_pool` 回 `{"result":2}`，而把
+  /// cmd 拼错的请求回的是**空 body**）。所以摘要必须把字段名写对，并只对网关
+  /// 码附上释义，否则会把「好友服务的业务错误」说成「服务未注册」。
+  final String? statusKey;
+
   /// 服务端 `msg` 或异常文本（可能为空）。
   final String message;
 
@@ -118,30 +136,50 @@ class RequestFailure {
     required this.endpoint,
     required this.at,
     this.code,
+    this.statusKey,
     this.message = '',
     this.count = 1,
   });
 
-  /// 一行摘要：`拍档列表（code=9 NO_ROUTE）`。
-  String get summary =>
-      '$label（${code == null ? '网络异常' : 'code=$code ${describeRequestCode(code!)}'}）';
+  /// 一行摘要：`拍档列表（code=9 NO_ROUTE）` / `好友标签池（result=2）`。
+  ///
+  /// `result` 不附释义：它不是网关码，用网关表解释会得出错误结论。
+  String get summary {
+    if (code == null) return '$label（网络异常）';
+    final key = statusKey ?? 'code';
+    final suffix = key == 'result' ? '' : ' ${describeRequestCode(code!)}';
+    return '$label（$key=$code$suffix）';
+  }
 
   RequestFailure copyWith({DateTime? at, int? count}) => RequestFailure(
     label: label,
     endpoint: endpoint,
     code: code,
+    statusKey: statusKey,
     message: message,
     at: at ?? this.at,
     count: count ?? this.count,
   );
 
-  /// 视作同一条失败：同标签同端点同码。
+  /// 视作同一条失败：同标签同端点同字段同码。
+  ///
+  /// `statusKey` 也算进 key：`code=2`（网关 UNKNOW_SERVICE）与 `result=2`
+  /// （好友服务自己的业务码）是两回事，不该合并成一条。
   bool sameAs(RequestFailure other) =>
-      label == other.label && endpoint == other.endpoint && code == other.code;
+      label == other.label &&
+      endpoint == other.endpoint &&
+      code == other.code &&
+      statusKey == other.statusKey;
 }
 
 /// 业务码 → 人话。取自反编译 `luascript/errorcode.lua` 与线上实测，
 /// 未收录的码原样返回 `#N`。
+///
+/// **只适用于网关码**（响应里的 `code` / `ret`）。`/server/friend` 这类服务
+/// 返回 `{"result":N}`，那是服务自己的码表，用这张表解释会得出错误结论
+/// （实测：`query_friend_label_pool` 回 `{"result":2}`，而拼错的 cmd 回空 body；
+/// 这里的 2 不是 `UNKNOW_SERVICE`）。[RequestFailure.summary] 因此对 `result`
+/// 不附释义。
 String describeRequestCode(int code) {
   switch (code) {
     case 1:
@@ -191,10 +229,14 @@ class RequestErrorBus {
   Stream<RequestFailure> get stream => _events.stream;
 
   /// 上报一次失败。[endpoint] 请传 [redactUrl] 处理过的地址。
+  ///
+  /// [statusKey] 是读出该码的字段名（`code`/`ret`/`result`），影响摘要措辞与
+  /// 去重键：`result` 属于服务自己的码表，不能被当成网关的 `UNKNOW_SERVICE`。
   void report({
     required String label,
     required String endpoint,
     int? code,
+    String? statusKey,
     String message = '',
   }) {
     final now = DateTime.now();
@@ -202,6 +244,7 @@ class RequestErrorBus {
       label: label,
       endpoint: endpoint,
       code: code,
+      statusKey: statusKey,
       message: message,
       at: now,
     );

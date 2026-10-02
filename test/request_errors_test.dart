@@ -182,6 +182,28 @@ void main() {
       expect(f.message, '');
     });
 
+    test('摘要写对字段名：code 附网关释义，result 不附（那是对端自己的码表）', () {
+      clearBus();
+      final bus = RequestErrorBus.instance;
+
+      reportIfFailed('https://h/miniw/x?act=a', const {'code': 2});
+      reportIfFailed('https://h/server/friend?cmd=query_friend_label_pool',
+          const {'result': 2});
+
+      final gateway = bus.failures.value.firstWhere((e) => e.label == 'x.a');
+      final service = bus.failures.value
+          .firstWhere((e) => e.label == 'friend.query_friend_label_pool');
+
+      expect(gateway.summary, contains('code=2'));
+      expect(gateway.summary, contains('UNKNOW_SERVICE'));
+      // 实测：/server/friend 回的是 {"result":2}，而拼错的 cmd 回空 body ——
+      // 这里的 2 是好友服务自己的业务码，不能读成 UNKNOW_SERVICE。
+      expect(service.summary, contains('result=2'));
+      expect(service.summary, isNot(contains('UNKNOW_SERVICE')));
+      // 同一个数字但字段不同 → 两条独立记录（去重键含字段名）。
+      expect(bus.failures.value, hasLength(2));
+    });
+
     test('responseOk：有明确的 0 才算成功，任一状态键非 0 即不算成功', () {
       expect(responseOk(const {'code': 0}), isTrue);
       expect(responseOk(const {'result': 0}), isTrue);

@@ -14,6 +14,7 @@ library;
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/services/request_errors.dart';
@@ -28,6 +29,70 @@ Future<void> showRequestErrorsDialog(
   return showDialog<void>(
     context: context,
     builder: (context) => _RequestErrorsDialog(bus: bus),
+  );
+}
+
+/// 单条失败的完整信息：完整 URL + 可复制 + 可选中。
+///
+/// 列表行里的地址按行截断，而定位一个失败请求全靠查询串后半段
+/// （`cmd` / 业务参数 / `ver`），截断了等于没信息。
+Future<void> showRequestFailureDetail(
+  BuildContext context,
+  RequestFailure f,
+) {
+  return showDialog<void>(
+    context: context,
+    builder: (context) {
+      final theme = Theme.of(context);
+      return AlertDialog(
+        title: Text(f.summary),
+        content: SizedBox(
+          width: 560,
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SelectableText(
+                  f.endpoint.isEmpty ? '(无请求地址)' : f.endpoint,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                  ),
+                ),
+                if (f.message.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  SelectableText(f.message, style: theme.textTheme.bodySmall),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  '${f.label} · ${f.code == null ? '无业务码' : 'code=${f.code}'}'
+                  '${f.count > 1 ? ' · 出现 ${f.count} 次' : ''} · ${f.at}',
+                  style: theme.textTheme.labelSmall,
+                ),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: f.endpoint.isEmpty
+                ? null
+                : () {
+                    Clipboard.setData(ClipboardData(text: f.endpoint));
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      const SnackBar(content: Text('已复制请求地址')),
+                    );
+                  },
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('复制地址'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      );
+    },
   );
 }
 
@@ -104,6 +169,12 @@ class _RequestErrorListenerState extends ConsumerState<RequestErrorListener> {
             overflow: TextOverflow.ellipsis,
           ),
           duration: const Duration(seconds: 6),
+          // 浮起 + 抬高底边：本监听器包在 MainShell 的 Scaffold **外面**，
+          // 应用级 ScaffoldMessenger 并不知道里层 Scaffold 的 FAB，默认的
+          // fixed 行为会把 toast 直接压在右下角「N 个请求失败」角标上
+          // （实测那段时间角标点不动）。76 = FAB 底距 16 + 高度 48 + 间距 12。
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.only(left: 16, right: 16, bottom: 76),
           action: SnackBarAction(
             label: '详情',
             onPressed: () =>
@@ -128,51 +199,61 @@ class _RequestErrorsDialog extends StatelessWidget {
     return AlertDialog(
       title: const Text('请求失败记录'),
       content: SizedBox(
-        width: 520,
-        height: 360,
-        child: ValueListenableBuilder<List<RequestFailure>>(
-          valueListenable: bus.failures,
-          builder: (context, failures, _) {
-            if (failures.isEmpty) {
-              return const Center(child: Text('暂无失败记录'));
-            }
-            return ListView.separated(
-              itemCount: failures.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, i) {
-                final f = failures[i];
-                return ListTile(
-                  dense: true,
-                  title: Text(
-                    f.count > 1 ? '${f.summary} ×${f.count}' : f.summary,
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (f.endpoint.isNotEmpty)
-                        Text(
-                          f.endpoint,
-                          style: theme.textTheme.bodySmall,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      if (f.message.isNotEmpty)
-                        Text(
-                          f.message,
-                          style: theme.textTheme.bodySmall,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      Text(
-                        _formatTime(f.at),
-                        style: theme.textTheme.labelSmall,
-                      ),
-                    ],
-                  ),
+        width: 560,
+        // 高度随内容收缩（shrinkWrap + maxHeight）：只有一条记录时不再撑出
+        // 一大片空白。
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 360),
+          child: ValueListenableBuilder<List<RequestFailure>>(
+            valueListenable: bus.failures,
+            builder: (context, failures, _) {
+              if (failures.isEmpty) {
+                return const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 24),
+                  child: Center(child: Text('暂无失败记录')),
                 );
-              },
-            );
-          },
+              }
+              return ListView.separated(
+                shrinkWrap: true,
+                itemCount: failures.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, i) {
+                  final f = failures[i];
+                  return ListTile(
+                    dense: true,
+                    onTap: () => showRequestFailureDetail(context, f),
+                    title: Text(
+                      f.count > 1 ? '${f.summary} ×${f.count}' : f.summary,
+                    ),
+                    trailing: const Icon(Icons.chevron_right, size: 18),
+                    subtitle: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        if (f.endpoint.isNotEmpty)
+                          Text(
+                            f.endpoint,
+                            style: theme.textTheme.bodySmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        if (f.message.isNotEmpty)
+                          Text(
+                            f.message,
+                            style: theme.textTheme.bodySmall,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        Text(
+                          _formatTime(f.at),
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              );
+            },
+          ),
         ),
       ),
       actions: [
