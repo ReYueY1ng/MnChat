@@ -10,13 +10,28 @@ import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
 import '../protocol/lua_table.dart';
-import 'request_errors.dart' show reportIfFailed;
+import '../utils/log.dart' show redactUrl;
+import 'request_errors.dart' show RequestErrorBus, labelFromUrl, reportIfFailed;
 
-/// 网关响应解码：先 JSON 后 LuaTable，异常时返回 null 结构。
-Object? decodeGatewayResponse(String text) {
+/// 网关响应解码：先 JSON 后 LuaTable；解析失败时上报并把空表返回给调用方。
+///
+/// 与 [decodeHttpResponse] 只差一点：**解析失败不再静默**。
+///
+/// `decodeHttpResponse` 会在响应体既不是 JSON 也不是 LuaTable 时抛
+/// [LuaTableDecodeError]，以前这里把它吞成 `{}` —— 调用方只看到「空数据」，
+/// 分不清是「服务端本来没数据」还是「响应解析挂了」。现在连同 [url] 一起报到
+/// [RequestErrorBus]，UI 的失败角标里能看到是哪个请求、什么原因。
+///
+/// 空响应体仍然按 `{}` 返回且**不算失败**：变更类接口成功时就返回 200 无 body。
+Object? decodeGatewayResponse(String text, {String? url}) {
   try {
     return decodeHttpResponse(text);
-  } on LuaTableDecodeError {
+  } on LuaTableDecodeError catch (e) {
+    RequestErrorBus.instance.report(
+      label: url == null ? '响应解析' : labelFromUrl(url),
+      endpoint: url == null ? '' : redactUrl(url),
+      message: '响应既非 JSON 也非 LuaTable：${e.message}',
+    );
     return <String, Object?>{};
   }
 }
@@ -137,24 +152,31 @@ class GatewayClient {
 
   /// GET 并解码响应（JSON → LuaTable 兼容）。
   ///
-  /// 业务码非 0（`code`/`ret`/`result`）会上报给 UI 的请求失败提示。
+  /// 业务码非 0（`code`/`ret`/`result`）与响应体解析失败都会上报给 UI 的失败提示。
   Future<Map<String, Object?>> get(String url,
       {Map<String, String>? query}) async {
     final resp = await _dio.get(url, queryParameters: query);
-    final data = decodeGatewayResponse(resp.data as String? ?? '');
+    final data = _decodeBody(resp.data, url);
     reportIfFailed(url, data);
     if (data is Map) return data.cast<String, Object?>();
     return <String, Object?>{};
   }
 
-  /// POST 并解码响应。业务码非 0 同样上报。
+  /// POST 并解码响应。业务码非 0 与解析失败同样上报。
   Future<Map<String, Object?>> post(String url,
       {Object? data, String? contentType}) async {
     final resp = await _dio.post(url,
         data: data, options: Options(contentType: contentType));
-    final decoded = decodeGatewayResponse(resp.data as String? ?? '');
+    final decoded = _decodeBody(resp.data, url);
     reportIfFailed(url, decoded);
     if (decoded is Map) return decoded.cast<String, Object?>();
     return <String, Object?>{};
   }
+
+  /// 解响应体。dio 的默认 `ResponseType.json` 会把 JSON content-type 的响应
+  /// 直接解成 Map/List，其余情况留 String —— 原来这里写死
+  /// `resp.data as String?`，服务端一旦回 JSON content-type 就是未捕获的
+  /// CastError。与其余 client 的 `raw is String ? ... : raw` 保持一致。
+  Object? _decodeBody(Object? data, String url) =>
+      data is String ? decodeGatewayResponse(data, url: url) : data;
 }
