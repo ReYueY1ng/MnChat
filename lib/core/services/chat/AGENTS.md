@@ -26,5 +26,5 @@ WebSocket side of chat: push dispatch, WS lifecycle, reconnect backoff, message 
 ## ANTI-PATTERNS
 - Don't reintroduce side effects into reconnect_policy.dart or online_notify.dart — their tests depend on determinism.
 - profile_cache and group_name_cache are in-memory per-account only; do not persist them into Drift.
-- `sessionKeyOf` is defined once in storage/chat_mapper.dart but its string format (`${type.name}_$id`) is re-implemented in `lib/chat/message_adapter.dart`. Change both together — there is no import and no compile-time link.
+- `sessionKeyOf` lives in `../../models/session_key.dart`; `message_store.dart` only forwards to it. Never re-implement the `'${type.name}_$id'` format here — there is exactly one definition and no copy to keep in sync.
 - push_dispatcher.dart (441 LOC) is the second hotspot after chat_service.dart; route new push types through it rather than adding parallel dispatch.

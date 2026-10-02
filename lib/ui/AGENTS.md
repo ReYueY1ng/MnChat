@@ -10,9 +10,9 @@ App UI layer: `MainShell` is the entry widget imported by `main.dart`, plus one 
 |------|----------|
 | Entry shell, 3 tabs (会话/好友/动态), responsive rail vs bar | `home_shell.dart` (`MainShell`) |
 | Chat screen | `chat_page.dart` (1439 LOC) |
-| Own / other player profile | `profile_page.dart` (2186 LOC, largest), `player_home_page.dart` (delegate, 23 LOC) |
+| Own / other player profile | `profile_page.dart` (450 LOC library + 4 `part` files), `player_home_page.dart` (delegate, 23 LOC) |
 | Session list + sort | `session_list_page.dart` |
-| Friends / family / partner social graph | `friends_page.dart` (1054), `family_page.dart`, `partner_page.dart` |
+| Friends / family / partner social graph | `friends_page.dart` (1125), `family_page.dart`, `partner_page.dart` |
 | Mail | `mail_page.dart` (1296; also owns `MailDetailPage`) |
 | Dynamics feed | `dynamics_page.dart`, `dynamics_detail_page.dart` (938), `publish_dynamics_page.dart` |
 | Settings incl. theme + keep-alive toggles | `settings_page.dart`, `theme_settings_page.dart`, `message_settings_page.dart` |
@@ -21,8 +21,9 @@ App UI layer: `MainShell` is the entry widget imported by `main.dart`, plus one 
 
 ## CONVENTIONS
 - One screen per file with `_page.dart` suffix; one public `XxxPage` widget per file; private helper widgets are `_PascalCase` in the same file.
+- When a page outgrows ~600 lines, split it with `part` / `part of` — the library and its public symbols (including test-locator keys and shared tiles like `HomePartnerTile`) stay byte-identical, so no importer changes. `profile_page.dart` = `profile_page_state_base/state_actions/widgets/widgets_compact.dart`; the same pattern is used for `widgets/avatar_edit_dialog.dart`.
 - Opening/closing a chat never happens by navigation — mutate `activeSessionProvider.notifier` (`open` / `close`) and let `MainShell` react.
-- Chat state is preserved by `MainShell._chatInstance`, keyed `ValueKey('type_id')`; `IndexedStack` swaps list vs chat on narrow widths.
+- Chat state is preserved by `MainShell._chatInstance`, keyed `ValueKey(sessionKeyOf(type, id))` (format defined in `core/models/session_key.dart`); `IndexedStack` swaps list vs chat on narrow widths.
 - Responsive checks come from `theme/app_tokens.dart` (`isCompactWidth`, `adaptiveDensity`), not raw `MediaQuery` arithmetic.
 - Clamp content width with `AppSizes.narrowContent` (760) for single-column settings/detail/profile pages and `AppSizes.listContent` (1000) for list pages; never hard-code widths.
 

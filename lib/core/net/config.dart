@@ -8,8 +8,13 @@ const String kApiId = '110';
 
 /// 客户端版本字符串（`url_addParams` 的 `ver`）。
 ///
-/// 必须是服务端当前版本：`miniw/bestpartner` 用 1.58.0 会直接回 `code=9`，
-/// 1.59.0 才下发数据（2026-10-01 真实账号实测；其余接口两个版本行为一致）。
+/// 取值对齐当前游戏客户端的 `ver` 即可。
+///
+/// **不要再把它当成接口门禁。** 曾据单次观察写下「`miniw/bestpartner` 用
+/// 1.58.0 必回 `code=9`、1.59.0 才下发数据」，该结论已撤回：`code=9`
+/// (`NO_ROUTE`) / `code=23` (`WAITTING`) 是**按账号申请队列**的瞬时失败，
+/// 任何版本、任何参数集单打一次都可能命中，带间隔重复才能看出真实比例。
+/// 把它当版本要求会导致「换回旧版本号就以为接口坏了」这类误判。
 const String kClientVersionStr = '1.59.0';
 const String kUa = 'Rainbow/1.0 (Windows_RT; U; Linux 6.2; zh)';
 

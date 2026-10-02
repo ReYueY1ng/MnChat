@@ -77,8 +77,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   FamilyInfo? _findMyFamily(Map<String, Object?> resp) {
     if (FamilyInfo.fromJson(resp) case final f?) return f;
     final family = resp['family'];
-    if (family is Map)
+    if (family is Map) {
       return FamilyInfo.fromJson(family.cast<String, Object?>());
+    }
     final list = resp['families'] ?? resp['data'];
     if (list is List) {
       for (final e in list) {
@@ -135,9 +136,10 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       await client.quit(family.familyId);
       if (mounted) _load();
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('退出失败: $e')));
+      }
     } finally {
       if (mounted) setState(() => _busy = false);
     }

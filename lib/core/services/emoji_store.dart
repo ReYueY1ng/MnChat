@@ -53,14 +53,11 @@ class EmojiPackView {
 /// 表情仓库（进程内缓存包列表）。
 class EmojiStore {
   EmojiStore({
-    required EmojiClient client,
+    required this._client,
     Dio? dio,
     String? baseUrl,
     String? cacheRoot,
-  })  :
-        // ignore: prefer_initializing_formals
-        _client = client,
-        _dio = dio ?? createDio(),
+  })  : _dio = dio ?? createDio(),
         _baseUrl = baseUrl ?? kDefaultBase,
         _cacheRootOverride = cacheRoot;
 

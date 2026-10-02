@@ -17,7 +17,7 @@ Drift (SQLite) database v9 + settings KV store + model-to-row mappers.
 - **Never hand-edit app_database.g.dart.** It is drift codegen output committed to the repo; regenerate with `fvm dart run build_runner build` and commit both `.dart` and `.g.dart` together.
 - The DB file is native-SQLite, not path_provider JSON — settings were deliberately migrated to a Drift key-value table for reliability.
 - Table classes are declared in app_database.dart; the generated accessors (`chatMessages`, `chatSessions`, `friends`, `settings`) live in app_database.g.dart.
-- `sessionKeyOf(type, id)` = `'${type.name}_$id'`. It is re-implemented (string format, not import) in `lib/chat/message_adapter.dart` — keep them in lockstep by hand.
+- `sessionKeyOf(type, id)` = `'${type.name}_$id'`, defined once in `../models/session_key.dart` and re-exported from chat_mapper.dart — import it, never re-copy the format string.
 - Read-path sanitization over migration: `friendDisplayName` fixes stored garbage on read — "不修库、不加迁移".
 - `ChatSessionRecord` and `ChatMessageRecord` data classes are named via `@DataClassName` on the Table classes in app_database.dart.
 - `SettingsStore` wraps the same `AppDatabase` instance (settings table); do not open a second handle for key-value data.

@@ -1,6 +1,6 @@
 # lib/core/models
 
-**Score: 12** — 10 files / 3,313 LOC, 27 external importers. `messages.dart` (595 LOC) alone is referenced ~75 times — the widest-imported file in scope.
+**Score: 12** — 11 files / 3,341 LOC, 27 external importers. `messages.dart` (595 LOC) alone is referenced ~75 times — the widest-imported file in scope.
 
 ## OVERVIEW
 Data classes and lenient parsers for server payloads. No network, no persistence — shape-and-parse only.
@@ -15,6 +15,7 @@ Data classes and lenient parsers for server payloads. No network, no persistence
 | Head frames | head_frame_catalog.dart (435), animated_frames.dart |
 | Medals / gifts | medal_catalog.dart, gift_catalog.dart — `parseGiftCatalog` |
 | Nickname & rich text | nickname.dart — `plainNickname`, `hasRichMarkup` |
+| Session key format | session_key.dart — `sessionKeyOf` / `sessionKeyFor`；全仓唯一定义，其它位置一律转调 |
 | Friend tags | friend_tag.dart — `FriendTag`, `encodeFriendLabel`, `decodeFriendLabel` |
 
 ## CONVENTIONS
