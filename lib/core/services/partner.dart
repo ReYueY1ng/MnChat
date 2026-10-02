@@ -2,7 +2,8 @@
 ///
 /// 覆盖好友面板所需的只读数据与写操作：
 ///   - 平台等级批量：`miniw/upgrade?act=get_level_info_batch`
-///   - 拍档列表：`miniw/bestpartner?act=get_list`
+///   - **拍档列表（含默契度）**：`miniw/bestpartner?act=get_list`（s7 包裹，
+///     见 [bestpartnerUrl]；响应里非拍档好友也在）
 ///   - 拍档槽位：`miniw/bestpartner?act=get_bestpartner_data`
 ///   - 红点：`miniw/bestpartner?act=get_red_dot_info`
 ///   - 大会员（本人）：`miniw/business?act=vip_get_data`
@@ -19,13 +20,19 @@
 /// 进度条（见 [RelationProgress]），绝不硬编码阈值。
 library;
 
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
-import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
+import '../crypto/md5_sign.dart' show md5Sign, md5Token;
+import '../crypto/s7_sign.dart' show encodeS7Url;
+import 'gateway.dart' show buildMiniwParamMd5Url;
 import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
-import '../protocol/lua_table.dart' show decodeHttpResponse;
+import '../protocol/lua_table.dart'
+    show decodeHttpResponse, LuaTableDecodeError;
+import 'request_errors.dart' show RequestErrorBus;
 import '../utils/log.dart';
 import 'config_text_cache.dart';
 import 'title_config.dart' show parseConfigIndex;
@@ -119,7 +126,16 @@ abstract final class PartnerLab {
     100: '最佳拍档',
   };
 
-  static String name(int lab) => names[lab] ?? '拍档';
+  /// `lab == 0` 不是拍档：`get_list` 会给**每个好友**都下发一条带 `tacitnum`
+  /// 的记录，没建立关系的 `lab` 就是 0（只有默契值），不能叫「拍档」。
+  static const String noRelation = '未结成拍档';
+
+  static String name(int lab) =>
+      lab <= 0 ? noRelation : (names[lab] ?? '拍档');
+
+  /// 是否已建立拍档关系（`lab > 0`）。UI 判「有拍档」一律用这个，
+  /// 不要用「在不在列表里」。
+  static bool isPartnerLab(int lab) => lab > 0;
 }
 
 /// 一条拍档关系（`get_list` 响应项）。
@@ -191,15 +207,32 @@ class PartnerInfo {
   int daysAt(int now) => daysSince(createtime, now);
 
   /// 解析单条；`bestUin` 缺失/非正 → null。
+  ///
+  /// 字段名做多写法兼容：服务端在不同接口/版本里会给 `bestUin`/`best_uin`/
+  /// `bestuin`，默契度可能是 `tacitnum`/`tacitNum`/`tacit_num` —— 少兼容一种
+  /// 就会静默变成 0（表现就是"默契度只显示 0"）。
   static PartnerInfo? fromItem(Object? item) {
     if (item is! Map) return null;
     final m = item.cast<String, Object?>();
-    final bestUin = _toInt(m['bestUin'] ?? m['best_uin'] ?? m['uin']);
+    final bestUin = _toInt(
+      m['bestUin'] ??
+          m['best_uin'] ??
+          m['bestuin'] ??
+          m['BestUin'] ??
+          m['uin'] ??
+          m['Uin'],
+    );
     if (bestUin <= 0) return null;
     return PartnerInfo(
       bestUin: bestUin,
-      lab: _toInt(m['lab']),
-      tacitnum: _toInt(m['tacitnum']),
+      lab: _toInt(m['lab'] ?? m['Lab']),
+      tacitnum: _toInt(
+        m['tacitnum'] ??
+            m['tacitNum'] ??
+            m['tacit_num'] ??
+            m['TacitNum'] ??
+            m['Tacitnum'],
+      ),
       createtime: _toInt(m['createtime']),
       titleId: _toInt(m['title_id'] ?? m['titleId']),
       applyUin: _toInt(m['applyuin'] ?? m['applyUin']),
@@ -215,10 +248,17 @@ class PartnerInfo {
   }
 
   /// 解析列表（`data`）；非 List / 脏条目只跳过。
+  ///
+  /// 兼容 `data` 直接是数组，或包一层 `{list|partner_list|data: [...]}`。
   static List<PartnerInfo> parseList(Object? data) {
-    if (data is! List) return const <PartnerInfo>[];
+    var list = data;
+    if (list is Map) {
+      final m = list.cast<String, Object?>();
+      list = m['list'] ?? m['partner_list'] ?? m['data'];
+    }
+    if (list is! List) return const <PartnerInfo>[];
     final out = <PartnerInfo>[];
-    for (final e in data) {
+    for (final e in list) {
       final p = fromItem(e);
       if (p != null) out.add(p);
     }
@@ -309,6 +349,66 @@ class PartnerDirectory {
   }
 }
 
+/// `miniw/bestpartner` 的私有 key（`bestpartnerserver.lua:16`）。
+const String kBestpartnerKey = 'ad0fd4743357398df92dc58e9c56937e';
+
+/// `miniw/bestpartner` 的请求 URL —— 与游戏客户端 `ParamEncode`
+/// （`bestpartnerserver.lua:14-37`）一致：`extdata` + `auth` 自定义签名，
+/// 再按 `http.lua` 的全局参数补齐 `uin/ver/apiid/lang/country`，最后做 s7 包裹。
+///
+/// ```text
+/// extdata = base64(JSON(reqParams))
+/// auth1   = md5("$time$s2$uin")
+/// auth    = md5(auth1 + act + extdata + privateKey)
+/// url     = <base>/miniw/bestpartner?s7=<mybase64(query&s7e=1)>&s7t=<...>
+/// ```
+///
+/// 几点实测（2026-10-01 真实账号）：
+/// - 形状必须和游戏一致：**base 保留尾斜杠**（路径形如 `//miniw/bestpartner`，
+///   游戏 `g_http_root` 自带 `/`）、**s7 包裹**、**全局参数齐全**。
+///   缺全局参数时服务端回 `code=2`（UNKNOW_SERVICE）。
+/// - `code=9`（NO_ROUTE）/ `code=23`（WAITTING）**不是形状或版本问题**：同一
+///   请求隔 ~2s 重发就好，连发时第一条成功、第二条失败——网关排队/限流。
+///   所以调用侧要做单飞缓存 + 退避重试（见 [PartnerClient.getPartnerList]）。
+/// - 签名用的 `s2`/`s2t` 必须是 WS 心跳那一对（login_v3 的 sign 会 `auth fail`）。
+///
+/// 纯函数，便于单测。
+String bestpartnerUrl({
+  required String base,
+  required String act,
+  required Map<String, Object?> reqParams,
+  required int time,
+  required int uin,
+  required String s2,
+  required String s2t,
+  String ver = kClientVersionStr,
+  String apiId = kApiId,
+  String lang = '0',
+  String country = 'CN',
+}) {
+  final root = base.endsWith('/') ? base : '$base/';
+  final extdata = base64Encode(utf8.encode(jsonEncode(reqParams)));
+  final auth1 = md5Token(time, s2, uin);
+  final auth = md5Sign([auth1, act, extdata, kBestpartnerKey]);
+  final query = 'extdata=$extdata&auth=$auth&act=$act&time=$time&s2t=$s2t'
+      '&uin=$uin&ver=$ver&apiid=$apiId&lang=$lang&country=$country';
+  return encodeS7Url('$root/miniw/bestpartner?$query');
+}
+
+/// bestpartner 系列的退避重试时间表（网关排队时用；测试可注入空表）。
+///
+/// 实测：连发两条同样请求，第一条 `code=0`、第二条 `code=9`（NO_ROUTE）；
+/// 间隔 ~2s 重发就恢复，所以按 0.7s → 1.5s → 3s 退避，共最多 4 次。
+const List<Duration> kBestpartnerRetryBackoff = <Duration>[
+  Duration(milliseconds: 700),
+  Duration(milliseconds: 1500),
+  Duration(milliseconds: 3000),
+];
+
+/// 网关「排队中」类响应码：重发可恢复（`errorcode.lua`：8 DEAD_NODE /
+/// 9 NO_ROUTE / 10 NO_CANDIDATE / 23 WAITTING）。
+const Set<int> kPartnerTransientCodes = <int>{8, 9, 10, 23};
+
 /// 拍档 / 等级 / 大会员客户端。
 class PartnerClient {
   final int uin;
@@ -317,12 +417,21 @@ class PartnerClient {
   final Dio _dio;
   final String baseUrl;
 
+  /// 网关排队（`code=9` 等）时的退避重试时间表；测试可传空表关掉等待。
+  final List<Duration> retryBackoff;
+
+  /// 本人拍档列表缓存时长：同账号短时间内重复拉取（多个 provider 同时要）
+  /// 直接复用，避开网关的「连发第二条必失败」。
+  final Duration listCacheTtl;
+
   PartnerClient({
     required this.uin,
     required this.s2,
     required this.s2t,
     Dio? dio,
     String? baseUrl,
+    this.retryBackoff = kBestpartnerRetryBackoff,
+    this.listCacheTtl = const Duration(seconds: 5),
   }) : _dio = dio ?? createDio(),
        baseUrl =
            baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
@@ -333,33 +442,21 @@ class PartnerClient {
     String act, [
     Map<String, String> params = const {},
   ]) {
-    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
-    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    final all = <String, String>{
-      'act': act,
-      'uin': '$uin',
-      'apiid': kApiId,
-      'ver': kClientVersionStr,
-      'country': 'CN',
-      'lang': '0',
-      ...params,
-    };
-    final md5 = httpGetParamMd5(
-      all,
-      timeVal: now,
+    // 复用 /miniw/* 的通用构造器（`buildMiniwParamMd5Url`）：它会把
+    // uin/ver/apiid/lang/country/server_ts 一起放进签名与 query。
+    //
+    // 签名用的 s2/s2t 必须是 **WS 心跳/网关** 下发的那一对：login_v3 返回的
+    // sign 只够 `/server/*` 用，拿它打 `/miniw/*` 会回 `auth fail` / `参数错误`
+    // （2026-10 实测；[ChatService.login] 已用 `WsConnection.fetchS2` 换签后再
+    // 构造这些客户端）。
+    return buildMiniwParamMd5Url(
+      baseUrl: baseUrl,
+      path: path.startsWith('/') ? path : '/$path',
+      uin: uin,
       s2: s2,
       s2t: s2t,
-      key: httpGetParamKey,
+      params: {'act': act, ...params},
     );
-    final parts = <String>[
-      ...all.entries.map(
-        (e) => '${e.key}=${Uri.encodeQueryComponent(e.value)}',
-      ),
-      'time=$now',
-      's2t=$s2t',
-      'encrypt_ver=3',
-    ];
-    return '$base/$path?${parts.join('&')}&md5=$md5';
   }
 
   Future<Map<String, Object?>> _get(String url) async {
@@ -367,9 +464,21 @@ class PartnerClient {
     final resp = await _dio.get(url);
     final raw = resp.data;
     log.debug('RAW: $raw', tag: _logTag);
-    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
-    if (decoded is Map) return decoded.cast<String, Object?>();
-    return <String, Object?>{};
+    if (raw is! String) {
+      return raw is Map
+          ? raw.cast<String, Object?>()
+          : const <String, Object?>{};
+    }
+    // 脏响应（非 Lua/JSON 表）按失败处理，与本模块「解析器不抛异常」的约定一致。
+    try {
+      final decoded = decodeHttpResponse(raw);
+      return decoded is Map
+          ? decoded.cast<String, Object?>()
+          : const <String, Object?>{};
+    } on LuaTableDecodeError catch (e) {
+      log.warn('响应解析失败：$e', tag: _logTag);
+      return const <String, Object?>{};
+    }
   }
 
   /// 配置表 base（去掉尾部 `/`），与 [TitleConfigClient] 同源。
@@ -401,15 +510,22 @@ class PartnerClient {
   Future<List<(int level, int intimacyValue)>> getPartnerLevels() async {
     final cached = _levelCache;
     if (cached != null) return cached;
+    final cfgUrl = '${_cfgBase()}/miniw/ma/configIndex.lua';
     try {
-      final index = parseConfigIndex(
-        await _getText('${_cfgBase()}/miniw/ma/configIndex.lua'),
-      );
+      final index = parseConfigIndex(await _getText(cfgUrl));
       final md5 = index['FriendSystem'];
-      if (md5 == null) return const <(int, int)>[];
+      if (md5 == null) {
+        _reportIfFailed('关系等级配置', cfgUrl, const <String, Object?>{'code': 1});
+        return const <(int, int)>[];
+      }
       final cfg = await _getText('${_cfgBase()}/miniw/ma/$md5.lua');
       return _levelCache = parsePartnerLevels(decodeHttpResponse(cfg));
-    } catch (_) {
+    } catch (e) {
+      RequestErrorBus.instance.report(
+        label: '关系等级配置',
+        endpoint: redactUrl(cfgUrl),
+        message: '$e',
+      );
       return const <(int, int)>[];
     }
   }
@@ -449,8 +565,29 @@ class PartnerClient {
   static List<PartnerInfo> parsePartnerListResponse(Object? response) {
     if (response is! Map) return const <PartnerInfo>[];
     final ret = response.cast<String, Object?>();
-    if (!_isOk(ret)) return const <PartnerInfo>[];
-    return PartnerInfo.parseList(ret['data']);
+    if (!_isOk(ret)) {
+      // 静默降级会让「默契度全是 0」看起来像服务端没数据，打一行便于定位。
+      // code=9（NO_ROUTE）/ code=3 都是路由/鉴权类失败，必须带上实际发出去的
+      // 版本号才分得清是「客户端版本过期」还是「形状/签名不对」。
+      log.warn(
+        '拍档列表拉取失败：code=${ret['code'] ?? ret['ret']} '
+        'msg=${ret['msg']} ver=$kClientVersionStr',
+        tag: _logTag,
+      );
+      return const <PartnerInfo>[];
+    }
+    final list = PartnerInfo.parseList(ret['data']);
+    // 一行摘要：默契度全 0 通常意味着服务端没下发非拍档项，或字段名又变了。
+    final withTacit = list.where((p) => p.tacitnum > 0).length;
+    final asPartner = list.where((p) => p.lab > 0).length;
+    final summary =
+        'get_list: ${list.length} 条（拍档 $asPartner，默契度>0 的 $withTacit）';
+    if (list.isEmpty || withTacit == 0) {
+      log.warn(summary, tag: _logTag);
+    } else {
+      log.debug(summary, tag: _logTag);
+    }
+    return list;
   }
 
   /// 解析槽位响应 `{code:0, data:{unlock_normal, unlock_special}}`。
@@ -512,41 +649,144 @@ class PartnerClient {
     final url = _url('miniw/upgrade', 'get_level_info_batch', {
       'op_uin_list': uins.join(','),
     });
-    return parseLevelBatchResponse(await _get(url));
+    final ret = await _get(url);
+    _reportIfFailed('平台等级', url, ret);
+    return parseLevelBatchResponse(ret);
   }
 
-  /// 拍档列表（`miniw/bestpartner?act=get_list`）；[otherUin] 传他人迷你号。
-  Future<List<PartnerInfo>> getPartnerList({int? otherUin}) async {
-    final url = _url('miniw/bestpartner', 'get_list', {
-      if (otherUin != null) 'otheruin': '$otherUin',
-    });
-    return parsePartnerListResponse(await _get(url));
+  /// 非 0 业务码 → 上报给 `RequestErrorBus`（UI 显示「哪个请求失败了」）。
+  ///
+  /// 上报地址前统一 [redactUrl]：`/miniw/*` 的签名/令牌都在查询串里。
+  static void _reportIfFailed(
+    String label,
+    String url,
+    Map<String, Object?> ret,
+  ) {
+    if (_isOk(ret)) return;
+    log.warn('$label 失败：code=${_codeOf(ret)}', tag: _logTag);
+    RequestErrorBus.instance.report(
+      label: label,
+      endpoint: redactUrl(url),
+      code: _codeOf(ret),
+      message: '${ret['msg'] ?? ''}',
+    );
   }
 
-  /// 拍档槽位（`act=get_bestpartner_data&uin=<targetUin>`）。
+  /// `miniw/bestpartner` 专用请求（见 [bestpartnerUrl]）。
+  String _bestpartnerUrl(String act, Map<String, Object?> reqParams) =>
+      bestpartnerUrl(
+        base: baseUrl,
+        act: act,
+        reqParams: reqParams,
+        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        uin: uin,
+        s2: s2,
+        s2t: s2t,
+      );
+
+  /// bestpartner 请求 + 网关排队退避重试（见 [kBestpartnerRetryBackoff]）。
+  ///
+  /// 重试耗尽或遇到不可重试的业务码时，把失败上报给 `RequestErrorBus`，
+  /// UI 才会显示「哪个请求失败了」（以前是静默返回空数据）。
+  Future<Map<String, Object?>> _bestpartnerGet(
+    String act,
+    Map<String, Object?> reqParams, {
+    String label = '拍档数据',
+  }) async {
+    final attempts = retryBackoff.length + 1;
+    var ret = const <String, Object?>{};
+    var url = '';
+    for (var i = 0; i < attempts; i++) {
+      url = _bestpartnerUrl(act, reqParams);
+      ret = await _get(url);
+      if (!kPartnerTransientCodes.contains(_codeOf(ret))) break;
+      if (i == attempts - 1) break;
+      await Future<void>.delayed(retryBackoff[i]);
+    }
+    final code = _codeOf(ret);
+    if (!_isOk(ret)) {
+      log.warn(
+        'bestpartner $act 失败：code=$code（重试 $attempts 次）',
+        tag: _logTag,
+      );
+      _reportIfFailed(label, url, ret);
+    }
+    return ret;
+  }
+
+  /// 本人拍档列表的进程内缓存（单飞 + [listCacheTtl]）。
+  List<PartnerInfo>? _selfListCache;
+  DateTime? _selfListCacheAt;
+  Future<List<PartnerInfo>>? _selfListInFlight;
+
+  /// 拍档列表（含默契度 `tacitnum`）；[otherUin] 传他人迷你号（缺省查自己）。
+  ///
+  /// `miniw/bestpartner?act=get_list`（URL 形状见 [bestpartnerUrl]），`otheruin`
+  /// 放在 `extdata` 里。响应 `{code:0, data:[{bestUin, tacitnum, lab, createtime,
+  /// daytacittotal, giftdaytacittotal, ...}]}` —— **非拍档好友也在列表里**
+  /// （`lab == 0`），所以每个好友都有默契度。
+  ///
+  /// 网关对同一账号连发会排队（第二条回 `code=9`），所以本人列表做了单飞 +
+  /// 短缓存；查他人不受影响。
+  Future<List<PartnerInfo>> getPartnerList({int? otherUin}) {
+    if (otherUin != null) return _fetchPartnerList(otherUin);
+    final cached = _selfListCache;
+    final at = _selfListCacheAt;
+    if (cached != null &&
+        at != null &&
+        DateTime.now().difference(at) < listCacheTtl) {
+      return Future.value(cached);
+    }
+    final inFlight = _selfListInFlight;
+    if (inFlight != null) return inFlight;
+    final future = _fetchPartnerList(null)
+        .whenComplete(() => _selfListInFlight = null);
+    _selfListInFlight = future;
+    return future;
+  }
+
+  Future<List<PartnerInfo>> _fetchPartnerList(int? otherUin) async {
+    final ret = await _bestpartnerGet(
+      'get_list',
+      {'otheruin': ?otherUin},
+      label: otherUin == null ? '拍档列表（我）' : '拍档列表（$otherUin）',
+    );
+    final list = parsePartnerListResponse(ret);
+    if (otherUin == null && _isOk(ret)) {
+      _selfListCache = list;
+      _selfListCacheAt = DateTime.now();
+    }
+    return list;
+  }
+
+  /// 拍档槽位（`act=get_bestpartner_data`，`uin` 放在 `extdata` 里）。
   Future<PartnerSlotInfo?> getPartnerSlot(int targetUin) async {
-    final url = _url('miniw/bestpartner', 'get_bestpartner_data', {
-      'uin': '$targetUin',
-    });
-    return parsePartnerSlotResponse(await _get(url));
+    return parsePartnerSlotResponse(
+      await _bestpartnerGet(
+        'get_bestpartner_data',
+        {'uin': targetUin},
+        label: '拍档槽位',
+      ),
+    );
   }
 
   /// 红点数量（`act=get_red_dot_info`）。
   Future<int> getRedDotCount() async {
-    final url = _url('miniw/bestpartner', 'get_red_dot_info');
-    return parseRedDotResponse(await _get(url));
+    return parseRedDotResponse(
+      await _bestpartnerGet('get_red_dot_info', {'uin': uin}, label: '拍档红点'),
+    );
   }
 
-  /// 设置拍档别称（`act=set_bestpartner_title`）。成功返回 true。
+  /// 设置拍档别称（`act=set_bestpartner_title`，参数进 `extdata`）。成功返回 true。
   Future<bool> setPartnerTitle({
     required int target,
     required int titleId,
   }) async {
-    final url = _url('miniw/bestpartner', 'set_bestpartner_title', {
-      'target': '$target',
-      'title_id': '$titleId',
-    });
-    return _isOk(await _get(url));
+    return _isOk(await _get(_bestpartnerUrl('set_bestpartner_title', {
+      'uin': uin,
+      'target': target,
+      'title_id': titleId,
+    })));
   }
 
   /// 开启拍档槽位（`act=unlock_bestpartnet_pos`，注意官方拼写）。成功 true。
@@ -554,11 +794,11 @@ class PartnerClient {
     required int pos,
     required int special,
   }) async {
-    final url = _url('miniw/bestpartner', 'unlock_bestpartnet_pos', {
-      'pos': '$pos',
-      'special': '$special',
-    });
-    return _isOk(await _get(url));
+    return _isOk(await _get(_bestpartnerUrl('unlock_bestpartnet_pos', {
+      'uin': uin,
+      'pos': pos,
+      'special': special,
+    })));
   }
 
   /// 申请成为拍档（`act=apply`）。成功返回 true。
@@ -566,17 +806,18 @@ class PartnerClient {
     required int desUin,
     required int applyLab,
   }) async {
-    final url = _url('miniw/bestpartner', 'apply', {
-      'desUin': '$desUin',
-      'applyLab': '$applyLab',
-    });
-    return _isOk(await _get(url));
+    return _isOk(await _get(_bestpartnerUrl('apply', {
+      'desUin': desUin,
+      'applyLab': applyLab,
+    })));
   }
 
   /// 本人大会员到期时间（`miniw/business?act=vip_get_data`）；非会员 null。
   Future<int?> getMyVipExpiry() async {
     final url = _url('miniw/business', 'vip_get_data');
-    return parseSelfVipResponse(await _get(url));
+    final ret = await _get(url);
+    _reportIfFailed('大会员（本人）', url, ret);
+    return parseSelfVipResponse(ret);
   }
 
   /// 他人批量大会员到期时间（`act=vip_get_uinlst_vipdata`）。
@@ -586,6 +827,8 @@ class PartnerClient {
     final url = _url('miniw/business', 'vip_get_uinlst_vipdata', {
       'param_id': uins.join('_'),
     });
-    return parseVipUinListResponse(await _get(url));
+    final ret = await _get(url);
+    _reportIfFailed('大会员（批量）', url, ret);
+    return parseVipUinListResponse(ret);
   }
 }

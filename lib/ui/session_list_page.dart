@@ -380,23 +380,32 @@ class _SessionTile extends ConsumerWidget {
               onTapUp: (details) => onAvatarTap!(details.globalPosition),
               child: avatar,
             ),
-      title: Row(
-        children: [
-          Flexible(
-            child: RichTextView(
-              session.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
+      // 行宽由 LayoutBuilder 显式传给徽标槽位（Row 给非 flex 子节点的是无界约束）。
+      title: LayoutBuilder(
+        builder: (context, titleConstraints) => Row(
+          children: [
+            Flexible(
+              child: RichTextView(
+                session.name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
-          ),
-          if (isFriend)
-            PartnerNameBadges(
-              level: level,
-              partner: partner,
-              isVip: isVip,
-              levels: levelCfg,
-            ),
-        ],
+            // 与好友页同样：徽标宽度受限 + 内部降级，昵称优先。
+            if (isFriend) ...[
+              const SizedBox(width: AppSpacing.xs),
+              PartnerBadgeSlot(
+                rowWidth: titleConstraints.maxWidth,
+                child: PartnerNameBadges(
+                  level: level,
+                  partner: partner,
+                  isVip: isVip,
+                  levels: levelCfg,
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
       subtitle: isFriend
           // 好友：在线绿点 + 状态 + 最后消息（两行紧凑显示）

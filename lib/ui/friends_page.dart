@@ -53,6 +53,11 @@ enum _SortMode {
 
 class _FriendsPageState extends ConsumerState<FriendsPage> {
   String _search = '';
+
+  /// 窄屏：搜索平时只是一个按钮，点开才展开成输入框并隐藏其它控件
+  /// （工具条一行放不下所有控件，400dp 内会溢出）。
+  bool _searchOpen = false;
+
   _FriendCat _cat = _FriendCat.friend;
   _SortMode _sort = _SortMode.defaultOrder;
 
@@ -531,9 +536,10 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
   /// 内容透出（"遮不住卡片"）。用页面底色铺底，保持与页面视觉无缝。
   Widget _buildToolbar(ThemeData theme, int online, int total) {
     // 搜索框：高度随系统字号缩放，避免大字号下输入文字被裁切。
-    final searchField = SizedBox(
+    Widget searchField({bool autofocus = false}) => SizedBox(
       height: MediaQuery.textScalerOf(context).scale(36),
       child: TextField(
+        autofocus: autofocus,
         onChanged: (v) => setState(() => _search = v),
         decoration: InputDecoration(
           hintText: '搜索好友昵称 / 迷你号…',
@@ -552,38 +558,68 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         ),
       ),
     );
+    // 窄屏：搜索平时是个图标按钮（有查询词时高亮）；点开才展开成输入框。
+    //
+    // 工具条一排 5 个图标按钮，默认 48dp 会把「在线好友 X/Y」挤到只剩
+    // 「在线好友…」；统一收到 40dp（仍近 Material 推荐的 44dp 触控区）。
+    Widget toolbarIcon({
+      required String tooltip,
+      required VoidCallback onPressed,
+      required Widget icon,
+    }) => IconButton(
+      tooltip: tooltip,
+      onPressed: onPressed,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+      visualDensity: adaptiveDensity(context),
+      icon: icon,
+    );
+
+    final searchToggle = toolbarIcon(
+      tooltip: _search.isEmpty ? '搜索' : '搜索：$_search',
+      onPressed: () => setState(() => _searchOpen = true),
+      icon: Icon(
+        Icons.search,
+        size: 18,
+        color: _search.isEmpty ? null : theme.colorScheme.primary,
+      ),
+    );
+    // 刷新 / 批量管理（窄屏收成 40dp 图标，大屏同样用）
+    final refreshButton = toolbarIcon(
+      tooltip: '刷新',
+      onPressed: () => ref.read(chatServiceProvider).loadSessions(),
+      icon: const Icon(Icons.refresh, size: 18),
+    );
+    final batchButton = toolbarIcon(
+      tooltip: _batchMode ? '退出批量管理' : '批量管理',
+      onPressed: () => setState(() {
+        _batchMode = !_batchMode;
+        _selected.clear();
+      }),
+      icon: Icon(
+        _batchMode ? Icons.checklist : Icons.checklist_outlined,
+        size: 18,
+      ),
+    );
+    // 游戏文案：`GetS(156004)` =「在线好友@1/@2」
+    final countText = Text(
+      '在线好友 $online/$total',
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
+      style: theme.textTheme.labelMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    );
     final controls = <Widget>[
-      // 游戏文案：`GetS(156004)` =「在线好友@1/@2」
-      Text(
-        '在线好友 $online/$total',
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: theme.colorScheme.onSurfaceVariant,
-        ),
-      ),
-      IconButton(
-        tooltip: '刷新',
-        visualDensity: adaptiveDensity(context),
-        icon: const Icon(Icons.refresh, size: 18),
-        onPressed: () => ref.read(chatServiceProvider).loadSessions(),
-      ),
-      // 批量管理（游戏 btn_multMgr）：进入后可多选好友批量打标签 / 清除 / 上线通知
-      IconButton(
-        tooltip: _batchMode ? '退出批量管理' : '批量管理',
-        visualDensity: adaptiveDensity(context),
-        icon: Icon(
-          _batchMode ? Icons.checklist : Icons.checklist_outlined,
-          size: 18,
-        ),
-        onPressed: () => setState(() {
-          _batchMode = !_batchMode;
-          _selected.clear();
-        }),
-      ),
+      // 宽屏：与搜索框按 1:1 分剩余宽度。
+      Flexible(child: countText),
+      refreshButton,
+      batchButton,
     ];
     // 筛选入口：有生效条件时高亮（游戏里漏斗的 selSt 控制器）。
-    final filterButton = IconButton(
+    final filterButton = toolbarIcon(
       tooltip: '筛选',
-      visualDensity: adaptiveDensity(context),
+      onPressed: _openFilterDialog,
       icon: Badge(
         isLabelVisible: !_filter.isEmpty,
         smallSize: 8,
@@ -593,31 +629,11 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           color: _filter.isEmpty ? null : theme.colorScheme.primary,
         ),
       ),
-      onPressed: _openFilterDialog,
     );
     final sortButton = PopupMenuButton<_SortMode>(
       tooltip: '排序方式',
       onSelected: (m) => setState(() => _sort = m),
-      itemBuilder: (ctx) => [
-        for (final m in _SortMode.values)
-          PopupMenuItem(
-            value: m,
-            child: Row(
-              children: [
-                if (m == _sort)
-                  Icon(
-                    Icons.check,
-                    size: 16,
-                    color: theme.colorScheme.primary,
-                  )
-                else
-                  const SizedBox(width: 16),
-                const SizedBox(width: 8),
-                Text(m.label),
-              ],
-            ),
-          ),
-      ],
+      itemBuilder: _sortMenuItems,
       child: Chip(
         visualDensity: adaptiveDensity(context),
         avatar: const Icon(Icons.sort, size: 16),
@@ -625,29 +641,52 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
       ),
     );
 
+    // 窄屏排序：纯图标（带当前排序的 tooltip），标签版留给宽屏 ——
+    // 否则“在线好友 X/Y + 刷新 + 批量 + 排序标签 + 筛选”在 360dp 下必然溢出。
+    final sortIconButton = PopupMenuButton<_SortMode>(
+      tooltip: '排序方式：${_sort.label}',
+      onSelected: (m) => setState(() => _sort = m),
+      itemBuilder: _sortMenuItems,
+      child: const Padding(
+        padding: EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+        child: Icon(Icons.sort, size: 18),
+      ),
+    );
+
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
-        // 手机（紧凑宽度）：控件一行、搜索框独占下一行整宽。此前控件与搜索框全挤在
-        // 同一个 Row 里，控件固定占掉近 300dp，搜索框只剩百来 dp 被挤到角落。
+        // 手机（紧凑宽度）：搜索平时只是一个按钮，点开才占整行并隐藏其它控件；
+        // 其余控件保持一行且保证不溢出（此前固定宽度控件相加超屏，实测溢出
+        // 32dp@360 / 72dp@320）。
         child: isCompactWidth(context)
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      ...controls,
-                      // 窄屏：排序 / 筛选推到右边。
-                      const Spacer(),
-                      sortButton,
-                      filterButton,
-                    ],
-                  ),
-                  const SizedBox(height: 8),
-                  searchField,
-                ],
-              )
+            ? (_searchOpen
+                  ? Row(
+                      children: [
+                        Expanded(child: searchField(autofocus: true)),
+                        toolbarIcon(
+                          tooltip: '关闭搜索',
+                          onPressed: () => setState(() {
+                            _searchOpen = false;
+                            _search = '';
+                          }),
+                          icon: const Icon(Icons.close, size: 18),
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        searchToggle,
+                        // `Expanded`（而不是 Flexible + Spacer）：计数占满
+                        // 中间并把右侧图标顶到行尾，不会和 Spacer 抢宽度。
+                        Expanded(child: countText),
+                        refreshButton,
+                        batchButton,
+                        sortIconButton,
+                        filterButton,
+                      ],
+                    ))
             : Row(
                 children: [
                   ...controls,
@@ -655,12 +694,34 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                   sortButton,
                   filterButton,
                   const SizedBox(width: 8),
-                  Expanded(child: searchField),
+                  Expanded(child: searchField()),
                 ],
               ),
       ),
     );
   }
+
+  /// 排序菜单项（宽屏标签版与窄屏图标版共用）。
+  List<PopupMenuEntry<_SortMode>> _sortMenuItems(BuildContext ctx) => [
+    for (final m in _SortMode.values)
+      PopupMenuItem(
+        value: m,
+        child: Row(
+          children: [
+            if (m == _sort)
+              Icon(
+                Icons.check,
+                size: 16,
+                color: Theme.of(ctx).colorScheme.primary,
+              )
+            else
+              const SizedBox(width: 16),
+            const SizedBox(width: 8),
+            Text(m.label),
+          ],
+        ),
+      ),
+  ];
 
   /// 左侧分类栏（黑名单 / 家族复用已有页面）。
   /// 手机端分类：横向可滚动的 chip 行（宽屏用 [_buildCategoryRail] 竖排）。
@@ -899,43 +960,53 @@ class _FriendTile extends ConsumerWidget {
               onTapUp: (d) => onAvatarTap!(d.globalPosition),
               child: avatar,
             ),
-      title: Row(
-        children: [
-          Flexible(
-            child: RichTextView(
-              name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-            ),
-          ),
-          // 默契度是**每个好友都有**的（`get_list` 里非拍档项 `lab == 0`），
-          // 所以这里显式传值 —— 非拍档也显示，配色用 lab（0 = 默认色）。
-          if (!isGroup)
-            PartnerNameBadges(
-              level: level,
-              partner: partner,
-              isVip: isVip,
-              levels: levelCfg,
-              tacitnum: directory.tacitOf(session.id),
-              lab: partner?.lab ?? 0,
-            ),
-          if (rel.isNotEmpty) ...[
-            const SizedBox(width: 6),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.secondaryContainer,
-                borderRadius: AppRadius.chipR,
+      // `Row` 给非 flex 子节点的是无界主轴约束，徽标拿不到行宽，所以这里用
+      // `LayoutBuilder` 量出标题行宽度并显式传给槽位（见 [PartnerBadgeSlot]）。
+      title: LayoutBuilder(
+        builder: (context, titleConstraints) => Row(
+          children: [
+            Flexible(
+              child: RichTextView(
+                name,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
               ),
-              child: Text(
-                rel,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: theme.colorScheme.onSecondaryContainer,
+            ),
+            // 默契度是**每个好友都有**的（`get_list` 里非拍档项 `lab == 0`），
+            // 所以这里显式传值 —— 非拍档也显示，配色用 lab（0 = 默认色）。
+            // 徽标宽度受限 + 内部按预算降级 → 昵称永远不会被挤没。
+            if (!isGroup) ...[
+              const SizedBox(width: AppSpacing.xs),
+              PartnerBadgeSlot(
+                rowWidth: titleConstraints.maxWidth,
+                child: PartnerNameBadges(
+                  level: level,
+                  partner: partner,
+                  isVip: isVip,
+                  levels: levelCfg,
+                  tacitnum: directory.tacitOf(session.id),
+                  lab: partner?.lab ?? 0,
                 ),
               ),
-            ),
+            ],
+            if (rel.isNotEmpty) ...[
+              const SizedBox(width: 6),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.secondaryContainer,
+                  borderRadius: AppRadius.chipR,
+                ),
+                child: Text(
+                  rel,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
           ],
-        ],
+        ),
       ),
       trailing: isGroup
           ? null

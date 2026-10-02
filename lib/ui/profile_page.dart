@@ -2157,25 +2157,30 @@ class HomePartnerTile extends StatelessWidget {
             ),
             const SizedBox(width: AppSpacing.md),
             Expanded(
-              child: Row(
-                children: [
-                  Flexible(
-                    child: RichTextView(
-                      name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium,
+              child: LayoutBuilder(
+                builder: (context, nameConstraints) => Row(
+                  children: [
+                    Flexible(
+                      child: RichTextView(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodyMedium,
+                      ),
                     ),
-                  ),
-                  if (level > 0 || isVip) ...[
-                    const SizedBox(width: AppSpacing.xs),
-                    PartnerNameBadges(
-                      level: level,
-                      partner: partner,
-                      isVip: isVip,
-                    ),
+                    if (level > 0 || isVip) ...[
+                      const SizedBox(width: AppSpacing.xs),
+                      PartnerBadgeSlot(
+                        rowWidth: nameConstraints.maxWidth,
+                        child: PartnerNameBadges(
+                          level: level,
+                          partner: partner,
+                          isVip: isVip,
+                        ),
+                      ),
+                    ],
                   ],
-                ],
+                ),
               ),
             ),
           ],

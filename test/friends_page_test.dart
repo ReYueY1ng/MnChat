@@ -58,6 +58,45 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('窄屏工具条：搜索默认是按钮，点开才展开并隐藏其它控件（不溢出）', (tester) async {
+    // 360dp：修复前工具条控件一行固定宽度相加超屏（实测溢出 32dp）。
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await pumpFriendsPage(tester);
+    expect(tester.takeException(), isNull, reason: '窄屏下工具条不应溢出');
+
+    // 默认：只有搜索按钮，没有输入框；排序标签也收成了图标。
+    expect(find.byTooltip('搜索'), findsOneWidget);
+    expect(find.byType(TextField), findsNothing);
+    expect(find.byTooltip('筛选'), findsOneWidget);
+    expect(find.byTooltip('排序方式：好友默认排序'), findsOneWidget);
+
+    // 点开搜索 → 输入框出现，其它控件隐藏。
+    await tester.tap(find.byTooltip('搜索'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsOneWidget);
+    expect(find.byTooltip('排序方式：好友默认排序'), findsNothing);
+    expect(find.byTooltip('筛选'), findsNothing);
+    expect(find.byTooltip('刷新'), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    // 输入过滤生效（用 ListTile 限定，避免匹配到输入框自身的文字）。
+    await tester.enterText(find.byType(TextField), '好友12');
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(ListTile, '好友12'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, '好友11'), findsNothing);
+
+    // 关闭 → 回到按钮态，并清掉查询词（避免“看不见的过滤”）。
+    await tester.tap(find.byTooltip('关闭搜索'));
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.byTooltip('搜索'), findsOneWidget);
+    expect(find.widgetWithText(ListTile, '好友11'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('工具条：ColoredBox 铺页面底色（不透明）且位于 Divider 之上', (tester) async {
     await pumpFriendsPage(tester);
     expect(tester.takeException(), isNull);
