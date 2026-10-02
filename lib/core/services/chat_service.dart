@@ -950,30 +950,53 @@ class ChatService {
 
   /// 拉取好友离线/最近聊天记录（buddysvr chat_query）。
   ///
-  /// 独立客户端**不走 WS RPC**：反编译源码 `buddymanager.lua` 中
-  /// `chat_query` 在 WS 打开时走 `cluster.buddysvr.chat_query`（游戏 cluster
-  /// 连接专属），chatpushconn 只是推送通道——WS 上发 RPC 永不响应（实测超时）。
-  /// 所以直接走 HTTP 后备 `chatpush_rpc`（POST /minilb/rpc）。
+  /// 与游戏一致：**WS RPC 优先，HTTP 仅作后备**。`buddymanager.lua` 里
+  /// `query_friend_info` / `batch_friend_info` / `friend_list` 都是
+  /// `if not chatpushconn.isopen then self:chatpush_rpc(...) else cluster.*` 的分支，
+  /// 即连接在就用 WS，只有连接不可用才走 HTTP `chatpush_rpc`（POST /minilb/rpc）。
+  ///
+  /// 2026-10-01 实测（真实账号，一条对方刚发来的离线消息）：
+  /// - **WS `buddysvr.chat_query` 能取到**：`[0,[[uin, time, text, extendB64, "0"]]]`，
+  ///   与 [ChatMessage.fromChatQueryTriple] 的期望形状一致；
+  /// - **HTTP `/minilb/rpc` 同参返回 `[0,[]]`**（建 gate 连接前后都是空），
+  ///   只有 WS 能拿到真实离线消息；
+  /// - `chat_query` 是**消费式读取**：拿到一次后两边都变空。
+  /// 所以这里 WS 优先，HTTP 仅作为连接不可用时的尽力后备（可能拿到空表）。
   Future<void> requestFriendHistory(int uin2) async {
     final auth = _auth;
     if (auth == null) return;
     try {
-      final seq = DateTime.now().microsecondsSinceEpoch % 100000;
-      final msec = DateTime.now().millisecondsSinceEpoch % 100000000;
-      final resp = await _chatpush.rpcHttp(
+      List<dynamic>? resp;
+      final conn = _connection.conn;
+      if (conn != null) {
+        try {
+          final r = await conn.sendRpc(
+            'buddysvr',
+            'chat_query',
+            <dynamic>[uin2],
+            timeout: const Duration(seconds: 8),
+          );
+          final result = r.result;
+          if (result is List) resp = result;
+        } catch (e) {
+          log.warn('chat_query WS 失败，退回 HTTP：$e', tag: _logTag);
+        }
+      }
+      // 连接不可用（未登录 / 断线中）才走 HTTP 后备。
+      resp ??= await _chatpush.rpcHttp(
         uin: auth.uin,
         s2: auth.s2,
         s2t: auth.s2t,
         message: [
           'buddysvr',
           'chat_query',
-          seq,
-          msec,
+          DateTime.now().microsecondsSinceEpoch % 100000,
+          DateTime.now().millisecondsSinceEpoch % 100000000,
           [uin2],
           <String, Object?>{},
         ],
       );
-      // 响应格式 [code?, ...]，chat_query 返回 [0, msglist]
+      // 两种通道响应同形：[0, msglist]
       if (resp.length >= 2 && resp[1] is List) {
         _applyChatQueryResult(uin2, resp[1] as List);
       } else if (resp.isNotEmpty && resp[0] is List) {

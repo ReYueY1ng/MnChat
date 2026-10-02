@@ -5,7 +5,12 @@ library;
 const String kDefaultBase = 'https://shequ.mini1.cn:8081/';
 const int kCltVersion = 80384;
 const String kApiId = '110';
-const String kClientVersionStr = '1.58.0';
+
+/// 客户端版本字符串（`url_addParams` 的 `ver`）。
+///
+/// 必须是服务端当前版本：`miniw/bestpartner` 用 1.58.0 会直接回 `code=9`，
+/// 1.59.0 才下发数据（2026-10-01 真实账号实测；其余接口两个版本行为一致）。
+const String kClientVersionStr = '1.59.0';
 const String kUa = 'Rainbow/1.0 (Windows_RT; U; Linux 6.2; zh)';
 
 /// 登录服务器

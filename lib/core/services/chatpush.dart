@@ -114,6 +114,17 @@ class ChatPushClient {
   /// WS 长连接不可用时使用：POST `{lb}/minilb/rpc?uid&time&auth&loginauth&s2t`。
   /// 关键差异（vs WS）：auth = md5(time + key + uin + extdata) **包含 extdata**。
   ///
+  /// **它不是 WS 的等价替代**（2026-10-01 同参逐方法实测）：
+  /// | 方法 | HTTP | WS |
+  /// |---|---|---|
+  /// | `buddysvr.chatstatuslist` | `[0,{...}]` | 相同 |
+  /// | `buddysvr.friend_info` / `batch_friend_info` | `[4001,null]` | `[0,{ 完整数据 }]` |
+  /// | `buddysvr.friend_list` | `[0]`（无负载） | `[0,[9438 字节列表]]` |
+  /// | `buddysvr.chat_query` | `[0,[]]`（看不到离线队列） | `[0, [[...消息...]]]` |
+  ///
+  /// 即 HTTP 通道活着、能应答，但**拿不到需要会话上下文的数据**（4001 = 服务端
+  /// 无会话/不支持）。所以能走 WS 就一律走 WS，本方法只当最后手段。
+  ///
   /// [args] 与 WS 通道一致，如 `['svc','method',seq,msec,args,{}]`。
   /// 返回解码后的数组（chatpush_decrypt(JSON)）。
   Future<List<dynamic>> rpcHttp({
