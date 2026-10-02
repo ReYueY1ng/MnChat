@@ -23,18 +23,13 @@ import 'reconnect_policy.dart';
 /// - [onConnectionChanged]：连接对象变化（供命令客户端同步）。
 class ChatConnectionManager {
   ChatConnectionManager({
-    required ChatPushClient chatpush,
-    required void Function(ChatServiceState) onStateChange,
-    required void Function(ChatPushPush) onPush,
-    required Future<void> Function() onReconnected,
-    required void Function(String) onError,
-    required void Function(ChatPushConnection?) onConnectionChanged,
-  })  : _chatpush = chatpush,
-        _onStateChange = onStateChange,
-        _onPush = onPush,
-        _onReconnected = onReconnected,
-        _onError = onError,
-        _onConnectionChanged = onConnectionChanged;
+    required this._chatpush,
+    required this._onStateChange,
+    required this._onPush,
+    required this._onReconnected,
+    required this._onError,
+    required this._onConnectionChanged,
+  });
 
   final ChatPushClient _chatpush;
   final void Function(ChatServiceState) _onStateChange;

@@ -12,12 +12,10 @@ import '../../models/messages.dart';
 /// 数据来源与写入目标由构造注入（[groupSessions] 为 ChatService 的群会话表）。
 class GroupNameCache {
   GroupNameCache({
-    required AppDatabase? Function() getDb,
-    required int Function() getMyUin,
-    required Map<int, ChatSession> groupSessions,
-  }) : _getDb = getDb,
-       _getMyUin = getMyUin,
-       _groupSessions = groupSessions;
+    required this._getDb,
+    required this._getMyUin,
+    required this._groupSessions,
+  });
 
   final AppDatabase? Function() _getDb;
   final int Function() _getMyUin;

@@ -10,22 +10,15 @@ import '../../utils/log.dart';
 /// 缓存与副作用经构造注入；`loadGroupNames` 用于顺带恢复群名。
 class OfflineCache {
   OfflineCache({
-    required AppDatabase? Function() getDb,
-    required int Function() getMyUin,
-    required Map<int, ChatSession> friendSessions,
-    required Map<int, ChatSession> groupSessions,
-    required List<Contact> contacts,
-    required Map<String, List<ChatMessage>> messagesCache,
-    required Future<void> Function() loadGroupNames,
-    required void Function() emitSessionSnapshot,
-  }) : _getDb = getDb,
-       _getMyUin = getMyUin,
-       _friendSessions = friendSessions,
-       _groupSessions = groupSessions,
-       _contacts = contacts,
-       _messagesCache = messagesCache,
-       _loadGroupNames = loadGroupNames,
-       _emitSessionSnapshot = emitSessionSnapshot;
+    required this._getDb,
+    required this._getMyUin,
+    required this._friendSessions,
+    required this._groupSessions,
+    required this._contacts,
+    required this._messagesCache,
+    required this._loadGroupNames,
+    required this._emitSessionSnapshot,
+  });
 
   final AppDatabase? Function() _getDb;
   final int Function() _getMyUin;

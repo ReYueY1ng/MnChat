@@ -13,20 +13,14 @@ import 'push_dispatcher.dart';
 /// ChatService 仅作门面。
 class ProfileCache {
   ProfileCache({
-    required MiniAuth? Function() getAuth,
-    required int Function() getMyUin,
-    required Map<int, ChatSession> friendSessions,
-    required List<Contact> contacts,
-    required Map<int, Map<int, PlayerProfile>> groupMemberProfiles,
-    required void Function() emitSessionSnapshot,
-    required Future<void> Function() saveFriendCache,
-  }) : _getAuth = getAuth,
-       _getMyUin = getMyUin,
-       _friendSessions = friendSessions,
-       _contacts = contacts,
-       _groupMemberProfiles = groupMemberProfiles,
-       _emitSessionSnapshot = emitSessionSnapshot,
-       _saveFriendCache = saveFriendCache;
+    required this._getAuth,
+    required this._getMyUin,
+    required this._friendSessions,
+    required this._contacts,
+    required this._groupMemberProfiles,
+    required this._emitSessionSnapshot,
+    required this._saveFriendCache,
+  });
 
   final MiniAuth? Function() _getAuth;
   final int Function() _getMyUin;

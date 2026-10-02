@@ -23,20 +23,14 @@ const String _logTag = 'ChatPushDispatcher';
 /// ChatPush 推送分发器。
 class ChatPushDispatcher {
   ChatPushDispatcher({
-    required int Function() getMyUin,
-    required void Function(int uin, ChatMessage m) upsertFriendMessage,
-    required void Function(int groupId, ChatMessage m) upsertGroupMessage,
-    required Future<void> Function() loadSessions,
-    required void Function() emitSessionSnapshot,
-    required ChatPushConnection? Function() getConn,
-    required Map<int, ChatSession> friendSessions,
-  })  : _getMyUin = getMyUin,
-        _upsertFriendMessage = upsertFriendMessage,
-        _upsertGroupMessage = upsertGroupMessage,
-        _loadSessions = loadSessions,
-        _emitSessionSnapshot = emitSessionSnapshot,
-        _getConn = getConn,
-        _friendSessions = friendSessions;
+    required this._getMyUin,
+    required this._upsertFriendMessage,
+    required this._upsertGroupMessage,
+    required this._loadSessions,
+    required this._emitSessionSnapshot,
+    required this._getConn,
+    required this._friendSessions,
+  });
 
   final int Function() _getMyUin;
   final void Function(int uin, ChatMessage m) _upsertFriendMessage;

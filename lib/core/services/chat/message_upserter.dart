@@ -7,22 +7,15 @@ import 'message_store.dart';
 /// 与 [MessageStore]（纯写库）配合：本类只管内存与通知，落盘委托后者。
 class MessageUpserter {
   MessageUpserter({
-    required Map<String, List<ChatMessage>> messagesCache,
-    required Map<int, ChatSession> friendSessions,
-    required Map<int, ChatSession> groupSessions,
-    required int Function() getMyUin,
-    required bool Function(ChatSessionType type, int id) isViewing,
-    required void Function(ChatSessionType type, int id, ChatMessage m) emitEvent,
-    required MessageStore store,
-    required void Function() emitSessionSnapshot,
-  }) : _messagesCache = messagesCache,
-       _friendSessions = friendSessions,
-       _groupSessions = groupSessions,
-       _getMyUin = getMyUin,
-       _isViewing = isViewing,
-       _emitEvent = emitEvent,
-       _store = store,
-       _emitSessionSnapshot = emitSessionSnapshot;
+    required this._messagesCache,
+    required this._friendSessions,
+    required this._groupSessions,
+    required this._getMyUin,
+    required this._isViewing,
+    required this._emitEvent,
+    required this._store,
+    required this._emitSessionSnapshot,
+  });
 
   final Map<String, List<ChatMessage>> _messagesCache;
   final Map<int, ChatSession> _friendSessions;
