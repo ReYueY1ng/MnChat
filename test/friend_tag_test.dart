@@ -70,8 +70,40 @@ void main() {
   });
 
   test('encodeFriendLabel 与 decodeFriendLabel 往返一致', () {
-    for (final s in ['a', '同学', '5字标签啦']) {
+    for (final s in ['a', '同学', '5字标签啦', 'probe', 'ab', 'abcd']) {
       expect(decodeFriendLabel(encodeFriendLabel(s)), s);
     }
+  });
+
+  group('标签文案 base64 的补位口径', () {
+    test('编码不带 = 补位（带补位建标签会被服务端回 result:2）', () {
+      expect(encodeFriendLabel('probe'), 'cHJvYmU');
+      expect(encodeFriendLabel('probe').contains('='), isFalse);
+      expect(encodeFriendLabel('测试'), '5rWL6K+V');
+    });
+
+    test('解码服务端的无补位 base64（长度不是 4 的倍数也要能解）', () {
+      // 线上实例：标签名 probe 下发的是 'cHJvYmU'（7 字符）。Dart 的
+      // base64.decode 要求长度是 4 的倍数，会抛 Invalid length，旧代码 catch 后
+      // 直接把 base64 当文案显示。中文标签每字 3 字节、编码后总是 4 的倍数，
+      // 所以这个坑一直没暴露。
+      expect(decodeFriendLabel('cHJvYmU'), 'probe');
+      expect(decodeFriendLabel('5rWL6K+V'), '测试');
+      // 已经是补位形式也要能解。
+      expect(decodeFriendLabel('cHJvYmU='), 'probe');
+      // 脏数据原样返回，不抛（宽松解析契约）。
+      expect(decodeFriendLabel('%%%'), '%%%');
+      expect(decodeFriendLabel(null), '');
+    });
+
+    test('parseFriendTagPool 里 ASCII 标签也解得对', () {
+      final tags = parseFriendTagPool({
+        'result': 0,
+        'label_list': [
+          {'tag_id': 3, 'label': 'cHJvYmU', 'uin_list': <int>[]},
+        ],
+      });
+      expect(tags.single.label, 'probe');
+    });
   });
 }

@@ -67,6 +67,20 @@ void main() {
     expect(q.containsKey('token'), isTrue);
   });
 
+  test('setFriendLabelPool 建标签：label 不带 base64 补位，也不带 src_uin', () async {
+    final adapter = _RecordingAdapter();
+    await clientWith(adapter).setFriendLabelPool(opType: 1, label: 'probe');
+
+    final q = adapter.requests.single.uri.queryParameters;
+    expect(q['cmd'], 'set_friend_label_pool');
+    expect(q['op_type'], '1');
+    // 带 `=` 补位服务端直接回 {"result":2}（实测）；这条曾经因为这里自己
+    // inline 一次 base64Encode 而漏掉。
+    expect(q['label'], 'cHJvYmU');
+    expect(q['label']!.contains('='), isFalse);
+    expect(q.containsKey('src_uin'), isFalse);
+  });
+
   test('其它 cmd 仍然带 src_uin（只有 label_pool 例外）', () async {
     final adapter = _RecordingAdapter();
     await clientWith(adapter).setOnlineNotifyFlag(654321, on: true);

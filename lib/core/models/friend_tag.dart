@@ -31,18 +31,35 @@ class FriendTag {
 /// （`main_newfriendsmgrctrl.lua:1064-1117`）。
 const int kFriendTagMaxLength = 5;
 
-/// 编码标签文案（写接口要 base64）。
-String encodeFriendLabel(String label) => base64Encode(utf8.encode(label));
+/// 编码标签文案（写接口要 base64，且**不能带 `=` 补位**）。
+///
+/// 实测（2026-10-02 真实账号，自己的标签池）：`base64` 带补位建标签，服务端
+/// 回 `{"result":2}`；去掉补位才回 `{"result":0,"tag_id":…}`。服务端回给
+/// 客户端的 `label` 同样是无补位形式，所以两头都不带 `=`。
+String encodeFriendLabel(String label) =>
+    base64Encode(utf8.encode(label)).replaceAll('=', '');
 
 /// 解码标签文案；失败原样返回（游戏里也是 pcall 兜底）。
+///
+/// 服务端下发的是**无 `=` 补位**的 base64，而 Dart 的 [base64.decode] 要求长度是
+/// 4 的倍数：标签的 UTF-8 字节数不是 3 的倍数时会直接抛 FormatException，被下面的
+/// catch 吞掉，于是列表里显示成 `cHJvYmU` 这种原始 base64（`probe` 的实际遭遇）。
+/// 中文标签每字 3 字节，编码后正好总是 4 的倍数，所以这个坑一直没暴露。
 String decodeFriendLabel(Object? raw) {
   final s = raw?.toString() ?? '';
   if (s.isEmpty) return '';
   try {
-    return utf8.decode(base64.decode(s));
+    return utf8.decode(base64.decode(_padBase64(s)));
   } catch (_) {
     return s;
   }
+}
+
+/// 把无补位的 base64 补成 Dart 能解码的形式（已是补位形式就原样返回）。
+String _padBase64(String s) {
+  if (s.endsWith('=')) return s;
+  final rest = s.length % 4;
+  return rest == 0 ? s : s.padRight(s.length + (4 - rest), '=');
 }
 
 /// 解析标签池响应 → 标签列表（丢掉没有 tag_id / 文案为空的项）。

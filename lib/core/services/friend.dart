@@ -5,6 +5,7 @@ library;
 import 'dart:convert';
 
 import '../crypto/md5_sign.dart' show httpGetRealNameMobileSum, md5Token;
+import '../models/friend_tag.dart' show encodeFriendLabel;
 import 'gateway.dart';
 
 /// 好友服务 URL 路径。
@@ -535,11 +536,14 @@ class FriendClient {
   /// 新增/删除标签池中的标签 (cmd=set_friend_label_pool)。
   /// [opType]=1 新增（需 [label]）；[opType]=0 删除（需 [tagId]）。
   ///
-  /// 与 [queryFriendLabelPool] 同一个坑：**不能带 `src_uin`**。实测（同日同账号，
-  /// 每个形状 2-4 次）带 `src_uin` 回 `{"result":2}`；去掉后换成另一个业务码
-  /// （用不存在的 tag_id 试删除时是 45），说明至少已经过了那道门。
-  /// 注意：**本 cmd 的成功码没有验证过** —— 验证它需要真的写一个标签，
-  /// 而那是会改动账号状态的操作，没有做。
+  /// 两道门都是实测出来的（2026-10-02 真实账号，自己的标签池）：
+  ///
+  /// 1. **不能带 `src_uin`**（同 [queryFriendLabelPool]）：带上删除回
+  ///    `{"result":2}`，去掉换成业务码 45（不存在的 tag_id）。
+  /// 2. **`label` 的 base64 不能带 `=` 补位**：同一个标签名，带补位回
+  ///    `{"result":2}`，去掉补位回 `{"result":0,"tag_id":…}`；传明文回 47。
+  ///    补 country/lang、换参数名 `tag_label`、加 src_uin 都无效。
+  ///    [encodeFriendLabel] 已负责去补位，所以调用方不用管。
   Future<Map<String, Object?>> setFriendLabelPool({
     required int opType,
     String? label,
@@ -551,7 +555,10 @@ class FriendClient {
       ..._signed(includeSrcUin: false),
     };
     if (opType == 1) {
-      params['label'] = base64Encode(utf8.encode(label ?? ''));
+      // 走 models/friend_tag.dart 的口径：base64 **不带 `=` 补位**。
+      // 带补位服务端直接回 {"result":2}（实测：同一个标签名 probe 带补位失败、
+      // 去补位成功）。这里以前自己 inline 了一次 base64Encode，漏掉了这个口径。
+      params['label'] = encodeFriendLabel(label ?? '');
     } else if (tagId != null) {
       params['tag_id'] = '$tagId';
     }
