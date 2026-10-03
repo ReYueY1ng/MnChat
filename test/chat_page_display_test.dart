@@ -41,6 +41,24 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  testWidgets('空会话显示中文空态，收到消息后消失', (tester) async {
+    final service = ChatService(db: null);
+    await tester.pumpWidget(harness(service));
+    await tester.pump();
+
+    // 空态经 flutter_chat_ui 的 emptyChatListBuilder 渲染
+    expect(find.text('打个招呼'), findsOneWidget);
+
+    service.addLocalMessage(ChatSessionType.friend, 273640665, '第一条');
+    await tester.pump();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(find.text('打个招呼'), findsNothing);
+    expect(find.text('第一条'), findsOneWidget);
+    await tester.pumpAndSettle();
+  });
+
   testWidgets('addLocalMessage 后消息通过桥接层上屏', (tester) async {
     final service = ChatService(db: null);
     await tester.pumpWidget(harness(service));

@@ -332,15 +332,17 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     data: MediaQuery.of(context).copyWith(
                       textScaler: TextScaler.linear(chatFontScale),
                     ),
-                    child: StreamBuilder<void>(
-                      stream: _controller.operationsStream,
-                      builder: (context, _) => _controller.messages.isEmpty
-                          // 「打个招呼」只往输入框塞字，不直接发出去 ——
-                          // 误点一下就替用户发消息，代价太大。
-                          ? _EmptyChatState(onInsert: () => _insertText('嗨~'))
-                          : ChatAnimatedList(itemBuilder: itemBuilder),
-                    ),
+                    child: ChatAnimatedList(itemBuilder: itemBuilder),
                   ),
+                  // 空会话的中文空态走官方 `emptyChatListBuilder`：由
+                  // ChatAnimatedList 自己在列表为空时叠一层（`Positioned.fill`，
+                  // 输入框是它的兄弟节点、不会被盖住）。
+                  // **不要**再用 StreamBuilder 把 ChatAnimatedList 整体换成空态控件 ——
+                  // 空↔非空切换时它会反复卸载/重挂，GlobalKey 重复出现在树上、
+                  // SliverAnimatedList 索引错乱，整段消息列表随即渲染失败。
+                  // 「打个招呼」只往输入框塞字，不直接发出去（误点代价太大）。
+                  emptyChatListBuilder: (context) =>
+                      _EmptyChatState(onInsert: () => _insertText('嗨~')),
                   linkPreviewBuilder: (context, message, isSentByMe) => null,
                 ),
               ),

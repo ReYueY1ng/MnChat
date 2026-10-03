@@ -110,6 +110,38 @@ void main() {
     });
   });
 
+  group('stabilizeSameIds（消除同 id 内容变化，规避 flutter_chat_ui change 崩溃）', () {
+    test('同 id 内容变化 → 沿用 current 里的实例', () {
+      final cur = _msg('m1', 100, text: 'old');
+      final target = [_msg('m1', 100, text: 'new'), _msg('m2', 200)];
+
+      final out = stabilizeSameIds([cur], target);
+      expect(out.map((m) => m.id).toList(), ['m1', 'm2']);
+      expect(identical(out.first, cur), isTrue);
+    });
+
+    test('同 id 即使内容相同也沿用 current 实例（按 id 稳定，不比较内容）', () {
+      final cur = _msg('m1', 100, text: 'a');
+      final target = _msg('m1', 100, text: 'a');
+
+      final out = stabilizeSameIds([cur], [target]);
+      expect(identical(out.single, cur), isTrue);
+    });
+
+    test('无同 id → 原样返回 target（不复制）', () {
+      final target = [_msg('m1', 100), _msg('m2', 200)];
+      expect(identical(stabilizeSameIds(const [], target), target), isTrue);
+    });
+
+    test('仅新消息（无同 id 冲突）→ 原样返回 target', () {
+      final cur = _msg('m1', 100);
+      final target = [_msg('m1', 100), _msg('m2', 200)];
+      final out = stabilizeSameIds([cur], target);
+      expect(identical(out.first, cur), isTrue);
+      expect(identical(out.last, target.last), isTrue);
+    });
+  });
+
   group('chatHistoryToMessages（映射 + 按 id 去重）', () {
     test('echo/push 同 id 只保留一条（确定性 id 去重契约）', () {
       final history = [

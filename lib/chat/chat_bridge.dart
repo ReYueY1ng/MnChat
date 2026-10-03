@@ -89,6 +89,37 @@ ChatOps computeChatOps(List<Message> current, List<Message> target) {
   return SetAll(target);
 }
 
+/// 消除 [target] 中与 [current] **同 id** 的消息的内容差异：同 id 一律沿用
+/// [current] 里的既有实例。
+///
+/// 为什么必须要这一步：flutter_chat_ui 2.12 的 `ChatAnimatedList` 在
+/// `setMessages` 的 diff 里出现「同 id、内容不同」的 `change` 更新时，
+/// 会走 `_onChanged`（= removeItem 后同位置 insertItem）并触发
+/// `SliverAnimatedList` 的索引断言 / 「GlobalKey 重复出现在树上」，整个消息
+/// 列表随即渲染失败（表现为进入会话后消息全不见）。
+///
+/// 本项目消息 id 由 `(sessionKey, uin, time, text)` 决定，**同 id 即同一逻辑
+/// 消息**，其 `metadata`（如 `live` 标志）可能在两次映射之间翻转（`replaceHistory`
+/// 合并、历史/推送先后到达等）。保持 current 的内容即可让 diff 只含
+/// insert / remove / move，不含 change，从而绕开该崩溃；因为 id 已含正文，
+/// 沿用旧实例不会丢任何可见信息。
+List<Message> stabilizeSameIds(List<Message> current, List<Message> target) {
+  if (current.isEmpty) return target;
+  final byId = <String, Message>{for (final m in current) m.id: m};
+  var changed = false;
+  final out = <Message>[];
+  for (final m in target) {
+    final existing = byId[m.id];
+    if (existing != null && !identical(existing, m)) {
+      out.add(existing);
+      changed = true;
+    } else {
+      out.add(m);
+    }
+  }
+  return changed ? out : target;
+}
+
 /// createdAt 缺失时的兜底时间（epoch 0），保证排序/比较不抛异常。
 final DateTime _epochZero = DateTime.fromMillisecondsSinceEpoch(0, isUtc: true);
 
@@ -195,10 +226,15 @@ class ChatBridge {
     int sessionId,
   ) {
     final current = List.of(controller.messages);
-    final target = chatHistoryToMessages(
-      _service.historyOf(type, sessionId),
-      type,
-      sessionId,
+    // 先消除「同 id 内容变化」：否则 computeChatOps 会判成 update → SetAll，
+    // 而 flutter_chat_ui 的 diff 一旦产生 change 更新就会崩（见 [stabilizeSameIds]）。
+    final target = stabilizeSameIds(
+      current,
+      chatHistoryToMessages(
+        _service.historyOf(type, sessionId),
+        type,
+        sessionId,
+      ),
     );
 
     switch (computeChatOps(current, target)) {
