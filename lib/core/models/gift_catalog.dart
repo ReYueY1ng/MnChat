@@ -5,8 +5,9 @@
 ///   读 `ret.gift.gift_cfg`，逐项按 `is_time_limit` + `ctrl` 过滤；
 /// - `FriendGiftDataMgr:SendFriendGift`（`friendgiftdatamgr.lua:476-578`）
 ///   发 `act=give_gift&op_uin&id&num&type&role_name`；
-/// - 礼物名/图标来自道具定义（游戏里是 `ItemDefCsv:get(itemid).Name`），
-///   客户端没有那份 csv，用 visual-cfg `items` 兜底，取不到就只显示编号。
+/// - 礼物名**就写在 `gift_cfg` 每一项里**（`name = '纸鹤'`，线上 29/29 项都有）。
+///   图标仍然只能靠 visual-cfg `items` 兜底，但线上那份是空的（`{ items = { }}`），
+///   所以图标取不到；名字不要再去 `items` 里找。
 library;
 
 import '../services/title_config.dart' show extractLuaBlock;
@@ -185,6 +186,29 @@ GiftCatalog parseGiftCatalog(String text) {
     return m == null ? null : int.tryParse(m.group(1)!);
   }
 
+  /// `name = '纸鹤'`：名字写在 `gift_cfg` 每一项自己身上。
+  ///
+  /// （曾经只从 visual-cfg `items` 那份拿名字，而线上 `items` 是空的，
+  /// 于是面板里全是「礼物 43028」这种兜底文案。）
+  ///
+  /// 只认深度 0 的那个 `name`：每项还带一层 `ctrl = {...}`，
+  /// `ctrl` 里若也有 `name` 不能当成这份礼物的名字。
+  String? nameOf(String body) {
+    final m = RegExp(
+      r"""\bname\s*=\s*['"]([^'"]+)['"]""",
+    ).firstMatch(body);
+    if (m == null) return null;
+    var depth = 0;
+    for (var i = 0; i < m.start; i++) {
+      if (body[i] == '{') {
+        depth++;
+      } else if (body[i] == '}') {
+        depth--;
+      }
+    }
+    return depth == 0 ? m.group(1) : null;
+  }
+
   final items = <GiftItem>[];
   for (final body in topLevelBlocks(inner)) {
     final id = intOf(body, 'id');
@@ -202,6 +226,7 @@ GiftCatalog parseGiftCatalog(String text) {
         timeLimited: (intOf(body, 'is_time_limit') ?? 0) == 1,
         startTime: intOf(body, 'startTime'),
         endTime: intOf(body, 'endTime'),
+        name: nameOf(body),
       ),
     );
   }

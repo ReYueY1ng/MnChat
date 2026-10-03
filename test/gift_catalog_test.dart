@@ -113,4 +113,97 @@ void main() {
       expect(merged.byId(43004)!.displayName, '礼物 43004');
     });
   });
+
+  /// 线上真实配置（2026-10-02 抓的 `new_give_gift_config`，`gift_cfg` 共 29 项）。
+  ///
+  /// 名字就写在每一项里，而 visual-cfg `items` 那份线上是 `{ items = { }}`，
+  /// 所以只能从这里读 —— 曾经只读 items，于是面板里全是「礼物 43028」。
+  group('礼物名写在 gift_cfg 项里', () {
+    const live = '''
+{
+  gift = {
+    gift_cfg = {
+      {
+        id = 43028,
+        num = 1,
+        cost_id = 10002,
+        cost_num = 25,
+        intimacies = 25,
+        charm_value = 12,
+        if_free = 0,
+        if_advert = 0,
+        name = '纸鹤',
+        select_times = {
+          {
+            num = 1,
+          },
+        },
+        ctrl = {
+          version_min = '1.59.0',
+        },
+        is_time_limit = false,
+        is_act_get = true,
+        startTime = 1790042400000,
+      },
+      {
+        id = 43027,
+        cost_id = 10002,
+        cost_num = 18,
+        intimacies = 9,
+        name = '棒棒糖',
+      },
+      {
+        id = 43099,
+        cost_id = 10002,
+        cost_num = 5,
+      },
+    },
+  },
+}''';
+
+    test('项自带的 name 被读出来，不再退化成编号', () {
+      final c = parseGiftCatalog(live);
+      expect(c.items.length, 3);
+      expect(c.byId(43028)!.name, '纸鹤');
+      expect(c.byId(43028)!.displayName, '纸鹤');
+      expect(c.byId(43027)!.displayName, '棒棒糖');
+      // 真的没有 name 的项才回退编号
+      expect(c.byId(43099)!.displayName, '礼物 43099');
+    });
+
+    test('数字/布尔字段照旧解析（线上写的是 false 不是 0）', () {
+      final g = parseGiftCatalog(live).byId(43028)!;
+      expect(g.costNum, 25);
+      expect(g.intimacies, 25);
+      expect(g.charmValue, 12);
+      expect(g.timeLimited, isFalse);
+    });
+
+    test('ctrl 里的 name 不算这份礼物的名字', () {
+      final c = parseGiftCatalog('''
+{
+  gift = {
+    gift_cfg = {
+      {
+        id = 43028,
+        cost_id = 10002,
+        cost_num = 25,
+        ctrl = {
+          name = 'ctrl里的不是礼物名',
+        },
+      },
+    },
+  },
+}''');
+      expect(c.byId(43028)!.name, isNull);
+      expect(c.byId(43028)!.displayName, '礼物 43028');
+    });
+
+    test('items 为空时靠项内名字也能拼出完整目录', () {
+      // 线上真实情况：items 是 `{ items = { }}`，merge 拿到空表。
+      final merged = mergeGiftNames(parseGiftCatalog(live), const {});
+      expect(merged.byId(43028)!.displayName, '纸鹤');
+      expect(merged.byId(43027)!.displayName, '棒棒糖');
+    });
+  });
 }
