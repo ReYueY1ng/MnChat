@@ -309,7 +309,7 @@ class FriendClient {
   }
 
   /// 拉取我的粉丝列表 (cmd=get_user_fans_list)。
-  /// 对齐 playercenterv2fanctrl.lua:63：仅传 uin。
+  /// 对齐 playercenterv2fanctrl.lua:63：仅传 uin。响应 `{result,fans_list:[{uin}]}`。
   Future<Map<String, Object?>> queryFansList() async {
     final params = <String, String>{
       'uin': '$uin',
@@ -319,6 +319,22 @@ class FriendClient {
       path: kFriendPath,
       params: params,
       cmd: 'get_user_fans_list',
+    );
+    return _get(url);
+  }
+
+  /// 拉取我关注的人列表 (cmd=get_user_attention_list)。
+  /// 对齐 playercenterv2focusctrl.lua:157：仅传 uin。响应
+  /// `{result,attention_list:[{uin}]}`。
+  Future<Map<String, Object?>> queryAttentionList() async {
+    final params = <String, String>{
+      'uin': '$uin',
+    };
+    final url = buildFriendRequestUrl(
+      server: _gw.resolve('HttpFriend'),
+      path: kFriendPath,
+      params: params,
+      cmd: 'get_user_attention_list',
     );
     return _get(url);
   }
@@ -503,6 +519,19 @@ class FriendClient {
     final token = md5Token(now, s2, uin);
     return _call('allow_add_by_nearby', {
       'flag': allow ? '1' : '0',
+      'uin': '$uin',
+      's2t': s2t,
+      'time': '$now',
+      'token': token,
+    });
+  }
+
+  /// 查询"是否允许附近的人加我" (cmd=get_add_by_nearby_flag)。
+  /// 对齐 nearbyfriendserver.lua:217。
+  Future<Map<String, Object?>> getAddByNearbyFlag() async {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final token = md5Token(now, s2, uin);
+    return _call('get_add_by_nearby_flag', {
       'uin': '$uin',
       's2t': s2t,
       'time': '$now',

@@ -25,6 +25,13 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
   /// 本地乐观记录的群置顶状态（服务端无查询接口，仅作按钮文案切换）。
   bool _groupTop = false;
 
+  /// 本地乐观记录的群消息免打扰状态（服务端无查询接口）。
+  bool _groupIgnored = false;
+
+  /// 本地乐观记录的成员禁言 / 屏蔽状态（服务端无查询接口）。
+  final Set<int> _silenced = {};
+  final Set<int> _banned = {};
+
   @override
   void initState() {
     super.initState();
@@ -130,7 +137,23 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             label: Text(_groupTop ? '取消群置顶' : '群置顶'),
           ),
           const SizedBox(height: 8),
+          FilledButton.tonalIcon(
+            onPressed: _busy ? null : _toggleGroupIgnore,
+            icon: Icon(
+              _groupIgnored
+                  ? Icons.notifications_off
+                  : Icons.notifications_off_outlined,
+            ),
+            label: Text(_groupIgnored ? '取消群免打扰' : '群消息免打扰'),
+          ),
+          const SizedBox(height: 8),
           if (isOwner) ...[
+            FilledButton.tonalIcon(
+              onPressed: _busy ? null : _editGroupName,
+              icon: const Icon(Icons.edit_outlined),
+              label: const Text('修改群名'),
+            ),
+            const SizedBox(height: 8),
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _rejectAllGroupApplies,
               icon: const Icon(Icons.clear_all),
@@ -402,61 +425,177 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     }
   }
 
-  /// 成员操作：禁言（仅群主）/ 屏蔽消息 / 举报。
+  /// 群消息免打扰开关（服务端 act=set_slient_group，本地乐观记录文案）。
+  Future<void> _toggleGroupIgnore() async {
+    final target = !_groupIgnored;
+    setState(() => _busy = true);
+    try {
+      await ref
+          .read(chatServiceProvider)
+          .setGroupIgnore(widget.groupId, ignore: target);
+      if (mounted) setState(() => _groupIgnored = target);
+      _toast(target ? '已开启群免打扰' : '已关闭群免打扰');
+    } catch (e) {
+      _toast('操作失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 修改群名（act=update_group；头像 id/type 原样回传，避免被重置）。
+  Future<void> _editGroupName() async {
+    final info = ref.read(chatServiceProvider).groupInfo(widget.groupId);
+    final ctrl = TextEditingController(text: info?.name ?? widget.name);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('修改群名'),
+        content: TextField(
+          controller: ctrl,
+          autofocus: true,
+          maxLength: 20,
+          decoration: const InputDecoration(
+            hintText: '群名称',
+            counterText: '',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+            child: const Text('保存'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    if (name == null || name.isEmpty || _busy) return;
+    setState(() => _busy = true);
+    try {
+      await ref.read(chatServiceProvider).updateGroupInfo(
+            widget.groupId,
+            name: name,
+            iconId: info?.iconId ?? 0,
+            iconType: info?.iconType ?? 0,
+          );
+      _toast('已更新群名');
+    } catch (e) {
+      _toast('更新失败: $e');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// 成员操作：禁言/解除、屏蔽/解除、移出该群（仅群主）、举报。
   Future<void> _showMemberActions(int uin, {required bool isOwner}) async {
     final name = _displayName(uin, ref.read(chatServiceProvider));
+    final silenced = _silenced.contains(uin);
+    final banned = _banned.contains(uin);
     final action = await showModalBottomSheet<String>(
       context: context,
       builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              title: Text(plainNickname(name)),
-              dense: true,
-              enabled: false,
-            ),
-            const Divider(height: 1),
-            if (isOwner)
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
               ListTile(
-                leading: const Icon(Icons.volume_off_outlined),
-                title: const Text('禁言该成员'),
-                onTap: () => Navigator.pop(ctx, 'silent'),
+                title: Text(plainNickname(name)),
+                dense: true,
+                enabled: false,
               ),
-            ListTile(
-              leading: const Icon(Icons.visibility_off_outlined),
-              title: const Text('屏蔽该成员消息'),
-              onTap: () => Navigator.pop(ctx, 'ban'),
-            ),
-            ListTile(
-              leading: const Icon(Icons.flag_outlined),
-              title: const Text('举报该成员'),
-              onTap: () => Navigator.pop(ctx, 'report'),
-            ),
-          ],
+              const Divider(height: 1),
+              if (isOwner)
+                ListTile(
+                  leading: const Icon(Icons.volume_off_outlined),
+                  title: Text(silenced ? '解除该成员禁言' : '禁言该成员'),
+                  onTap: () => Navigator.pop(ctx, 'silent'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.visibility_off_outlined),
+                title: Text(banned ? '解除屏蔽该成员' : '屏蔽该成员消息'),
+                onTap: () => Navigator.pop(ctx, 'ban'),
+              ),
+              if (isOwner)
+                ListTile(
+                  leading: const Icon(Icons.person_remove_outlined),
+                  title: const Text('移出该群'),
+                  onTap: () => Navigator.pop(ctx, 'kick'),
+                ),
+              ListTile(
+                leading: const Icon(Icons.flag_outlined),
+                title: const Text('举报该成员'),
+                onTap: () => Navigator.pop(ctx, 'report'),
+              ),
+            ],
+          ),
         ),
       ),
     );
     if (action == null) return;
 
     final svc = ref.read(chatServiceProvider);
+
+    if (action == 'kick') {
+      final info = svc.groupInfo(widget.groupId);
+      final ok = await _confirm('移出群成员', '确定将 ${plainNickname(name)} 移出本群？');
+      if (!ok || _busy) return;
+      setState(() => _busy = true);
+      try {
+        await svc.kickGroupMembers(
+          widget.groupId,
+          uins: [uin],
+          groupCreator: info?.creatorUin ?? 0,
+          groupName: info?.name ?? widget.name,
+        );
+        _toast('已移出该成员');
+      } catch (e) {
+        _toast('操作失败: $e');
+      } finally {
+        if (mounted) setState(() => _busy = false);
+      }
+      return;
+    }
+
     setState(() => _busy = true);
     try {
       switch (action) {
         case 'silent':
+          final target = !silenced;
           await svc.setGroupMemberSilent(
             widget.groupId,
             opUin: uin,
-            silent: true,
+            silent: target,
           );
-          _toast('已禁言');
+          if (mounted) {
+            setState(() {
+              if (target) {
+                _silenced.add(uin);
+              } else {
+                _silenced.remove(uin);
+              }
+            });
+          }
+          _toast(target ? '已禁言' : '已解除禁言');
         case 'ban':
+          final target = !banned;
           await svc.setGroupMemberBanned(
             widget.groupId,
             opUin: uin,
-            ban: true,
+            ban: target,
           );
-          _toast('已屏蔽该成员消息');
+          if (mounted) {
+            setState(() {
+              if (target) {
+                _banned.add(uin);
+              } else {
+                _banned.remove(uin);
+              }
+            });
+          }
+          _toast(target ? '已屏蔽该成员消息' : '已解除屏蔽');
         case 'report':
           await svc.reportGroupMember(widget.groupId, opUin: uin);
           _toast('已提交举报');

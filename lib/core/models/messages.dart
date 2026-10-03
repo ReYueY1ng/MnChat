@@ -570,12 +570,19 @@ class GroupInfo {
   /// 我是否被本群静音（ban_group==1 → ignoreAll）。
   final bool isMuteAll;
 
+  /// 群头像 id / 类型（`group_iconid` / `group_icontype`）。
+  /// 改群名时要原样回传，否则会把头像重置掉。
+  final int iconId;
+  final int iconType;
+
   const GroupInfo({
     required this.groupId,
     required this.name,
     this.creatorUin = 0,
     this.members = const [],
     this.isMuteAll = false,
+    this.iconId = 0,
+    this.iconType = 0,
   });
 
   Map<String, Object?> toJson() => {
@@ -584,6 +591,8 @@ class GroupInfo {
         'creator_uin': creatorUin,
         'members': members,
         'is_mute_all': isMuteAll,
+        'icon_id': iconId,
+        'icon_type': iconType,
       };
 
   factory GroupInfo.fromJson(Map<String, Object?> json) => GroupInfo(
@@ -592,5 +601,7 @@ class GroupInfo {
         creatorUin: (json['creator_uin'] as num?)?.toInt() ?? 0,
         members: (json['members'] as List?)?.whereType<num>().map((e) => e.toInt()).toList() ?? const [],
         isMuteAll: json['is_mute_all'] as bool? ?? false,
+        iconId: (json['icon_id'] as num?)?.toInt() ?? 0,
+        iconType: (json['icon_type'] as num?)?.toInt() ?? 0,
       );
 }

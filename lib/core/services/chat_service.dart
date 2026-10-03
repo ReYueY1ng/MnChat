@@ -693,6 +693,101 @@ class ChatService {
     return group.rejectGroupApplyAll(groupId);
   }
 
+  /// 踢出群成员（act=quit_group + op_uin，群主专用）。
+  Future<Map<String, Object?>> kickGroupMembers(
+    int groupId, {
+    required List<int> uins,
+    int groupCreator = 0,
+    String groupName = '',
+  }) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.kickMembers(
+      groupId: groupId,
+      uins: uins,
+      groupCreator: groupCreator,
+      groupName: groupName,
+    );
+  }
+
+  /// 群消息免打扰（服务端，act=set_slient_group）。
+  Future<Map<String, Object?>> setGroupIgnore(
+    int groupId, {
+    required bool ignore,
+  }) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.setGroupIgnore(groupId, ignore: ignore);
+  }
+
+  /// 修改群名 / 群头像（act=update_group）。成功后刷新群详情。
+  Future<Map<String, Object?>> updateGroupInfo(
+    int groupId, {
+    required String name,
+    required int iconId,
+    required int iconType,
+  }) async {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    final resp = await group.updateGroupInfo(
+      groupId: groupId,
+      groupName: name,
+      iconId: iconId,
+      iconType: iconType,
+    );
+    await refreshGroupInfo(groupId);
+    return resp;
+  }
+
+  /// 待处理的入群申请列表（act=query_user_groups_apply_list）。
+  Future<Map<String, Object?>> groupApplyList() {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.queryGroupApplyList();
+  }
+
+  /// 同意入群申请（act=agree_group_apply）。
+  Future<Map<String, Object?>> agreeGroupApply(int groupId) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.agreeGroupApply(groupId);
+  }
+
+  /// 拒绝单个入群申请（act=reject_group_apply）。
+  Future<Map<String, Object?>> rejectGroupApply(int groupId) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.rejectGroupApply(groupId);
+  }
+
+  /// 退群 / 被移出记录（act=query_user_groups_quit_list）。
+  Future<Map<String, Object?>> quitGroupRecords() {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.queryUserGroupsQuitList();
+  }
+
+  /// 删除一条退群记录（act=del_group_quit_list）。
+  Future<Map<String, Object?>> delQuitGroupRecord(int groupId) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.delGroupQuitList(groupId);
+  }
+
+  /// 是否允许他人邀请我入群（act=update_user_groups, join）。
+  Future<Map<String, Object?>> setAllowInvitedToGroup({required bool allow}) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.updateUserGroupsJoin(allow: allow);
+  }
+
+  /// 是否允许自动加入被邀请的群（act=update_user_groups, auto_join）。
+  Future<Map<String, Object?>> setAllowAutoJoinGroup({required bool allow}) {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.updateUserGroupsAutoJoin(allow: allow);
+  }
+
   // ── 好友设置 / 社交（服务端同步）────────────────────────────────────────
 
   /// 修改好友备注（cmd=set_note，服务端同步）。成功刷新会话列表使昵称生效。

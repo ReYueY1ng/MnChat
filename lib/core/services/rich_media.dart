@@ -75,20 +75,38 @@ class ShareType {
     achieve: '成就',
     chameleon: '变色龙皮肤',
     weapon: '武器',
+    greatEwallGuard: '长城守卫',
+    douluoTeam: '斗罗小队',
+    weekendCarnival: '周末狂欢',
+    bpCompetitionMsg: '竞技消息',
     pat: '拍一拍',
     dynamics: '动态',
     dynamicNotice: '动态',
     action: '动作',
+    bpFlyChess: '飞行棋',
     customPic: '图片',
     customPanel: '卡片',
+    customCrShare: '分享',
+    customFlowersShare: '鲜花',
+    versionResCrShare: '资源',
+    customExploreAct: '探索',
+    customWeekSignShare: '周签',
+    customTreasureSummon: '寻宝',
+    dynamicInviteAnswer: '邀请回答',
+    customFishCollectShare: '钓鱼',
+    customPeerShare: '伙伴',
     resourceGoodShare: '资源',
     familyRecruit: '家族招募',
     familyInvite: '家族邀请',
     familyServer: '家族服务器',
+    customSpmtShare: '分享',
     familyDynamics: '家族动态',
     familyRedPacket: '家族红包',
     rankSystem: '排行榜',
+    contentFavsShare: '收藏',
     qixiPartnerInvite: '伙伴邀请',
+    avatarMatch: '头像匹配',
+    mscardShare: '卡片',
   };
 
   static String label(int v) => labels[v] ?? '分享';
@@ -255,6 +273,9 @@ class RichMedia {
     if (url.isNotEmpty) return url;
     return content.isEmpty ? title : content;
   }
+
+  /// 通用分享卡兜底说明：确有卡片但本地没有可展示字段时用。
+  String get hint => '来自迷你世界的分享，请在游戏内查看';
 
   /// 从 url_encode(base64(JSON)) 解码；失败返回 null。
   static RichMedia? decode(String? rawExt) {

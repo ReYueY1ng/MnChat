@@ -335,8 +335,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     child: StreamBuilder<void>(
                       stream: _controller.operationsStream,
                       builder: (context, _) => _controller.messages.isEmpty
-                          // 「打个招呼」直接发送，而不是往输入框塞字。
-                          ? _EmptyChatState(onSayHi: () => _send('嗨~'))
+                          // 「打个招呼」只往输入框塞字，不直接发出去 ——
+                          // 误点一下就替用户发消息，代价太大。
+                          ? _EmptyChatState(onInsert: () => _insertText('嗨~'))
                           : ChatAnimatedList(itemBuilder: itemBuilder),
                     ),
                   ),
@@ -544,10 +545,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
 }
 
 /// 中文空状态：覆盖 flutter_chat_ui 内置的英文 "No messages yet"。
+///
+/// 「打个招呼」按钮只把招呼语填进输入框（同快捷短语），发送由用户自己按发送键 ——
+/// 空态里任何一键直发都会在误触时真的给对方发消息。
 class _EmptyChatState extends StatelessWidget {
-  final VoidCallback onSayHi;
+  final VoidCallback onInsert;
 
-  const _EmptyChatState({required this.onSayHi});
+  const _EmptyChatState({required this.onInsert});
 
   @override
   Widget build(BuildContext context) {
@@ -586,7 +590,7 @@ class _EmptyChatState extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             OutlinedButton.icon(
-              onPressed: onSayHi,
+              onPressed: onInsert,
               icon: const Icon(Icons.waving_hand_outlined, size: 16),
               label: const Text('打个招呼'),
             ),
@@ -1144,6 +1148,15 @@ class _RichMediaBubble extends ConsumerWidget {
   }
 
   Widget _card(BuildContext context, RichMedia media, ThemeData theme) {
+    // 除图标+标题外是否有可展示的细节；没有则给一句兜底说明，避免空卡片。
+    final hasDetail =
+        media.name.isNotEmpty ||
+        media.author.isNotEmpty ||
+        media.content.isNotEmpty ||
+        media.picList.isNotEmpty ||
+        (media.isUrl && media.url.isNotEmpty) ||
+        media.isRedPacket ||
+        ((media.isPat || media.isCustomPanel) && media.subtitle.isNotEmpty);
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: media.isDynamicNotice || media.isDynamics
@@ -1268,6 +1281,13 @@ class _RichMediaBubble extends ConsumerWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+            if (!hasDetail)
+              Text(
+                media.hint,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
           ],
         ),
       ),
@@ -1276,7 +1296,9 @@ class _RichMediaBubble extends ConsumerWidget {
 
   IconData _iconFor(RichMedia media) {
     if (media.isFriendGift) return Icons.card_giftcard;
-    if (media.isRedPacket) return Icons.redeem;
+    if (media.isRedPacket || media.shareType == ShareType.familyRedPacket) {
+      return Icons.redeem;
+    }
     if (media.isRoomInvite) return Icons.videogame_asset_outlined;
     if (media.isPat) return Icons.touch_app_outlined;
     if (media.isAchieve) return Icons.emoji_events_outlined;
@@ -1284,15 +1306,41 @@ class _RichMediaBubble extends ConsumerWidget {
     if (media.isDynamicNotice || media.isDynamics) return Icons.public;
     if (media.isMap) return Icons.map_outlined;
     if (media.isUrl) return Icons.link;
-    if (media.shareType == ShareType.role) return Icons.person_outline;
-    if (media.shareType == ShareType.skin ||
-        media.shareType == ShareType.chameleon) {
-      return Icons.checkroom_outlined;
+    switch (media.shareType) {
+      case ShareType.role:
+        return Icons.person_outline;
+      case ShareType.skin:
+      case ShareType.chameleon:
+        return Icons.checkroom_outlined;
+      case ShareType.ride:
+        return Icons.directions_car_outlined;
+      case ShareType.weapon:
+        return Icons.hardware_outlined;
+      case ShareType.avatar:
+      case ShareType.avatarMatch:
+        return Icons.account_circle_outlined;
+      case ShareType.familyRecruit:
+      case ShareType.familyInvite:
+      case ShareType.familyServer:
+      case ShareType.familyDynamics:
+        return Icons.family_restroom_outlined;
+      case ShareType.rankSystem:
+        return Icons.leaderboard_outlined;
+      case ShareType.contentFavsShare:
+        return Icons.bookmark_outline;
+      case ShareType.qixiPartnerInvite:
+      case ShareType.customPeerShare:
+        return Icons.favorite_outline;
+      case ShareType.resourceGoodShare:
+      case ShareType.versionResCrShare:
+        return Icons.inventory_2_outlined;
+      case ShareType.action:
+        return Icons.sports_martial_arts_outlined;
+      case ShareType.customPic:
+        return Icons.image_outlined;
+      default:
+        return Icons.article_outlined;
     }
-    if (media.shareType == ShareType.ride) return Icons.directions_car_outlined;
-    if (media.shareType == ShareType.weapon) return Icons.hardware_outlined;
-    if (media.shareType == ShareType.avatar) return Icons.account_circle_outlined;
-    return Icons.article_outlined;
   }
 }
 

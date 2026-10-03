@@ -48,6 +48,8 @@ class SettingsKeys {
   static const String lockAttempts = 'app_lock_pin_attempts'; // 连续失败次数
   static const String lockLockedUntil = 'app_lock_pin_locked_until'; // 锁定截止 epoch 毫秒
   static const String leaveVisitTrace = 'leave_visit_trace'; // 访问主页留下踪迹 '1'/'0'
+  static const String allowInvitedToGroup = 'allow_invited_to_group'; // 允许他人拉我入群 '1'/'0'
+  static const String allowAutoJoinGroup = 'allow_auto_join_group'; // 自动加入被邀请的群 '1'/'0'
 
   // ── 桌面端 ──────────────────────────────────────────────────────────
   static const String closeToTray = 'close_to_tray'; // 关闭到托盘 '1'/'0'

@@ -656,6 +656,68 @@ class LeaveVisitTraceNotifier extends _BoolSettingNotifier {
   bool get fallback => false;
 }
 
+/// 允许他人拉我入群（本地镜像 + 服务端 `update_user_groups?join=`）。
+///
+/// 服务端没有查询接口，故以本地持久化为准，变更时同步一份给服务端。
+final allowInvitedToGroupProvider =
+    NotifierProvider<AllowInvitedToGroupNotifier, bool>(
+      AllowInvitedToGroupNotifier.new,
+    );
+
+class AllowInvitedToGroupNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    _trySettings(ref)
+        ?.getBool(SettingsKeys.allowInvitedToGroup, fallback: true)
+        .then((v) {
+          if (!ref.mounted) return;
+          if (v != state) state = v;
+        })
+        .catchError((Object _) {});
+    return true;
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    await _trySettings(ref)?.setBool(SettingsKeys.allowInvitedToGroup, value);
+    try {
+      await ref.read(chatServiceProvider).setAllowInvitedToGroup(allow: value);
+    } catch (_) {
+      // 服务端同步失败不影响本地记录
+    }
+  }
+}
+
+/// 自动加入被邀请的群（本地镜像 + 服务端 `update_user_groups?auto_join=`）。
+final allowAutoJoinGroupProvider =
+    NotifierProvider<AllowAutoJoinGroupNotifier, bool>(
+      AllowAutoJoinGroupNotifier.new,
+    );
+
+class AllowAutoJoinGroupNotifier extends Notifier<bool> {
+  @override
+  bool build() {
+    _trySettings(ref)
+        ?.getBool(SettingsKeys.allowAutoJoinGroup, fallback: false)
+        .then((v) {
+          if (!ref.mounted) return;
+          if (v != state) state = v;
+        })
+        .catchError((Object _) {});
+    return false;
+  }
+
+  Future<void> set(bool value) async {
+    state = value;
+    await _trySettings(ref)?.setBool(SettingsKeys.allowAutoJoinGroup, value);
+    try {
+      await ref.read(chatServiceProvider).setAllowAutoJoinGroup(allow: value);
+    } catch (_) {
+      // 服务端同步失败不影响本地记录
+    }
+  }
+}
+
 /// 聊天字号缩放（[ChatFontScaleNotifier.min] ~ [ChatFontScaleNotifier.max]）。
 final chatFontScaleProvider =
     NotifierProvider<ChatFontScaleNotifier, double>(ChatFontScaleNotifier.new);

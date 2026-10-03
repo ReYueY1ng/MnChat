@@ -63,6 +63,36 @@ class GroupClient {
   Future<Map<String, Object?>> quitGroup(Object groupId) =>
       _call('quit_group', {'group_id': '$groupId'});
 
+  /// 踢出群成员 (act=quit_group + op_uin)，群主专用。
+  ///
+  /// 对齐 friendservice.lua `ReqKickChatGroup` (5563)：复用的是 `quit_group`
+  /// 动作，靠 `op_uin` 区分踢谁（自己退群时不带 op_uin）。
+  /// extend_data = url_encode(base64(JSON{Type:"KickGroup",GroupID,GroupCreator,
+  /// KickUins,group_name}))。
+  Future<Map<String, Object?>> kickMembers({
+    required Object groupId,
+    required List<int> uins,
+    int groupCreator = 0,
+    String groupName = '',
+    int pushChannel = 1,
+  }) {
+    final opUins = uins.join(',');
+    final extend = <String, Object?>{
+      'Type': 'KickGroup',
+      'GroupID': '$groupId',
+      'GroupCreator': groupCreator,
+      'KickUins': opUins,
+      'group_name': groupName,
+    };
+    return _call('quit_group', {
+      'group_id': '$groupId',
+      'op_uin': opUins,
+      'extend_data': _encodeExtendData(extend),
+      'json': '1',
+      'pushchannel': '$pushChannel',
+    });
+  }
+
   /// 转让群主。
   Future<Map<String, Object?>> transferGroup(Map<String, String> params) =>
       _call('transfer_group', params);
@@ -223,6 +253,49 @@ class GroupClient {
         'status': top ? '1' : '0',
         'json': '1',
       });
+
+  /// 群消息免打扰（服务端）(act=set_slient_group)。[ignore]=true 屏蔽本群消息。
+  /// 对齐 friendservice.lua `ReqIgnoreGroup` (6734)（动作名是游戏里的 `slient` 拼写）。
+  Future<Map<String, Object?>> setGroupIgnore(Object groupId,
+          {required bool ignore}) =>
+      _call('set_slient_group', {
+        'group_id': '$groupId',
+        'status': ignore ? '1' : '0',
+        'json': '1',
+      });
+
+  /// 修改群资料 (act=update_group)：群名 / 群头像。
+  ///
+  /// 对齐 friendservice.lua `ReqUpdateInfoChatGroup` (5627)：
+  /// group_name 走 url_encode（同 [createGroupWithMembers]，由调用方完成），
+  /// extend_data = url_encode(base64(JSON{Type:"UpdateGroupInfo",GroupID,
+  /// GroupName,iconType,iconID}))。
+  Future<Map<String, Object?>> updateGroupInfo({
+    required Object groupId,
+    required String groupName,
+    required int iconId,
+    required int iconType,
+    int pushChannel = 1,
+  }) {
+    final encodedName = luaUrlEncode(groupName);
+    final extend = <String, Object?>{
+      'Type': 'UpdateGroupInfo',
+      'GroupID': '$groupId',
+      'GroupName': groupName,
+      'iconType': iconType,
+      'iconID': iconId,
+    };
+    return _call('update_group', {
+      'group_id': '$groupId',
+      'group_name': encodedName,
+      'group_icontype': '$iconType',
+      'group_iconid': '$iconId',
+      'extend_data': _encodeExtendData(extend),
+      'json': '1',
+      'auto_join': '0',
+      'pushchannel': '$pushChannel',
+    });
+  }
 
   /// 禁言/取消禁言群成员 (act=set_silent)。
   /// 对齐 ReqGroupChatSetSilent (5782)：status=1 禁言。

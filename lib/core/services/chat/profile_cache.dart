@@ -175,6 +175,8 @@ class ProfileCache {
       creatorUin: creator,
       members: members,
       isMuteAll: muteAll,
+      iconId: ChatPushDispatcher.toNum(m['IconID'] ?? m['group_iconid']),
+      iconType: ChatPushDispatcher.toNum(m['IconType'] ?? m['group_icontype']),
     );
   }
 

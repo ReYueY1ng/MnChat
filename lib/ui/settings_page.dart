@@ -10,9 +10,13 @@ import '../core/services/app_lock.dart';
 import '../core/services/tray_service.dart';
 import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
+import 'bubble_page.dart';
 import 'data_page.dart';
 import 'message_settings_page.dart';
+import 'nearby_page.dart';
 import 'profile_page.dart';
+import 'quit_group_page.dart';
+import 'relation_page.dart';
 import 'social_sign_page.dart';
 import 'theme/app_tokens.dart';
 import 'theme_settings_page.dart';
@@ -30,6 +34,10 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   bool _autoLogin = false;
   bool _autoLoginLoaded = false;
 
+  /// 「拒绝陌生人加好友」开关（服务端 cmd=get/set_closeapply_flag）。
+  bool _closeapply = false;
+  bool _closeapplyLoaded = false;
+
   /// 桌面端（linux/windows）才显示托盘相关项。
   bool get _isDesktop =>
       defaultTargetPlatform == TargetPlatform.linux ||
@@ -39,6 +47,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
   void initState() {
     super.initState();
     _loadAutoLogin();
+    _loadCloseapply();
   }
 
   void _toast(String text) {
@@ -68,6 +77,32 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
       await settings.clearCredentials();
     }
     _toast(value ? '已开启自动登录（下次登录将保存凭据）' : '已关闭自动登录');
+  }
+
+  /// 读取「拒绝陌生人加好友」开关（服务端）。
+  Future<void> _loadCloseapply() async {
+    try {
+      final v = await ref.read(chatServiceProvider).closeapplyEnabled();
+      if (!mounted) return;
+      setState(() {
+        _closeapply = v;
+        _closeapplyLoaded = true;
+      });
+    } catch (_) {
+      // 拉取失败：开关不可交互，避免误导
+      if (mounted) setState(() => _closeapplyLoaded = true);
+    }
+  }
+
+  Future<void> _toggleCloseapply(bool value) async {
+    setState(() => _closeapply = value);
+    try {
+      await ref.read(chatServiceProvider).setCloseapplyEnabled(on: value);
+      _toast(value ? '已开启：拒绝陌生人加好友' : '已关闭：允许陌生人加好友');
+    } catch (e) {
+      if (mounted) setState(() => _closeapply = !value);
+      _toast('设置失败: $e');
+    }
   }
 
   Future<void> _logout() async {
@@ -331,6 +366,58 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
                       ? _toggleCloseToTray
                       : null,
                 ),
+
+              // ── 社交 ────────────────────────────────────────────────
+              _SectionHeader('社交'),
+              _navCard(
+                icon: Icons.people_outline,
+                title: '关注与粉丝',
+                subtitle: '查看我关注的人和我的粉丝',
+                page: const RelationPage(),
+              ),
+              _navCard(
+                icon: Icons.near_me_outlined,
+                title: '附近的人',
+                subtitle: '按经纬度查找附近的玩家',
+                page: const NearbyPage(),
+              ),
+              _navCard(
+                icon: Icons.chat_bubble_outline,
+                title: '聊天气泡',
+                subtitle: '切换已拥有的聊天气泡',
+                page: const BubblePage(),
+              ),
+              _navCard(
+                icon: Icons.group_off_outlined,
+                title: '退群记录',
+                subtitle: '被移出 / 已退出的群提醒',
+                page: const QuitGroupPage(),
+              ),
+              _switchCard(
+                icon: Icons.person_off_outlined,
+                title: '拒绝陌生人加好友',
+                subtitle: _closeapplyLoaded
+                    ? '开启后陌生人无法添加我为好友'
+                    : '读取中…',
+                value: _closeapply,
+                onChanged: _closeapplyLoaded ? _toggleCloseapply : null,
+              ),
+              _switchCard(
+                icon: Icons.group_add_outlined,
+                title: '允许他人拉我入群',
+                subtitle: '关闭后他人邀请将被拒绝',
+                value: ref.watch(allowInvitedToGroupProvider),
+                onChanged: (v) =>
+                    ref.read(allowInvitedToGroupProvider.notifier).set(v),
+              ),
+              _switchCard(
+                icon: Icons.group_add_outlined,
+                title: '自动加入被邀请的群',
+                subtitle: '开启后收到邀请将自动进群',
+                value: ref.watch(allowAutoJoinGroupProvider),
+                onChanged: (v) =>
+                    ref.read(allowAutoJoinGroupProvider.notifier).set(v),
+              ),
 
               // ── 消息与通知 ──────────────────────────────────────────
               _SectionHeader('消息与通知'),
