@@ -6,7 +6,13 @@
 ///
 /// `type`（payType）取值来自 `friendgiftdatamgr.lua:15` 的
 /// `paytype = { costItem=3, ad=2, free=1, item=4 }`：
-/// 付费礼物用 3（消耗迷你币购买）、看广告用 2、免费礼物用 1。
+/// 付费礼物用 3（消耗迷你币购买）、看广告用 2、免费礼物用 1、
+/// **从礼物仓库赠送用 4**（仓库里有就直接扣库存免费送）。
+///
+/// 说明：游戏里每个礼物格子会标「仓库里有几个」（`getAccountItemNum`，数据来自
+/// 账号服务的 `BillDataSvr.ItemInfo`）——那份数据本客户端没有接入，所以无法展示
+/// 持有数量、也无法自动判断「该走仓库还是该扣费」。这里改为让用户显式选择
+/// 「从仓库赠送」，由服务端校验（不足会回业务码，界面按码提示）。
 library;
 
 import 'package:material_ui/material_ui.dart';
@@ -69,6 +75,9 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
   static int _payTypeOf(GiftItem g) => g.ad
       ? 2
       : (g.free ? 1 : 3);
+
+  /// 从礼物仓库赠送（`paytype.item`）。
+  static const int _payTypeItem = 4;
 
   @override
   Widget build(BuildContext context) {
@@ -194,11 +203,12 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
 
   /// 选数量 → 确认 → 发送。
   Future<void> _confirmAndSend(GiftItem g) async {
-    final num = await showDialog<int>(
+    final picked = await showDialog<(int, bool)>(
       context: context,
       builder: (ctx) => _GiftCountDialog(gift: g),
     );
-    if (num == null || num <= 0 || !mounted) return;
+    if (picked == null || picked.$1 <= 0 || !mounted) return;
+    final (num, fromWarehouse) = picked;
 
     setState(() => _sending = true);
     final messenger = ScaffoldMessenger.of(context);
@@ -210,7 +220,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
             desUin: widget.uin,
             itemId: g.id,
             num: num,
-            payType: _payTypeOf(g),
+            payType: fromWarehouse ? _payTypeItem : _payTypeOf(g),
             addValue: g.intimacies * num,
           );
       messenger.showSnackBar(
@@ -238,9 +248,18 @@ class _GiftCountDialog extends StatefulWidget {
 class _GiftCountDialogState extends State<_GiftCountDialog> {
   int _num = 1;
 
+  /// 从礼物仓库赠送（免费，扣库存）；由服务端校验是否够。
+  bool _warehouse = false;
+
   @override
   Widget build(BuildContext context) {
     final g = widget.gift;
+    final theme = Theme.of(context);
+    final payText = _warehouse
+        ? '从仓库赠送 $_num 份（仓库不足会失败）'
+        : g.free || g.ad
+        ? (g.ad ? '看广告赠送 $_num 份' : '免费赠送 $_num 份')
+        : '共 ${g.costNum * _num} ${g.currency}';
     return AlertDialog(
       title: Text(g.displayName),
       content: Column(
@@ -262,16 +281,22 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
               ),
             ],
           ),
-          Text(
-            g.free || g.ad
-                ? (g.ad ? '看广告赠送 $_num 份' : '免费赠送 $_num 份')
-                : '共 ${g.costNum * _num} ${g.currency}',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
+          Text(payText, style: theme.textTheme.bodySmall),
           if (g.intimacies > 0)
             Text(
               '默契度 +${g.intimacies * _num}',
-              style: Theme.of(context).textTheme.bodySmall,
+              style: theme.textTheme.bodySmall,
+            ),
+          // 付费礼物（迷你币购买）允许改用仓库里的存货免费送 —— 本客户端取不到
+          // 仓库持有数（见文件头），只能由用户自己选择、服务端校验。
+          if (!g.free)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              value: _warehouse,
+              title: const Text('从礼物仓库赠送'),
+              subtitle: const Text('仓库里有就免费，不足则失败'),
+              onChanged: (v) => setState(() => _warehouse = v),
             ),
         ],
       ),
@@ -281,7 +306,7 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
           child: const Text('取消'),
         ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(_num),
+          onPressed: () => Navigator.of(context).pop((_num, _warehouse)),
           child: const Text('赠送'),
         ),
       ],

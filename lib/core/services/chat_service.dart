@@ -68,6 +68,12 @@ class SessionSnapshot {
   const SessionSnapshot(this.sessions, this.contacts);
 }
 
+/// 礼物接口业务码 → 人话（120264 = `ErrorCode.ERROR_COST`，货币不足）。
+String _giftErrorText(String code) => switch (code) {
+  '120264' => '迷你币/迷你豆不足',
+  _ => '赠送失败（错误码 $code）',
+};
+
 /// 聊天服务。
 class ChatService {
   // ── 认证状态 ────────────────────────────────────────────────────────────
@@ -905,7 +911,11 @@ class ChatService {
       roleName: myNickname,
     );
     final code = resp['ret'] ?? resp['code'];
-    if (code == null || '$code' != '0') return false;
+    if (code == null || '$code' != '0') {
+      // 赠送失败：把业务码翻成人话再抛，UI 直接显示原因（120264 = ERROR_COST，
+      // 即迷你币/迷你豆不足）。此前只返回 false，用户只看到「赠送失败」四个字。
+      throw StateError(_giftErrorText('$code'));
+    }
 
     final data = resp['data'];
     final token = data is Map ? (data['token']?.toString() ?? '') : '';

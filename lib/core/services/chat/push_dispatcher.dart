@@ -14,6 +14,7 @@ import 'dart:convert';
 import '../../models/emoji_catalog.dart' show isDynamicEmojiHint;
 import '../../models/messages.dart';
 import '../chatpush.dart';
+import '../rich_media.dart' show RichMedia;
 import '../../protocol/lua_table.dart' show decodeHttpResponse;
 import '../../utils/log.dart';
 
@@ -122,6 +123,19 @@ class ChatPushDispatcher {
             '动态表情缺 interCode：extend_data=${ext == null || ext.isEmpty ? "(空)" : ext}',
             tag: _logTag,
           );
+        }
+        // 诊断：礼物卡靠 extend_data 的 `Type=="SendFriendGift"` 渲染。若正文是礼物
+        // 兜底文案、却取不到可解码的 extend_data，把原文打出来 —— 用以判定是发送端
+        // 的 msgtype 不对（服务端未透传 extend_data）、还是服务端/编码的问题。
+        if (m.text.contains('默契礼物')) {
+          final media = RichMedia.decode(ext);
+          if (media == null || !media.isFriendGift) {
+            log.warn(
+              '收到礼物兜底文案但 extend_data 不可用：'
+              'extend_data=${ext == null || ext.isEmpty ? "(空)" : ext}',
+              tag: _logTag,
+            );
+          }
         }
         _upsertFriendMessage(src, m);
         // 推送携带好友在线状态（online 字段）→ 更新会话在线标识。
