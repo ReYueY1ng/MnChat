@@ -93,6 +93,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
     super.initState();
     _bridge = ref.read(chatBridgeProvider);
     _controller = _bridge.controllerFor(widget.type, widget.sessionId);
+    // 进入会话即与最新历史对账一次：会话关闭期间到达的消息（那时没有控制器）、
+    // 或历史拉回导致的增删，都要在这里补齐 —— 否则要等到「发一条消息」触发的
+    // 那次 reconcile 才会补上，表现为「只收不发就吞消息」。幂等（无差异走 NoOp）。
+    _bridge.reconcile(_controller, widget.type, widget.sessionId);
     // 提前持有：Riverpod 3.x 禁止在 dispose 中再访问 ref。
     _service = ref.read(chatServiceProvider);
     WidgetsBinding.instance.addObserver(this);

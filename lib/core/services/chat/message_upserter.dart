@@ -103,16 +103,21 @@ class MessageUpserter {
     _emitSessionSnapshot();
   }
 
-  /// 整段替换某会话的历史（网络/离线历史拉回时）：升序归位 → 落盘 →
-  /// 回填会话摘要 → 发快照 → 通知已打开的聊天窗口刷新。
+  /// 拉回某会话历史（网络/离线历史拉回时）：与已有历史**合并** → 升序归位 →
+  /// 落盘 → 回填会话摘要 → 发快照 → 通知已打开的聊天窗口刷新。
+  ///
+  /// 注意是「合并」而非「替换」：`buddysvr.chat_query` 是**消费式读取**，返回的
+  /// 只是离线队列，既不含已经通过推送（WS）收到的消息，也不含更早的历史；直接
+  /// 整体覆盖会把它们从内存和库里删掉（用户侧表现为「收到消息后进会话就少了几条」）。
   void replaceHistory(ChatSessionType type, int id, List<ChatMessage> msgs) {
     if (msgs.isEmpty) return;
     final key = MessageStore.sessionKey(type, id);
+    final prev = _messagesCache[key];
     // `buddysvr.chat_query` 只回 `[who, ts, text]` 三元组，**没有 extend_data**：
     // 直接覆盖会把已有的 interCode（动态/互动表情的真身）冲掉，表情就退化回
     // 「请升级到最新版本查看」。所以按 (uin,time,text) 回填已丢失的字段。
-    final merged = preserveEmojiFields(msgs, _messagesCache[key]);
-    final sorted = sortMessagesAscending(merged);
+    final merged = preserveEmojiFields(msgs, prev);
+    final sorted = sortMessagesAscending(mergeHistory(merged, prev));
     _messagesCache[key] = sorted;
     _store.persistHistory(type, id, sorted);
     final map = type == ChatSessionType.friend
@@ -127,6 +132,25 @@ class MessageUpserter {
     // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配）。
     _emitEvent(type, id, sorted.last);
   }
+}
+
+/// 把「本次拉到的历史」与「已有的内存历史」合并成并集（按 `(uin,time,text)` 去重，
+/// 顺序为先 incoming 后 existing 里多出来的）。纯函数，便于单测。
+///
+/// 存在的意义：`chat_query` 消费式读取只回离线队列，不含已收到的推送/更早历史，
+/// 若用本次结果整体替换，就会把这些消息删掉。
+List<ChatMessage> mergeHistory(
+  List<ChatMessage> incoming,
+  List<ChatMessage>? existing,
+) {
+  if (existing == null || existing.isEmpty) return incoming;
+  String keyOf(ChatMessage m) => '${m.uin}:${m.time}:${m.text}';
+  final seen = <String>{for (final m in incoming) keyOf(m)};
+  final out = <ChatMessage>[...incoming];
+  for (final m in existing) {
+    if (seen.add(keyOf(m))) out.add(m);
+  }
+  return out;
 }
 
 /// 用旧消息里已有的表情字段，补回新拉到的历史消息上。

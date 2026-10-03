@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/chat/message_upserter.dart'
-    show preserveEmojiFields;
+    show mergeHistory, preserveEmojiFields;
 
 /// 历史整段替换时的表情字段回填：
 /// `chat_query` 只回 `[who, ts, text]` 三元组（没有 extend_data），
@@ -56,5 +56,35 @@ void main() {
     final incoming = [msg()];
     expect(preserveEmojiFields(incoming, null), same(incoming));
     expect(preserveEmojiFields(incoming, const []), same(incoming));
+  });
+
+  group('mergeHistory（历史拉回时与已有消息合并，不吞消息）', () {
+    ChatMessage m(String text, int time) =>
+        ChatMessage(uin: 42, text: text, time: time);
+
+    test('本次未返回、但已在内存里的消息保留（chat_query 消费式读取）', () {
+      final existing = [m('推送收到的', 300)];
+      final incoming = [m('离线队列里的', 100)];
+
+      final out = mergeHistory(incoming, existing);
+      expect(out.map((e) => e.text), containsAll(['离线队列里的', '推送收到的']));
+      expect(out, hasLength(2));
+    });
+
+    test('同 (uin,time,text) 去重，保留 incoming 的那份', () {
+      final existing = [m('hi', 100)];
+      final incomingMsg = m('hi', 100);
+      final incoming = [incomingMsg];
+
+      final out = mergeHistory(incoming, existing);
+      expect(out, hasLength(1));
+      expect(identical(out.single, incomingMsg), isTrue);
+    });
+
+    test('无旧历史时原样返回 incoming（不复制）', () {
+      final incoming = [m('a', 1)];
+      expect(mergeHistory(incoming, null), same(incoming));
+      expect(mergeHistory(incoming, const []), same(incoming));
+    });
   });
 }
