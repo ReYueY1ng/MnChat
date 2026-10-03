@@ -919,7 +919,15 @@ class ChatService {
     // 低版本提示文案（GetS(70974) 取逗号前那段），正文只为兼容旧客户端。
     final text = '收到来自「$myNickname」的默契礼物';
     try {
-      await friend.sendChatMsg(desUin: desUin, msg: text, extendData: extend);
+      // 必须 msgtype=3（对齐 friendgiftdatamgr.lua:443 NewSendGiftMsg）：
+      // 卡片类消息服务端才会把 extend_data 透传给对端；用默认的 msgtype=1
+      // 时对端只收到那句文本、渲染不出礼物卡。
+      await friend.sendChatMsg(
+        desUin: desUin,
+        msg: text,
+        msgtype: 3,
+        extendData: extend,
+      );
     } catch (_) {
       // 礼物已送出，卡片发失败不影响结果
     }

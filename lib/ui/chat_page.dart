@@ -923,10 +923,11 @@ class _RichMediaBubble extends ConsumerWidget {
     );
   }
 
-  /// 礼物卡：礼物图（目录里的道具图标）+ 名称 + 数量 + 默契度。
+  /// 礼物卡（紧凑两行）：礼物图 + 名称×数量，次行「默契礼物 · 来源 · 默契度」。
   ///
   /// 名称/图标来自服务端 visual-cfg（`new_give_gift_config` + `items`），
-  /// 还没加载出来时退回「礼物 #id」+ 通用礼物图标。
+  /// 还没加载出来时退回「礼物 #id」+ 通用礼物图标。刻意做窄做矮：礼物在会话里
+  /// 常连发，原三行大卡（56 图 + 独立标题行）太占竖向空间。
   Widget _giftCard(
     BuildContext context,
     WidgetRef ref,
@@ -944,95 +945,70 @@ class _RichMediaBubble extends ConsumerWidget {
     final who = media.giftSrcName.isNotEmpty
         ? media.giftSrcName
         : media.nickname;
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              const Icon(Icons.card_giftcard, size: 18),
-              const SizedBox(width: 6),
-              Text(
-                '默契礼物',
-                style: theme.textTheme.labelLarge?.copyWith(
-                  fontWeight: FontWeight.w600,
-                ),
+    final meta = [
+      '默契礼物',
+      if (who.isNotEmpty) who,
+      if (media.giftAddValue > 0) '默契度 +${media.giftAddValue}',
+    ].join(' · ');
+    return InkWell(
+      borderRadius: AppRadius.inputR,
+      onTap: () {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$name ×$num')),
+        );
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(8),
               ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Container(
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surfaceContainerLowest,
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Center(
-                  child: icon != null && icon.startsWith('http')
-                      ? Image.network(
-                          icon,
-                          width: 44,
-                          height: 44,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) =>
-                              const Icon(Icons.card_giftcard, size: 28),
-                        )
-                      : const Icon(Icons.card_giftcard, size: 28),
-                ),
+              child: Center(
+                child: icon != null && icon.startsWith('http')
+                    ? Image.network(
+                        icon,
+                        width: 32,
+                        height: 32,
+                        fit: BoxFit.contain,
+                        errorBuilder: (_, _, _) =>
+                            const Icon(Icons.card_giftcard, size: 22),
+                      )
+                    : const Icon(Icons.card_giftcard, size: 22),
               ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '$name ×$num',
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w600,
-                      ),
+            ),
+            const SizedBox(width: 8),
+            Flexible(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '$name ×$num',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
                     ),
-                    if (who.isNotEmpty)
-                      Text(
-                        who,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          if (media.giftAddValue > 0) ...[
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                Icon(
-                  Icons.hexagon,
-                  size: 12,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 4),
-                Text(
-                  '默契度 +${media.giftAddValue}',
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.primary,
                   ),
-                ),
-              ],
+                  Text(
+                    meta,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
-        ],
+        ),
       ),
     );
   }
