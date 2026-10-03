@@ -89,16 +89,27 @@ List<int>? lenientBase64Decode(String s) {
 Iterable<String> _base64Candidates(String s) sync* {
   // `:`（本项目发出去的填充写法）、`-`/`+` 的互换先统一掉。
   final unified = s.replaceAll(':', '=').replaceAll('-', '+');
-  // 1) 标准 urlsafe：`_` == `/`
-  yield _leftPad(unified.replaceAll('_', '/'));
-  // 2) 尾部 1~2 个 `_` 当填充（真机实测形态）
+
+  // 0) 尾部 `_` 当**填充**（真机实测形态），必须先于「`_` 当 `/`」尝试。
+  //    原因：尾部 1 个 `_` 若当成 `/` 解，会多出**恰好一个**字节 —— 以
+  //    `...In0_`（礼物 extend_data）为例，`_`→`/` 后解成 `...}` 再跟一个
+  //    `?`(0x3F)，而 `?` 是**合法 UTF-8**，于是错误候选被选中，随后
+  //    `jsonDecode` 因尾部多余内容失败，整条消息退化成兜底文案。
+  //    仅当尾部 `_` 个数正好等于该长度的补位需求时才这样解，避免把真正的
+  //    `/`（也编码为 `_`）误当填充。
   for (var pads = 2; pads >= 1; pads--) {
     if (unified.length > pads && unified.endsWith('_' * pads)) {
-      final body = unified.substring(0, unified.length - pads);
-      yield _leftPad('${body.replaceAll('_', '/')}${'=' * pads}');
+      final bodyLen = unified.length - pads;
+      if ((4 - bodyLen % 4) % 4 == pads) {
+        final body = unified.substring(0, bodyLen).replaceAll('_', '/');
+        yield '$body${'=' * pads}';
+      }
     }
   }
-  // 3) `_` 全是填充
+
+  // 1) 标准 urlsafe：`_` == `/`
+  yield _leftPad(unified.replaceAll('_', '/'));
+  // 2) `_` 全是填充
   yield _leftPad(unified.replaceAll('_', '='));
 }
 
