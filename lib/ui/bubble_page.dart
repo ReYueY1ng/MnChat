@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 /// 聊天气泡页（`/miniw/business?act=bubble_get_data`）。
 ///
@@ -125,7 +126,7 @@ class _BubblePageState extends ConsumerState<BubblePage> {
           : _error != null
           ? Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(AppSpacing.xl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -134,9 +135,9 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                       size: 40,
                       color: scheme.outline,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
                     Text('加载失败：$_error', textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
                     FilledButton.tonal(
                       onPressed: _load,
                       child: const Text('重试'),
@@ -150,7 +151,7 @@ class _BubblePageState extends ConsumerState<BubblePage> {
               child: ListView(
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
                     child: Text(
                       '气泡名称/样式由游戏内置配置决定，外部客户端无法显示，'
                       '仅能切换佩戴。',
@@ -162,7 +163,7 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                   ),
                   if (_bubbles.isEmpty)
                     Padding(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.all(AppSpacing.xl),
                       child: Center(
                         child: Text(
                           '还没有可用气泡',

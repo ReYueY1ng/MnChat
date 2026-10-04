@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/app_lock.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 /// 应用锁解锁页：全屏居中，无 AppBar/返回键。
 ///
@@ -112,16 +113,16 @@ class _LockPageState extends ConsumerState<LockPage>
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppSpacing.xl),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 360),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(Icons.lock_outline, size: 48, color: scheme.primary),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
                   Text('MnChat', style: theme.textTheme.headlineSmall),
-                  const SizedBox(height: 4),
+                  const SizedBox(height: AppSpacing.xs),
                   Text(
                     '请输入应用锁密码',
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -130,7 +131,7 @@ class _LockPageState extends ConsumerState<LockPage>
                   ),
                   const SizedBox(height: 28),
                   _buildDots(scheme),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: AppSpacing.md),
                   SizedBox(
                     height: 20,
                     child: _error == null
@@ -142,7 +143,7 @@ class _LockPageState extends ConsumerState<LockPage>
                             ),
                           ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: AppSpacing.lg),
                   _buildKeypad(theme, scheme),
                 ],
               ),
@@ -198,11 +199,11 @@ class _LockPageState extends ConsumerState<LockPage>
       mainAxisSize: MainAxisSize.min,
       children: [
         _keyRow([digitKey('1'), digitKey('2'), digitKey('3')]),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         _keyRow([digitKey('4'), digitKey('5'), digitKey('6')]),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         _keyRow([digitKey('7'), digitKey('8'), digitKey('9')]),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         _keyRow([
           iconKey(Icons.check, () => _submit(isConfirm: true), primary: true),
           digitKey('0'),
@@ -217,7 +218,7 @@ class _LockPageState extends ConsumerState<LockPage>
       mainAxisAlignment: MainAxisAlignment.center,
       children: [
         for (var i = 0; i < children.length; i++) ...[
-          if (i > 0) const SizedBox(width: 16),
+          if (i > 0) const SizedBox(width: AppSpacing.lg),
           children[i],
         ],
       ],

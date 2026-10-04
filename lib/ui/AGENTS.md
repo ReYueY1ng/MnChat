@@ -15,11 +15,12 @@ App UI layer: `MainShell` is the entry widget imported by `main.dart`, plus one 
 | Friends / family / partner social graph | `friends_page.dart` (1125), `family_page.dart`, `partner_page.dart` |
 | Mail | `mail_page.dart` (1296; also owns `MailDetailPage`) |
 | Dynamics feed | `dynamics_page.dart`, `dynamics_detail_page.dart` (938), `publish_dynamics_page.dart` |
-| Settings incl. theme + keep-alive toggles | `settings_page.dart`, `theme_settings_page.dart`, `message_settings_page.dart` |
+| Settings (顶层 + 账号与安全 / 通用与外观 / 消息与通知 / 隐私与数据 / 关于 5 个子页) | `settings_page.dart` + `settings_*_page.dart`;`theme_settings_page.dart` 是主题子页 |
 | Auth / lock | `login_page.dart`, `lock_page.dart` |
 | Groups, visitors, QR, blacklist, sign-in, data | `group_detail_page.dart`, `visitor_list_page.dart`, `my_qr_page.dart`, `blacklist_page.dart`, `social_sign_page.dart`, `data_page.dart` |
 
 ## CONVENTIONS
+- Settings is two levels: `settings_page.dart` is only the account card + 5 group entries + logout; each entry pushes a `settings_*_page.dart` sub-page (shared row widgets live in `widgets/settings_tiles.dart` — `SettingsSectionHeader` / `SettingsNavTile` / `SettingsSwitchTile` / `SettingsInfoTile` / `showSettingsToast`). Put a new setting in the matching sub-page, never back on the top level.
 - One screen per file with `_page.dart` suffix; one public `XxxPage` widget per file; private helper widgets are `_PascalCase` in the same file.
 - When a page outgrows ~600 lines, split it with `part` / `part of` — the library and its public symbols (including test-locator keys and shared tiles like `HomePartnerTile`) stay byte-identical, so no importer changes. `profile_page.dart` = `profile_page_state_base/state_actions/widgets/widgets_compact.dart`; the same pattern is used for `widgets/avatar_edit_dialog.dart`.
 - Opening/closing a chat never happens by navigation — mutate `activeSessionProvider.notifier` (`open` / `close`) and let `MainShell` react.

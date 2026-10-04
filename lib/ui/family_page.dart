@@ -1,7 +1,6 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../core/models/nickname.dart' show plainNickname;
 import '../core/services/family.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
@@ -59,11 +58,11 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     });
     try {
       // get_family_list → 找我的家族 id → get_family_detail
-      final listResp = await client.getFamilyList();
-      final family = _findMyFamily(listResp);
+      final families = await client.getFamilyList();
+      final family = families.isEmpty ? null : families.first;
       if (family != null) {
         final detail = await client.getFamilyDetail(family.familyId);
-        _family = FamilyInfo.fromJson(detail) ?? family;
+        _family = detail.info ?? family;
       } else {
         _family = null;
       }
@@ -72,25 +71,6 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     } finally {
       if (mounted) setState(() => _loading = false);
     }
-  }
-
-  /// 从 get_family_list 响应里取出我所在的家族（兼容 {family:..} / {families:[..]} / 顶层）。
-  FamilyInfo? _findMyFamily(Map<String, Object?> resp) {
-    if (FamilyInfo.fromJson(resp) case final f?) return f;
-    final family = resp['family'];
-    if (family is Map) {
-      return FamilyInfo.fromJson(family.cast<String, Object?>());
-    }
-    final list = resp['families'] ?? resp['data'];
-    if (list is List) {
-      for (final e in list) {
-        if (e is Map) {
-          final f = FamilyInfo.fromJson(e.cast<String, Object?>());
-          if (f != null) return f;
-        }
-      }
-    }
-    return null;
   }
 
   Future<void> _sendMsg(String text) async {
@@ -175,16 +155,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     if (client == null || family == null) return;
     final detail = await client.getFamilyDetail(family.familyId);
     if (!mounted) return;
-    final data = detail['data'] ?? detail;
-    final applies = <Map<String, Object?>>[];
-    if (data is Map) {
-      final al = data['apply_list'];
-      if (al is List) {
-        for (final e in al) {
-          if (e is Map) applies.add(e.cast<String, Object?>());
-        }
-      }
-    }
+    final applies = detail.applies;
     if (applies.isEmpty) {
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('暂无入族申请')));
@@ -206,12 +177,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
             ),
             const Divider(height: 1),
             ...applies.map((a) {
-              final uin = (a['uin'] ?? a['Uin'] ?? 0) is num
-                  ? ((a['uin'] ?? a['Uin']) as num).toInt()
-                  : int.tryParse('${a['uin'] ?? a['Uin'] ?? 0}') ?? 0;
-              // 服务端 NickName 带富文本标记，纯文本处必须先洗；洗完为空回退迷你号。
-              final plainName = plainNickname(a['NickName']?.toString());
-              final name = plainName.isEmpty ? '$uin' : plainName;
+              final uin = a.uin;
+              // 昵称已在 FamilyApply.fromJson 里洗过富文本标记。
+              final name = a.nickname;
               return ListTile(
                 leading: AvatarView(name: name),
                 title: Text(name),
@@ -304,7 +272,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               const Divider(),
               if (family.members.isNotEmpty) ...[
                 const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                  padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
                   child: Text(
                     '成员',
                     style: TextStyle(fontWeight: FontWeight.w600),
@@ -330,7 +298,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               const Divider(),
               // 家族消息
               const Padding(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, 4),
+                padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
                 child: Text(
                   '家族消息',
                   style: TextStyle(fontWeight: FontWeight.w600),
@@ -338,10 +306,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               ),
               if (_messages.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
+                  padding: AppSpacing.listTilePadding,
                   child: Text(
                     '暂无家族消息',
                     style: TextStyle(color: scheme.onSurfaceVariant),
@@ -395,7 +360,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                     child: const Text('退出家族'),
                   ),
                   if (isLeader) ...[
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppSpacing.sm),
                     TextButton(
                       onPressed: _busy ? null : () {},
                       child: const Text('转让族长'),

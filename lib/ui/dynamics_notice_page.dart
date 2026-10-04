@@ -15,6 +15,7 @@ import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
+import 'theme/app_tokens.dart';
 
 class DynamicsNoticePage extends ConsumerStatefulWidget {
   const DynamicsNoticePage({super.key});
@@ -133,7 +134,7 @@ class _DynamicsNoticePageState extends ConsumerState<DynamicsNoticePage>
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(_error[channel]!),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton(
               onPressed: () => _load(channel),
               child: const Text('重试'),

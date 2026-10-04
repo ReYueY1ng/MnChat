@@ -174,7 +174,11 @@ class _RequestErrorListenerState extends ConsumerState<RequestErrorListener> {
           // fixed 行为会把 toast 直接压在右下角「N 个请求失败」角标上
           // （实测那段时间角标点不动）。76 = FAB 底距 16 + 高度 48 + 间距 12。
           behavior: SnackBarBehavior.floating,
-          margin: const EdgeInsets.only(left: 16, right: 16, bottom: 76),
+          margin: const EdgeInsets.only(
+            left: AppSpacing.lg,
+            right: AppSpacing.lg,
+            bottom: 76,
+          ),
           action: SnackBarAction(
             label: '详情',
             onPressed: () =>
@@ -209,7 +213,7 @@ class _RequestErrorsDialog extends StatelessWidget {
             builder: (context, failures, _) {
               if (failures.isEmpty) {
                 return const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
+                  padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
                   child: Center(child: Text('暂无失败记录')),
                 );
               }

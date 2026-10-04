@@ -176,7 +176,10 @@ class _AuditTag extends StatelessWidget {
     final scheme = theme.colorScheme;
     final color = warning ? AppSemanticColors.of(context).warning : scheme.error;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: 1,
+      ),
       decoration: BoxDecoration(
         color: scheme.surface.withValues(alpha: 0.85),
         borderRadius: AppRadius.chipR,

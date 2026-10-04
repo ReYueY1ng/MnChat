@@ -11,6 +11,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/dynamics.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 class PublishDynamicsPage extends ConsumerStatefulWidget {
   const PublishDynamicsPage({super.key});
@@ -159,7 +160,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
       body: _publishing
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 TextField(
                   controller: _textCtrl,
@@ -170,10 +171,10 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                     border: OutlineInputBorder(),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: AppSpacing.md),
                 // 话题选择
                 Text('话题（可选）', style: theme.textTheme.titleSmall),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Row(
                   children: [
                     Expanded(
@@ -187,7 +188,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                         onSubmitted: (_) => _searchTopic(),
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: AppSpacing.sm),
                     IconButton(
                       tooltip: '搜索',
                       icon: const Icon(Icons.search),
@@ -197,14 +198,14 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                 ),
                 if (_selectedTopic != null)
                   Padding(
-                    padding: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.only(top: AppSpacing.sm),
                     child: InputChip(
                       label: Text('#${_selectedTopic!.title}'),
                       onDeleted: () => setState(() => _selectedTopic = null),
                     ),
                   ),
                 if (_topicResults.isNotEmpty) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: AppSpacing.xs),
                   ..._topicResults.take(5).map((t) => ListTile(
                         dense: true,
                         contentPadding: EdgeInsets.zero,
@@ -232,7 +233,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                       isDense: true,
                     ),
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   for (var i = 0; i < 4; i++)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 6),

@@ -187,7 +187,7 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
     final theme = Theme.of(context);
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -196,9 +196,9 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
               size: 48,
               color: theme.colorScheme.error,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text('加载失败：$_error', textAlign: TextAlign.center),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             FilledButton(onPressed: _load, child: const Text('重试')),
           ],
         ),
@@ -225,7 +225,7 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
                     size: 48,
                     color: theme.colorScheme.outline,
                   ),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   const Text('还没有人来访'),
                 ],
               ),

@@ -14,6 +14,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/friend_tag.dart';
 import '../../core/services/request_errors.dart' show responseOk;
 import '../../state/providers.dart';
+import '../theme/app_tokens.dart';
 import 'friend_filter_dialog.dart' show showCreateFriendTagDialog;
 
 /// 打开「标签」面板：[uins] 为要操作的好友（单个 = 从会话菜单进来）。
@@ -49,7 +50,12 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
       title: Text(widget.uins.length > 1
           ? '给 ${widget.uins.length} 位好友打标签'
           : '标签'),
-      contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md,
+        AppSpacing.xl,
+        0,
+      ),
       content: SizedBox(
         width: 360,
         child: tags == null
@@ -63,7 +69,9 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
                 children: [
                   if (tags.isEmpty)
                     Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
                       child: Text(
                         '你还未创建标签',
                         style: theme.textTheme.bodyMedium?.copyWith(

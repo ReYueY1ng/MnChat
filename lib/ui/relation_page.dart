@@ -7,6 +7,7 @@ import 'player_home_page.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/rich_text_view.dart';
+import 'theme/app_tokens.dart';
 
 /// 关注 / 粉丝列表页。
 ///
@@ -147,14 +148,14 @@ class _RelationPageState extends ConsumerState<RelationPage>
     final scheme = Theme.of(context).colorScheme;
     return Center(
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(AppSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(Icons.cloud_off_outlined, size: 40, color: scheme.outline),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             Text('加载失败：$_error', textAlign: TextAlign.center),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             FilledButton.tonal(onPressed: _load, child: const Text('重试')),
           ],
         ),

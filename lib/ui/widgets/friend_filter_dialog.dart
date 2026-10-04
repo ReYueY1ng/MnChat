@@ -16,6 +16,7 @@ library;
 import 'package:material_ui/material_ui.dart';
 
 import '../../core/models/friend_tag.dart';
+import '../theme/app_tokens.dart';
 
 /// 通用筛选条件（id 对齐游戏 `def_commonFilterType`：1/2/3/4）。
 enum FriendFilterCommon {
@@ -87,7 +88,12 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
     final theme = Theme.of(context);
     return AlertDialog(
       title: const Text('筛选'),
-      contentPadding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      contentPadding: const EdgeInsets.fromLTRB(
+        AppSpacing.xl,
+        AppSpacing.md,
+        AppSpacing.xl,
+        0,
+      ),
       content: SizedBox(
         width: 380,
         child: SingleChildScrollView(
@@ -96,10 +102,10 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Text('通用', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               Wrap(
-                spacing: 8,
-                runSpacing: 4,
+                spacing: AppSpacing.sm,
+                runSpacing: AppSpacing.xs,
                 children: [
                   for (final c in FriendFilterCommon.values)
                     FilterChip(
@@ -111,12 +117,12 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
                     ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppSpacing.lg),
               Text('标签', style: theme.textTheme.titleSmall),
-              const SizedBox(height: 4),
+              const SizedBox(height: AppSpacing.xs),
               if (widget.tags.isEmpty)
                 Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 8),
+                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                   child: Text(
                     '你还未创建标签',
                     style: theme.textTheme.bodyMedium?.copyWith(
@@ -126,8 +132,8 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
                 )
               else
                 Wrap(
-                  spacing: 8,
-                  runSpacing: 4,
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
                   children: [
                     for (final t in widget.tags)
                       FilterChip(

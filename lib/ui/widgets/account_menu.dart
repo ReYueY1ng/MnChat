@@ -189,7 +189,7 @@ Future<void> _showCreateGroupDialog(
                       shrinkWrap: true,
                       children: [
                         const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 4),
+                          padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
                           child: Text(
                             '选择成员（可选）',
                             style: TextStyle(fontWeight: FontWeight.w600),

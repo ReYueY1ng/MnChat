@@ -1,3 +1,5 @@
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform;
 import 'package:material_ui/material_ui.dart';
 
 /// 设计 token —— 间距 / 圆角 / 语义色 / 尺寸 的唯一来源。
@@ -145,14 +147,45 @@ class AppSemanticColors extends ThemeExtension<AppSemanticColors> {
   }
 }
 
-/// 宽屏内容约束：避免卡片在 2K/4K 下横向拉满。
+/// 宽屏内容约束与自适应断点：避免卡片在 2K/4K 下横向拉满，也避免断点散在各页面里各写各的。
 abstract final class AppSizes {
   /// 设置 / 详情 / 个人主页等单列内容。
   static const double narrowContent = 760;
 
   /// 列表页内容。
   static const double listContent = 1000;
+
+  /// 「会话列表 + 聊天」双栏并排所需的最小内容区宽度。
+  ///
+  /// 内容区宽度指**扣掉侧栏之后**的可用宽度（见 [railWidth]）。
+  static const double chatSplitBreakpoint = 760;
+
+  /// 进入「左侧常驻导航栏 + 内容区」宽屏布局的最小窗口宽度。
+  ///
+  /// 移动端（手机横屏也是手机）按此宽度判定；桌面端另有 [railMinWindow]。
+  static const double railBreakpoint = 800;
+
+  /// 桌面端窗口窄到多少才退化成底部导航栏。
+  ///
+  /// 桌面有鼠标键盘、窗口通常够高，侧栏比底部栏合适，所以只在极端窄窗下退回；
+  /// 移动端不使用这个值。
+  static const double railMinWindow = 480;
+
+  /// 会话列表栏的默认宽度（桌面端可拖拽调整，范围见下）。
+  static const double chatListWidth = 320;
+
+  /// 会话列表栏可拖拽的最小 / 最大宽度。
+  static const double chatListMinWidth = 240;
+  static const double chatListMaxWidth = 460;
 }
+
+/// 是否桌面端（linux / windows）。
+///
+/// 与 `TrayService.isDesktop` 同义，但 UI 层不该为了一个平台判断去 import core service，
+/// 因此在这里提供一份；两处都基于 [defaultTargetPlatform]，不会走偏。
+bool get isDesktopPlatform =>
+    defaultTargetPlatform == TargetPlatform.linux ||
+    defaultTargetPlatform == TargetPlatform.windows;
 
 /// 是否为「紧凑宽度」（手机）。判据用最短边 < 600dp（Material 的 compact
 /// width class）——横屏手机最短边仍是 ~400dp，故横屏也算手机，

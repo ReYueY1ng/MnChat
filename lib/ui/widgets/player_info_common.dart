@@ -8,9 +8,8 @@
 ///   共用的内容片段（头部、等级信息区、圆形操作按钮）。
 ///
 /// 主页字段解析（称号 id / 勋章列表）复用 `core/models/homepage_modules.dart`
-/// 的公开解析器，不再各自持有私有拷贝。两种展示的容器与定位仍各自实现
-/// （`player_info_sheet.dart` 是底部弹窗，`session_player_info_popup.dart`
-/// 是锚定浮窗），此处只提供共享内容。
+/// 的公开解析器，不再各自持有私有拷贝。展示容器与定位由
+/// `session_player_info_popup.dart` 实现，此处只提供共享内容。
 library;
 
 import 'package:material_ui/material_ui.dart';
@@ -123,11 +122,8 @@ class PlayerInfoHeader extends StatelessWidget {
   final int? headId;
   final int? headFrameId;
 
-  /// 头像半径（底部弹窗 40 / 浮窗 32）。
+  /// 头像半径（浮窗 32；默认 40）。
   final double radius;
-
-  /// 是否在昵称区下方预留一行（底部弹窗的称号占位间距）。
-  final bool reserveTitleLine;
 
   const PlayerInfoHeader({
     super.key,
@@ -138,7 +134,6 @@ class PlayerInfoHeader extends StatelessWidget {
     this.headId,
     this.headFrameId,
     this.radius = 40,
-    this.reserveTitleLine = false,
   });
 
   @override
@@ -174,7 +169,6 @@ class PlayerInfoHeader extends StatelessWidget {
                   color: theme.colorScheme.outline,
                 ),
               ),
-              if (reserveTitleLine) const SizedBox(height: AppSpacing.sm),
             ],
           ),
         ),
@@ -243,10 +237,7 @@ class PlayerInfoStats extends StatelessWidget {
             if (medals.isNotEmpty) ...[
               const SizedBox(height: AppSpacing.sm),
               Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 6,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
                   color: theme.colorScheme.secondaryContainer.withValues(
                     alpha: 0.4,

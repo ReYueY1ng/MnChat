@@ -5,6 +5,7 @@ import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
+import 'theme/app_tokens.dart';
 
 /// 登录/切换账号页：选择已保存账号一键登录；也可添加新账号。
 ///
@@ -124,7 +125,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     return Scaffold(
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.xl),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
             child: Card(
@@ -133,7 +134,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(AppSpacing.xl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -143,7 +144,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       size: 48,
                       color: theme.colorScheme.primary,
                     ),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     Text(
                       'MnChat',
                       textAlign: TextAlign.center,
@@ -159,14 +160,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                     const SizedBox(height: 20),
                     if (!_loaded)
                       const Padding(
-                        padding: EdgeInsets.all(24),
+                        padding: EdgeInsets.all(AppSpacing.xl),
                         child: Center(child: CircularProgressIndicator()),
                       )
                     else if (_showForm)
                       _buildForm(auth, theme)
                     else
                       _buildAccountList(theme),
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     if (_loaded && !_showForm)
                       TextButton.icon(
                         onPressed: auth.isBusy
@@ -191,32 +192,29 @@ class _LoginPageState extends ConsumerState<LoginPage> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         if (_accounts.isEmpty) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Text(
             '还没有保存的账号',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium,
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
         ] else ...[
           const Text('选择账号', style: TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           ..._accounts.map((acc) {
             final name = acc.name != null && acc.name!.isNotEmpty
                 ? acc.name!
                 : '${acc.uin}';
             return Card(
-              margin: const EdgeInsets.only(bottom: 8),
+              margin: const EdgeInsets.only(bottom: AppSpacing.sm),
               elevation: 0,
               color: theme.colorScheme.surfaceContainerHighest,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
               child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 2,
-                ),
+                contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 2),
                 leading: AvatarView(name: name, radius: 20),
                 title: RichTextView(
                   name,
@@ -266,7 +264,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 ? '请输入有效的迷你号'
                 : null,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           TextFormField(
             controller: _pwdCtrl,
             obscureText: !_showPwd,
@@ -281,7 +279,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             validator: (v) => (v == null || v.isEmpty) ? '请输入密码' : null,
             onFieldSubmitted: (_) => _submitForm(),
           ),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           CheckboxListTile(
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
@@ -297,7 +295,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   }
                 : null,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           FilledButton.icon(
             onPressed: (authState.isBusy || _busy) ? null : _submitForm,
             icon: _busy
@@ -316,7 +314,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             ),
           ),
           if (_accounts.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             TextButton(
               onPressed: () => setState(() => _showForm = false),
               child: const Text('返回账号列表'),

@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 /// 退群 / 被移出记录（`act=query_user_groups_quit_list`，对齐 friendservice.lua）。
 ///
@@ -107,7 +108,7 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
           : _error != null
           ? Center(
               child: Padding(
-                padding: const EdgeInsets.all(24),
+                padding: const EdgeInsets.all(AppSpacing.xl),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
@@ -116,9 +117,9 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
                       size: 40,
                       color: scheme.outline,
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
                     Text('加载失败：$_error', textAlign: TextAlign.center),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: AppSpacing.md),
                     FilledButton.tonal(
                       onPressed: _load,
                       child: const Text('重试'),

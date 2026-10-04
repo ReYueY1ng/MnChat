@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
 import 'player_home_page.dart';
+import 'theme/app_tokens.dart';
 
 /// 附近的人（`cmd=get_nearby` / `report_location`，对齐 nearbyfriendserver.lua）。
 ///
@@ -198,13 +199,13 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
     return Scaffold(
       appBar: AppBar(title: const Text('附近的人')),
       body: ListView(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         children: [
           Text(
             '外部客户端未接入系统定位，请手动填写经纬度后再查询。',
             style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           Row(
             children: [
               Expanded(
@@ -220,7 +221,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpacing.md),
               Expanded(
                 child: TextField(
                   controller: _lonCtrl,
@@ -236,7 +237,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           FilledButton.icon(
             onPressed: _busy ? null : _search,
             icon: _busy
@@ -248,7 +249,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                 : const Icon(Icons.near_me_outlined),
             label: const Text('上报位置并查找附近的人'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           Card(
             child: ListTile(
               leading: const Icon(Icons.person_add_alt),
@@ -265,7 +266,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
           const Divider(height: 24),
           if (_error != null)
             Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: Text(
                 '查询失败：$_error',
                 style: TextStyle(color: scheme.error),
@@ -273,7 +274,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
             )
           else if (_loaded && _users.isEmpty)
             Padding(
-              padding: const EdgeInsets.all(24),
+              padding: const EdgeInsets.all(AppSpacing.xl),
               child: Center(
                 child: Text(
                   '附近没有找到人',
@@ -296,7 +297,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
               ),
             ),
           if (_loaded && _users.isNotEmpty) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Text(
               '共 ${_users.length} 人（仅显示第 1 页）',
               style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),

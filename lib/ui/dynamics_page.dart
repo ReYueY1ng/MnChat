@@ -8,6 +8,7 @@ import '../state/providers.dart';
 import 'mail_page.dart' show MailPage, MailSelection;
 import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
+import 'theme/app_tokens.dart';
 
 /// 动态页 —— 瀑布流信息流（热门/关注/官方/我的）。
 ///
@@ -257,7 +258,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text('${cache.error}', textAlign: TextAlign.center),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             FilledButton.tonalIcon(
               onPressed: _load,
               icon: const Icon(Icons.refresh),
@@ -295,7 +296,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                 crossAxisCount: wide ? 2 : 1,
                 mainAxisSpacing: 8,
                 crossAxisSpacing: 8,
-                padding: const EdgeInsets.all(8),
+                padding: const EdgeInsets.all(AppSpacing.sm),
                 itemCount: cache.posts.length,
                 itemBuilder: (context, i) => DynamicsCard(
                   post: cache.posts[i],

@@ -29,6 +29,7 @@ import '../../core/models/account_inventory.dart' show AccountInventory;
 import '../../core/models/gift_catalog.dart';
 import '../../core/models/nickname.dart' show plainNickname;
 import '../../state/providers.dart';
+import '../theme/app_tokens.dart';
 import 'floating_panel.dart';
 
 /// 弹出礼物面板；[uin] 为收礼好友。
@@ -106,7 +107,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
     return Column(
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(14, 12, 14, 6),
+          padding: const EdgeInsets.fromLTRB(14, AppSpacing.md, 14, 6),
           child: Row(
             children: [
               Expanded(
@@ -139,8 +140,8 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
                   gridDelegate:
                       const SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: 4,
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
+                        mainAxisSpacing: AppSpacing.sm,
+                        crossAxisSpacing: AppSpacing.sm,
                         childAspectRatio: 0.78,
                       ),
                   itemCount: gifts.length,
@@ -166,7 +167,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Expanded(child: _giftIcon(theme, g)),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             Text(
               g.displayName,
               maxLines: 1,
@@ -365,7 +366,7 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
                 '默契度 +${_g.intimacies * _num}',
                 style: theme.textTheme.bodySmall,
               ),
-            const Divider(height: 12),
+            const Divider(height: AppSpacing.md),
             for (final m in modes)
               ListTile(
                 contentPadding: EdgeInsets.zero,

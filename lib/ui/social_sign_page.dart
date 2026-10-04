@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/social_sign.dart';
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 class SocialSignPage extends ConsumerStatefulWidget {
   const SocialSignPage({super.key});
@@ -102,10 +103,10 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               children: [
                 const Text('想要…', style: TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -123,9 +124,9 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                       ),
                   ],
                 ),
-                const SizedBox(height: 24),
+                const SizedBox(height: AppSpacing.xl),
                 const Text('喜欢…', style: TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: 8),
+                const SizedBox(height: AppSpacing.sm),
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,
@@ -143,7 +144,7 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                       ),
                   ],
                 ),
-                const SizedBox(height: 32),
+                const SizedBox(height: AppSpacing.xxl),
                 Card(
                   child: ListTile(
                     leading: const Icon(Icons.auto_awesome),

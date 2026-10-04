@@ -180,7 +180,8 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return const [];
     final client = FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
-    return parseFamilyList(await client.getFamilyList());
+    // 解析已下沉到客户端（返回 List<FamilyInfo>），这里不再自己 parse 一遍。
+    return client.getFamilyList();
   }
 
   Future<FamilyShowInfo?> _loadShowFamilyFromServer() async {

@@ -195,7 +195,7 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
           mainAxisSize: MainAxisSize.min,
           children: [
             Text(_error!),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton(onPressed: _load, child: const Text('重试')),
           ],
         ),

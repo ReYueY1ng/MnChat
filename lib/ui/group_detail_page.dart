@@ -72,12 +72,12 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             ),
 
           const Padding(
-            padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+            padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
             child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
           ),
           if (members.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: AppSpacing.listTilePadding,
               child: Text(
                 '暂无成员信息（可能未拉取到）',
                 style: TextStyle(color: scheme.onSurfaceVariant),
@@ -103,7 +103,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
           if (_busy)
             const Padding(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(AppSpacing.lg),
               child: Center(child: CircularProgressIndicator()),
             )
           else
@@ -122,7 +122,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
   ) {
     final scheme = Theme.of(context).colorScheme;
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(AppSpacing.lg),
       child: Column(
         children: [
           FilledButton.tonalIcon(
@@ -130,13 +130,13 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             icon: const Icon(Icons.person_add_alt),
             label: const Text('邀请好友入群'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           FilledButton.tonalIcon(
             onPressed: _busy ? null : _toggleGroupTop,
             icon: Icon(_groupTop ? Icons.push_pin : Icons.push_pin_outlined),
             label: Text(_groupTop ? '取消群置顶' : '群置顶'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           FilledButton.tonalIcon(
             onPressed: _busy ? null : _toggleGroupIgnore,
             icon: Icon(
@@ -146,20 +146,20 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             ),
             label: Text(_groupIgnored ? '取消群免打扰' : '群消息免打扰'),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           if (isOwner) ...[
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _editGroupName,
               icon: const Icon(Icons.edit_outlined),
               label: const Text('修改群名'),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _rejectAllGroupApplies,
               icon: const Icon(Icons.clear_all),
               label: const Text('一键拒绝入群申请'),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton.icon(
               onPressed: _busy
                   ? null
@@ -167,7 +167,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
               icon: const Icon(Icons.admin_panel_settings),
               label: const Text('转让群主'),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton.tonalIcon(
               onPressed: _busy ? null : () => _confirmDissolve(service),
               icon: const Icon(Icons.delete_forever),
@@ -254,7 +254,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                 ),
                 const Divider(height: 1),
                 Padding(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
                       Expanded(child: Text('已选 ${selected.length} 人')),
@@ -262,7 +262,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                         onPressed: () => Navigator.pop(ctx, false),
                         child: const Text('取消'),
                       ),
-                      const SizedBox(width: 8),
+                      const SizedBox(width: AppSpacing.sm),
                       FilledButton(
                         onPressed: selected.isEmpty
                             ? null

@@ -41,7 +41,6 @@ import '../../core/services/family.dart'
         FamilyClient,
         FamilyInfo,
         FamilyShowInfo,
-        parseFamilyList,
         parseShowFamily;
 import '../../core/services/name_rules.dart'
     show kNicknameMaxLen, renameErrorText, validateNickname;

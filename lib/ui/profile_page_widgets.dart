@@ -142,7 +142,7 @@ class _ProfileHeaderCard extends StatelessWidget {
                             size: 14,
                             color: theme.colorScheme.outline,
                           ),
-                          const SizedBox(width: 4),
+                          const SizedBox(width: AppSpacing.xs),
                           Flexible(
                             child: Text(
                               '家族: $familyName',

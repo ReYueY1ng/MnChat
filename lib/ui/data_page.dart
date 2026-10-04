@@ -215,11 +215,11 @@ class _DataPageState extends ConsumerState<DataPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
           child: ListView(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             children: [
               Card(
                 child: Padding(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -229,11 +229,11 @@ class _DataPageState extends ConsumerState<DataPage> {
                             Icons.storage_outlined,
                             color: theme.colorScheme.primary,
                           ),
-                          const SizedBox(width: 12),
+                          const SizedBox(width: AppSpacing.md),
                           Text('本地数据', style: theme.textTheme.titleSmall),
                         ],
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       Text(
                         summary,
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -244,7 +244,7 @@ class _DataPageState extends ConsumerState<DataPage> {
                   ),
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Card(
                 child: ListTile(
                   leading: _leading(Icons.upload_file_outlined, 'export'),
@@ -254,7 +254,7 @@ class _DataPageState extends ConsumerState<DataPage> {
                   onTap: _busy ? null : _export,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: AppSpacing.md),
               Card(
                 child: ListTile(
                   leading: _leading(Icons.download_outlined, 'import'),

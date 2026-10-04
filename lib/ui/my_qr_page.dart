@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 
 class MyQrPage extends ConsumerWidget {
   const MyQrPage({super.key});
@@ -24,9 +25,9 @@ class MyQrPage extends ConsumerWidget {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.qr_code_2, size: 160, color: theme.colorScheme.primary),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.xl),
             Text('我的迷你号', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             SelectableText(
               '$uin',
               style: theme.textTheme.headlineMedium?.copyWith(
@@ -34,7 +35,7 @@ class MyQrPage extends ConsumerWidget {
                 letterSpacing: 2,
               ),
             ),
-            const SizedBox(height: 24),
+            const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
               icon: const Icon(Icons.copy),
               label: const Text('复制迷你号'),
@@ -45,7 +46,7 @@ class MyQrPage extends ConsumerWidget {
                 );
               },
             ),
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpacing.md),
             Text(
               '让对方在「好友 → 按迷你号添加」中输入此号码',
               style: theme.textTheme.bodySmall?.copyWith(

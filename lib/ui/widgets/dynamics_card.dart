@@ -52,7 +52,7 @@ class DynamicsCard extends ConsumerWidget {
         child: Padding(
           // 左上比右下收得更紧：玩家信息（头像 + 昵称/时间/属地）更贴近卡片
           // 左上角（原来四边都是 10）。
-          padding: const EdgeInsets.fromLTRB(8, 6, 10, 10),
+          padding: const EdgeInsets.fromLTRB(AppSpacing.sm, 6, 10, 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -73,7 +73,7 @@ class DynamicsCard extends ConsumerWidget {
                       frameId: post.headFrameId,
                     ),
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -119,7 +119,7 @@ class DynamicsCard extends ConsumerWidget {
                     ),
                 ],
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: AppSpacing.sm),
               // 中间：内容（截断 3 行；超长才显示「查看全文」，点击/整卡进详情页）
               _PostContent(
                 content: post.content,
@@ -388,8 +388,8 @@ class _LinkCard extends StatelessWidget {
             .showSnackBar(SnackBar(content: Text('打开作品/地图：${post.linkName}')));
       },
       child: Container(
-        margin: const EdgeInsets.only(top: 8),
-        padding: const EdgeInsets.all(8),
+        margin: const EdgeInsets.only(top: AppSpacing.sm),
+        padding: const EdgeInsets.all(AppSpacing.sm),
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
           borderRadius: BorderRadius.circular(6),
@@ -441,7 +441,10 @@ class _ChipLabel extends StatelessWidget {
     final theme = Theme.of(context);
     return Container(
       margin: const EdgeInsets.only(top: 6),
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: 3,
+      ),
       decoration: BoxDecoration(
         color: theme.colorScheme.tertiaryContainer,
         borderRadius: BorderRadius.circular(8),
@@ -450,7 +453,7 @@ class _ChipLabel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           Icon(icon, size: 14, color: theme.colorScheme.onTertiaryContainer),
-          const SizedBox(width: 4),
+          const SizedBox(width: AppSpacing.xs),
           Text(
             text,
             style: TextStyle(
@@ -529,7 +532,7 @@ class _ActionIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(left: 12),
+      padding: const EdgeInsets.only(left: AppSpacing.md),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [

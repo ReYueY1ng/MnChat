@@ -37,6 +37,7 @@ import '../../core/models/emoji_catalog.dart'
         kImfcEmojis;
 import '../../core/services/emoji_store.dart' show EmojiPackView, EmojiStore;
 import '../../state/providers.dart' show emojiStoreProvider;
+import '../theme/app_tokens.dart';
 import 'floating_panel.dart';
 
 /// 弹出表情面板（浮动，浮在 [anchor] 上方）。
@@ -209,8 +210,8 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: 8,
-        mainAxisSpacing: 4,
-        crossAxisSpacing: 4,
+        mainAxisSpacing: AppSpacing.xs,
+        crossAxisSpacing: AppSpacing.xs,
         childAspectRatio: 1,
       ),
       itemCount: itemCount,
@@ -231,7 +232,10 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
       height: 62,
       child: ListView(
         scrollDirection: Axis.horizontal,
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: 6,
+        ),
         children: [
           _barButton(
             tooltip: '添加表情包',
@@ -286,7 +290,7 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
                     top: -4,
                     child: Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 4,
+                        horizontal: AppSpacing.xs,
                         vertical: 1,
                       ),
                       decoration: BoxDecoration(
