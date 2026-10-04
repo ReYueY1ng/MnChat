@@ -159,6 +159,53 @@ class ChatBackgroundService : Service() {
                 Notification.Builder(context)
             }
 
+        /**
+         * 消息渠道 id —— 按「提示音 / 震动」的组合取对应渠道。
+         *
+         * Android 8+ 的声音与震动是**渠道级**属性，单条通知改不了，所以只能这么分；
+         * 且只在真正用到时才创建，用户的通知设置里不会平白多出用不到的条目。
+         *
+         * 两者都开时直接用默认消息渠道，保持与旧版本完全一致的行为。
+         */
+        private fun messageChannel(
+            context: Context,
+            sound: Boolean,
+            vibrate: Boolean
+        ): String {
+            if (sound && vibrate) return CHANNEL_MESSAGES
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_MESSAGES
+            val id = when {
+                !sound && !vibrate -> "${CHANNEL_MESSAGES}_silent"
+                !sound -> "${CHANNEL_MESSAGES}_nosound"
+                else -> "${CHANNEL_MESSAGES}_novibrate"
+            }
+            try {
+                val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
+                    as NotificationManager
+                if (nm.getNotificationChannel(id) == null) {
+                    val name = when {
+                        !sound && !vibrate -> "聊天消息（静音）"
+                        !sound -> "聊天消息（无声）"
+                        else -> "聊天消息（不震动）"
+                    }
+                    val ch = NotificationChannel(
+                        id,
+                        name,
+                        NotificationManager.IMPORTANCE_HIGH
+                    ).apply {
+                        description = "好友 / 群聊新消息"
+                        if (!sound) setSound(null, null)
+                        enableVibration(vibrate)
+                    }
+                    nm.createNotificationChannel(ch)
+                }
+            } catch (e: Exception) {
+                Log.w(TAG, "创建消息渠道失败: $e")
+                return CHANNEL_MESSAGES
+            }
+            return id
+        }
+
         /** 构造「点击后带着 sessionKey 打开应用」的 PendingIntent。 */
         private fun launchPending(
             context: Context,
@@ -194,15 +241,17 @@ class ChatBackgroundService : Service() {
             lines: List<String>,
             group: Boolean,
             avatarUrl: String?,
-            avatarAsset: String?
+            avatarAsset: String?,
+            sound: Boolean,
+            vibrate: Boolean
         ) {
             // 先立刻弹出（不等头像下载完成），再在后台线程把大图标补上原地更新。
-            postMessageNotification(context, sessionKey, title, text, lines, group, null)
+            postMessageNotification(context, sessionKey, title, text, lines, group, null, sound, vibrate)
             if (avatarAsset.isNullOrEmpty() && avatarUrl.isNullOrEmpty()) return
             val app = context.applicationContext
             Thread {
                 val icon = loadLargeIcon(app, avatarAsset, avatarUrl) ?: return@Thread
-                postMessageNotification(app, sessionKey, title, text, lines, group, icon)
+                postMessageNotification(app, sessionKey, title, text, lines, group, icon, sound, vibrate)
             }.start()
         }
 
@@ -214,14 +263,16 @@ class ChatBackgroundService : Service() {
             text: String,
             lines: List<String>,
             group: Boolean,
-            icon: android.graphics.Bitmap?
+            icon: android.graphics.Bitmap?,
+            sound: Boolean,
+            vibrate: Boolean
         ) {
             try {
                 createChannels(context)
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
                     as NotificationManager
                 val id = messageIdFor(sessionKey)
-                val nb = builder(context, CHANNEL_MESSAGES)
+                val nb = builder(context, messageChannel(context, sound, vibrate))
                     .setSmallIcon(android.R.drawable.stat_notify_chat)
                     .setContentTitle(title)
                     .setContentText(text)

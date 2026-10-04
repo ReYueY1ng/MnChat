@@ -5,6 +5,7 @@ library;
 import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
+import '../models/nickname.dart' show plainNickname;
 import '../net/config.dart' show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
@@ -102,6 +103,35 @@ class FamilyInfo {
       memberCount: (m['member_count'] as num?)?.toInt() ?? members.length,
     );
   }
+}
+
+/// 入族申请。
+///
+/// 服务端 `NickName` 带富文本标记（`[i][color][b]顾念`），这里在**解析时**就洗成
+/// 纯文本 —— 以前是页面自己调 `plainNickname`，同一份口径在 UI 与 service 之间
+/// 抄两遍，漏一处就会把标记渲染给用户。洗完为空则回退迷你号。
+class FamilyApply {
+  final int uin;
+  final String nickname;
+
+  const FamilyApply({required this.uin, required this.nickname});
+
+  /// 脏数据（没有有效 uin）返回 null。
+  static FamilyApply? fromJson(Map<String, Object?> m) {
+    final raw = m['uin'] ?? m['Uin'] ?? 0;
+    final uin = raw is num ? raw.toInt() : int.tryParse('$raw') ?? 0;
+    if (uin == 0) return null;
+    final name = plainNickname(m['NickName']?.toString());
+    return FamilyApply(uin: uin, nickname: name.isEmpty ? '$uin' : name);
+  }
+}
+
+/// 家族详情：家族信息 + 入族申请列表。
+class FamilyDetail {
+  final FamilyInfo? info;
+  final List<FamilyApply> applies;
+
+  const FamilyDetail({this.info, this.applies = const []});
 }
 
 /// 解析 `get_family_list` 响应，返回我加入的全部家族（按响应顺序去重）。
@@ -225,13 +255,36 @@ class FamilyClient {
     return <String, Object?>{};
   }
 
-  /// 我加入的家族列表。
-  Future<Map<String, Object?>> getFamilyList({int? target}) =>
-      _get(_url('get_family_list', {if (target != null) 'target': '$target'}), 'get_family_list');
+  /// 我加入的家族列表（按响应顺序去重；信封兼容见 [parseFamilyList]）。
+  Future<List<FamilyInfo>> getFamilyList({int? target}) async => parseFamilyList(
+    await _get(
+      _url('get_family_list', {if (target != null) 'target': '$target'}),
+      'get_family_list',
+    ),
+  );
 
-  /// 家族详情。
-  Future<Map<String, Object?>> getFamilyDetail(Object familyId) =>
-      _get(_url('get_family_detail', {'family_id': '$familyId'}), 'get_family_detail');
+  /// 家族详情：家族信息 + 入族申请。
+  Future<FamilyDetail> getFamilyDetail(Object familyId) async {
+    final resp = await _get(
+      _url('get_family_detail', {'family_id': '$familyId'}),
+      'get_family_detail',
+    );
+    final data = resp['data'] ?? resp;
+    final map = data is Map
+        ? data.cast<String, Object?>()
+        : const <String, Object?>{};
+    final applies = <FamilyApply>[];
+    final raw = map['apply_list'];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is Map) {
+          final a = FamilyApply.fromJson(e.cast<String, Object?>());
+          if (a != null) applies.add(a);
+        }
+      }
+    }
+    return FamilyDetail(info: FamilyInfo.fromJson(map), applies: applies);
+  }
 
   /// 当前展示家族（act=get_show_family，参数 uin）。
   ///

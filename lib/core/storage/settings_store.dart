@@ -35,6 +35,9 @@ class SettingsKeys {
   static const String sendOnEnter = 'send_on_enter'; // 回车发送 '1'/'0'
   static const String autoMarkRead = 'auto_mark_read'; // 进会话自动已读 '1'/'0'
   static const String hideNotifyContent = 'hide_notify_content'; // 通知隐藏内容
+  static const String notifySound = 'notify_sound'; // 通知提示音 '1'/'0'
+  static const String notifyVibrate = 'notify_vibrate'; // 通知震动 '1'/'0'
+  static const String notifyMentionOnly = 'notify_mention_only'; // 群里仅 @我 时通知 '1'/'0'
 
   // ── 免打扰时段 ──────────────────────────────────────────────────────
   static const String dndEnabled = 'dnd_enabled'; // '1'/'0'
@@ -53,6 +56,11 @@ class SettingsKeys {
 
   // ── 桌面端 ──────────────────────────────────────────────────────────
   static const String closeToTray = 'close_to_tray'; // 关闭到托盘 '1'/'0'
+  static const String windowWidth = 'window_width'; // 桌面窗口宽（逻辑像素，int 字符串）
+  static const String windowHeight = 'window_height'; // 桌面窗口高（逻辑像素，int 字符串）
+
+  // ── 聊天草稿 ──────────────────────────────────────────────────────
+  static const String drafts = 'chat_drafts'; // JSON: {sessionKey: 未发送文本}
 
   /// 会话设置 key（免打扰/置顶），形如 "friend_123" / "group_456"。
   ///
@@ -263,6 +271,45 @@ class SettingsStore {
     final list = await quickPhrases();
     list.remove(text);
     await setString(SettingsKeys.quickPhrases, jsonEncode(list));
+  }
+
+  // ── 聊天草稿 ──────────────────────────────────────────────────────────
+
+  /// 读取某会话的未发送草稿（没有则 null）。
+  Future<String?> draft(String sessionKey) async {
+    final map = await _loadDrafts();
+    final v = map[sessionKey];
+    return (v == null || v.isEmpty) ? null : v;
+  }
+
+  /// 写入 / 清空某会话的草稿（空白文本视为清空）。
+  ///
+  /// 整体重写 JSON：草稿量级就是「有草稿的会话数」，几十条封顶，比新开一张表
+  /// 划算，也避免动 schema（见 storage/AGENTS.md：不轻易加迁移）。
+  Future<void> setDraft(String sessionKey, String text) async {
+    final map = await _loadDrafts();
+    if (text.trim().isEmpty) {
+      map.remove(sessionKey);
+    } else {
+      map[sessionKey] = text;
+    }
+    await setString(SettingsKeys.drafts, jsonEncode(map));
+  }
+
+  Future<Map<String, String>> _loadDrafts() async {
+    final raw = await getString(SettingsKeys.drafts);
+    if (raw == null || raw.isEmpty) return {};
+    try {
+      final d = jsonDecode(raw);
+      if (d is Map) {
+        return {
+          for (final e in d.entries)
+            if (e.value is String && (e.value as String).isNotEmpty)
+              '${e.key}': e.value as String,
+        };
+      }
+    } catch (_) {}
+    return {};
   }
 
   // ── 会话免打扰 / 置顶（本地配置）───────────────────────────────────────

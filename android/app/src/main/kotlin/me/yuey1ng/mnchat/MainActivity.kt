@@ -63,7 +63,9 @@ class MainActivity : FlutterActivity() {
                         call.argument<List<String>>("lines") ?: emptyList(),
                         call.argument<Boolean>("group") ?: false,
                         call.argument<String>("avatarUrl"),
-                        call.argument<String>("avatarAsset")
+                        call.argument<String>("avatarAsset"),
+                        call.argument<Boolean>("sound") ?: true,
+                        call.argument<Boolean>("vibrate") ?: true
                     )
                     result.success(true)
                 }

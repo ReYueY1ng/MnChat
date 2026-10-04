@@ -59,6 +59,8 @@ class NativeBridge {
     bool group = false,
     String? avatarUrl,
     String? avatarAsset,
+    bool sound = true,
+    bool vibrate = true,
   }) async {
     try {
       return await _channel.invokeMethod<bool>('showMessageNotification', {
@@ -69,6 +71,8 @@ class NativeBridge {
             'group': group,
             'avatarUrl': avatarUrl,
             'avatarAsset': avatarAsset,
+            'sound': sound,
+            'vibrate': vibrate,
           }) ??
           false;
     } catch (_) {

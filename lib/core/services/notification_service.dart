@@ -43,6 +43,12 @@ class MessageNotification {
   /// （如 `assets/heads/skin_1001.png`），优先于 [avatarUrl]。
   final String? avatarAsset;
 
+  /// 是否带提示音（Android 走渠道、Linux 走 `suppress-sound` hint）。
+  final bool sound;
+
+  /// 是否震动（仅 Android 渠道有意义，桌面忽略）。
+  final bool vibrate;
+
   const MessageNotification({
     required this.sessionKey,
     required this.title,
@@ -51,6 +57,8 @@ class MessageNotification {
     this.group = false,
     this.avatarUrl,
     this.avatarAsset,
+    this.sound = true,
+    this.vibrate = true,
   });
 }
 
@@ -111,6 +119,8 @@ class AndroidNotificationService implements NotificationService {
     group: n.group,
     avatarUrl: n.avatarUrl,
     avatarAsset: n.avatarAsset,
+    sound: n.sound,
+    vibrate: n.vibrate,
   );
 
   @override
@@ -208,6 +218,11 @@ class LinuxNotificationService implements NotificationService {
       final body = n.lines.length > 1
           ? '${n.text}\n${n.lines.join('\n')}'
           : n.text;
+      // 桌面端没有「震动」，只处理提示音：关掉时带上 `suppress-sound` hint
+      // （org.freedesktop.Notifications 规范里通知服务器认这个键）。
+      final hints = <String, DBusValue>{
+        if (!n.sound) 'suppress-sound': const DBusBoolean(true),
+      };
       final reply = await object.callMethod(_busName, 'Notify', [
         DBusString('MnChat'),
         DBusUint32(replaces),
@@ -215,7 +230,7 @@ class LinuxNotificationService implements NotificationService {
         DBusString(n.title),
         DBusString(body),
         DBusArray.string(const ['default', '打开']),
-        DBusDict.stringVariant(const {}),
+        DBusDict.stringVariant(hints),
         DBusInt32(-1),
       ]);
       final returned = reply.values.isNotEmpty ? reply.values.first : null;
