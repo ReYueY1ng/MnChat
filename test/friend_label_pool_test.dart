@@ -81,7 +81,7 @@ void main() {
     expect(q.containsKey('src_uin'), isFalse);
   });
 
-  test('其它 cmd 仍然带 src_uin（只有 label_pool 例外）', () async {
+  test('其它 cmd 仍然带 src_uin（label_pool / closeapply 例外）', () async {
     final adapter = _RecordingAdapter();
     await clientWith(adapter).setOnlineNotifyFlag(654321, on: true);
 

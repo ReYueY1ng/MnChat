@@ -432,15 +432,30 @@ class FriendClient {
       });
 
   /// 查询"拒绝陌生人加好友"开关 (cmd=get_closeapply_flag)。
-  /// 对齐 friendservice.lua ReqGetFriendApply (7711)：country/lang 为 notAuth。
+  /// 对齐 friendservice.lua ReqGetFriendApply (7711)：country/lang 为 notAuth，
+  /// **且不带 `src_uin`**（源码参数集只有 apiid/cmd/country/lang/s2t/time/token/
+  /// uin/ver）。
+  ///
+  /// 2026-10-04 真实账号实测（同链路先跑 `query_friend_list` 阳性对照；两臂各
+  /// 重复 3 次、间隔 2.5s 避开网关按账号排队）：
+  /// - 带 `src_uin`（原形状）→ `{"result":2}`，稳定复现；
+  /// - 去掉 `src_uin` → `{"result":0,"data":0}`，拿到真实开关值。
+  /// 两臂 auth 指纹不同，确认比较的是两种形状。
+  /// （`result:2` 是好友服务自己的业务码，不是网关 UNKNOW_SERVICE。）
   Future<Map<String, Object?>> getCloseapplyFlag() => _call(
     'get_closeapply_flag',
-    {'apiid': apiId, 'country': country, 'lang': lang, ..._signed()},
+    {
+      'apiid': apiId,
+      'country': country,
+      'lang': lang,
+      ..._signed(includeSrcUin: false),
+    },
     notAuthKeys: {'country', 'lang'},
   );
 
   /// 设置"拒绝陌生人加好友"开关 (cmd=set_closeapply_flag)。[flag]=1 开启。
-  /// 对齐 friendservice.lua ReqSetFriendApply (7734)：country/lang 为 notAuth。
+  /// 对齐 friendservice.lua ReqSetFriendApply (7734)：country/lang 为 notAuth，
+  /// 同样**不带 `src_uin`**（与 [getCloseapplyFlag] 一个参数集，只多一个 flag）。
   Future<Map<String, Object?>> setCloseapplyFlag({required bool on}) => _call(
     'set_closeapply_flag',
     {
@@ -448,7 +463,7 @@ class FriendClient {
       'country': country,
       'flag': on ? '1' : '0',
       'lang': lang,
-      ..._signed(),
+      ..._signed(includeSrcUin: false),
     },
     notAuthKeys: {'country', 'lang'},
   );
