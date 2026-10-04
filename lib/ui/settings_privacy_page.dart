@@ -47,6 +47,7 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
   }
 
   Future<void> _clearCache() async {
+    if (_clearing) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -173,7 +174,7 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
                 icon: Icons.cleaning_services_outlined,
                 title: '清除图片缓存',
                 subtitle: _clearing ? '正在清除…' : cacheLabel,
-                onTap: _clearing ? null : _clearCache,
+                onTap: _clearCache,
               ),
               const SizedBox(height: AppSpacing.xl),
             ],

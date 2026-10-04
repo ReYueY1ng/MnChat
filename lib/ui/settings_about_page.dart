@@ -34,6 +34,7 @@ class _SettingsAboutPageState extends ConsumerState<SettingsAboutPage> {
       '${defaultTargetPlatform.name}${kDebugMode ? ' (debug)' : ''}';
 
   Future<void> _checkUpdate() async {
+    if (_checking) return;
     setState(() => _checking = true);
     final result = await AppUpdateClient().check(kAppVersion);
     if (!mounted) return;
@@ -140,7 +141,7 @@ class _SettingsAboutPageState extends ConsumerState<SettingsAboutPage> {
                 icon: Icons.system_update_alt_outlined,
                 title: '检查更新',
                 subtitle: _checking ? '正在检查…' : '查询 GitHub 上的最新构建',
-                onTap: _checking ? null : _checkUpdate,
+                onTap: _checkUpdate,
               ),
 
               const SettingsSectionHeader('其他'),
