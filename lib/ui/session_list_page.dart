@@ -177,7 +177,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 6, 12, 6),
+        padding: const EdgeInsets.fromLTRB(AppSpacing.md, 6, AppSpacing.md, 6),
         child: Row(
           children: [Expanded(child: _buildSearchField())],
         ),
@@ -459,7 +459,7 @@ class _SessionTile extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
           Text(timeText, style: theme.textTheme.labelSmall),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           if (session.unreadCount > 0)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -511,7 +511,7 @@ class _EmptySessions extends StatelessWidget {
             size: 48,
             color: theme.colorScheme.outline,
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           const Text('暂无会话\n聊过天的人会出现在这里'),
           const SizedBox(height: AppSpacing.xs),
           // 说清楚为什么好友列了一屏、会话却是空的：会话只从本机历史与实时推送
@@ -523,7 +523,7 @@ class _EmptySessions extends StatelessWidget {
               color: theme.colorScheme.outline,
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           TextButton.icon(
             onPressed: onAddFriend,
             icon: const Icon(Icons.person_add),

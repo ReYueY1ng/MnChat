@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
@@ -16,10 +19,12 @@ import '../core/models/messages.dart'
         ChatSessionType,
         decodeChatExtendData,
         emojiCodeForMessage;
+import '../core/models/nickname.dart' show plainNickname;
+import '../core/models/session_key.dart' show sessionKeyOf;
 import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart' show DynamicsClient;
 import '../core/services/rich_media.dart' show RichMedia, ShareType;
-import '../core/storage/settings_store.dart' show SettingsKeys;
+import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
 import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'group_detail_page.dart';
@@ -27,9 +32,14 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/emoji_code_image.dart' show EmojiCodeImage;
 import 'widgets/emoji_picker.dart' show showEmojiPicker;
+import 'widgets/floating_panel.dart' show showFloatingPanel;
 import 'widgets/gift_picker.dart' show showGiftPicker;
 import 'widgets/rich_text_view.dart';
 import '../core/services/image_disk_cache.dart';
+
+part 'chat_page_composer.dart';
+part 'chat_page_bubbles.dart';
+part 'chat_page_message_row.dart';
 
 /// 相邻两条消息间隔超过该值时，在两条消息之间插入居中的时间分隔条。
 ///
@@ -88,6 +98,30 @@ class _ChatPageState extends ConsumerState<ChatPage>
   /// 有创建/缓存副作用，不能在 build 中调用），build 直接复用。
   late final ChatController _controller;
 
+  /// 设置存储（草稿用）。测试环境可能未注入 databaseProvider → null，草稿逻辑整体跳过。
+  SettingsStore? _settings;
+
+  /// 本会话草稿的存储 key（`friend_123` / `group_456`）。
+  late final String _draftKey = sessionKeyOf(widget.type, widget.sessionId);
+
+  /// 草稿落盘防抖：输入停顿 600ms 才写一次库，避免每个按键一次 SQLite 写入。
+  Timer? _draftTimer;
+
+  /// 会话内搜索：是否展开搜索栏、当前关键词，以及搜索框控制器。
+  bool _searching = false;
+  String _query = '';
+  final TextEditingController _searchController = TextEditingController();
+
+  /// 成员选择器是否已弹出（防止刚敲下的 `@` 反复触发）。
+  bool _mentionOpen = false;
+
+  /// 进入会话时的未读数，以及据此定位出的「第一条未读消息」id。
+  ///
+  /// 未读数必须在标记已读**之前**取（见 initState），否则自己一进会话就归零。
+  int _unreadAtOpen = 0;
+  String? _firstUnreadId;
+  bool _unreadResolved = false;
+
   @override
   void initState() {
     super.initState();
@@ -99,6 +133,26 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _bridge.reconcile(_controller, widget.type, widget.sessionId);
     // 提前持有：Riverpod 3.x 禁止在 dispose 中再访问 ref。
     _service = ref.read(chatServiceProvider);
+    // 未读边界：现在取（setViewing 会把未读清零，取晚了永远是 0）。
+    try {
+      final snap = ref.read(sessionListProvider).asData?.value;
+      for (final s in snap?.sessions ?? const <ChatSession>[]) {
+        if (s.type == widget.type && s.id == widget.sessionId) {
+          _unreadAtOpen = s.unreadCount;
+          break;
+        }
+      }
+    } catch (_) {
+      _unreadAtOpen = 0;
+    }
+    // 草稿：读回上次没发出去的内容，并在输入变化时防抖写回。
+    try {
+      _settings = ref.read(settingsProvider);
+    } catch (_) {
+      _settings = null; // 测试环境未注入 databaseProvider
+    }
+    _composerController.addListener(_onComposerChanged);
+    _restoreDraft();
     WidgetsBinding.instance.addObserver(this);
     // 进入会话：登记为「正在查看」并（默认）标记已读。
     // 登记后，停留期间到达的消息不再累加未读；离开时 [dispose] 再补一次已读，
@@ -172,6 +226,249 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  /// 恢复上次未发送的草稿。
+  ///
+  /// 只在输入框还空着时回填：异步读库期间用户可能已经开始打字，不能覆盖他刚敲的。
+  void _restoreDraft() {
+    final settings = _settings;
+    if (settings == null) return;
+    settings
+        .draft(_draftKey)
+        .then((text) {
+          if (!mounted || text == null) return;
+          if (_composerController.text.isNotEmpty) return;
+          _composerController.text = text;
+          _composerController.selection = TextSelection.collapsed(
+            offset: text.length,
+          );
+        })
+        .catchError((Object _) {});
+  }
+
+  void _onComposerChanged() {
+    _draftTimer?.cancel();
+    _draftTimer = Timer(const Duration(milliseconds: 600), _saveDraft);
+    // 群聊里刚敲下 `@` 就把成员选择器弹出来（与常见 IM 一致）。
+    if (!_mentionOpen &&
+        widget.type == ChatSessionType.group &&
+        _composerController.text.endsWith('@')) {
+      unawaited(_showMentionPicker(fromTyped: true));
+    }
+  }
+
+  /// 群成员候选（昵称优先，没资料就显示迷你号），按昵称排序、自己排最后。
+  List<({int uin, String name})> _mentionCandidates() {
+    final myUin = ref.read(myUinProvider);
+    final list = <({int uin, String name})>[];
+    for (final uin in _service.groupMembers(widget.sessionId)) {
+      final nick = plainNickname(
+        _service.groupMemberProfile(widget.sessionId, uin)?.nickname ?? '',
+      ).trim();
+      list.add((uin: uin, name: nick.isEmpty ? '$uin' : nick));
+    }
+    list.sort((a, b) {
+      if (a.uin == myUin) return 1;
+      if (b.uin == myUin) return -1;
+      return a.name.compareTo(b.name);
+    });
+    return list;
+  }
+
+  /// @群成员：列出群成员，选中后把 `@昵称 ` 插到光标处。
+  ///
+  /// [fromTyped] 表示是用户刚敲下 `@` 触发的 —— 选中后要先删掉那个 `@`，
+  /// 否则会插成 `@@昵称`。
+  Future<void> _showMentionPicker({bool fromTyped = false}) async {
+    if (!mounted) return;
+    final members = _mentionCandidates();
+    if (members.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('还没拉到群成员名单，稍后再试'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+    _mentionOpen = true;
+    final name = await showFloatingPanel<String>(
+      context,
+      builder: (ctx, close) =>
+          _MentionPicker(members: members, onPick: (n) => close(n)),
+    );
+    _mentionOpen = false;
+    if (!mounted || name == null) return;
+    if (fromTyped) {
+      final t = _composerController.text;
+      final sel = _composerController.selection;
+      final at = (sel.isValid ? sel.start : t.length).clamp(0, t.length);
+      if (at > 0 && t[at - 1] == '@') {
+        _composerController.value = TextEditingValue(
+          text: t.replaceRange(at - 1, at, ''),
+          selection: TextSelection.collapsed(offset: at - 1),
+        );
+      }
+    }
+    _insertText('@$name ');
+  }
+
+  /// 把输入框当前内容写进草稿（空白即清空该会话的草稿）。
+  void _saveDraft() {
+    final settings = _settings;
+    if (settings == null) return;
+    unawaited(
+      settings
+          .setDraft(_draftKey, _composerController.text)
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// 取消息的可搜索 / 可复制文本。
+  ///
+  /// 文本消息直接取正文；卡片类（礼物 / 动态分享 / 房间邀请 …）的正文在
+  /// `metadata['text']` 里（见 `chat/message_adapter.dart` 的映射）。
+  static String _searchableText(Message m) {
+    if (m is TextMessage) return m.text;
+    final t = m.metadata?['text'];
+    return t is String ? t : '';
+  }
+
+  void _toggleSearch() {
+    setState(() {
+      _searching = !_searching;
+      if (!_searching) {
+        _query = '';
+        _searchController.clear();
+      }
+    });
+  }
+
+  /// 搜索命中（时间倒序，最多 100 条）。
+  List<Message> _searchHits(String query) {
+    if (query.isEmpty) return const [];
+    final all = _controller.messages;
+    final hits = <Message>[];
+    for (var i = all.length - 1; i >= 0 && hits.length < 100; i--) {
+      final m = all[i];
+      if (m.deletedAt != null) continue;
+      if (_searchableText(m).toLowerCase().contains(query)) hits.add(m);
+    }
+    return hits;
+  }
+
+  /// 会话内消息搜索面板。
+  ///
+  /// 这里做的是「找到并读全文」：命中按时间倒序列出，点一条看完整正文并可复制。
+  /// flutter_chat_ui 的 `ChatAnimatedList` 没有暴露「滚动到某条消息」的能力，
+  /// 所以这一版**不做**点击后滚动定位 —— 与其做一个跳不准的定位，
+  /// 不如把内容给全（长消息在气泡里本来也是截断显示的）。
+  Widget _buildSearchPanel(BuildContext context, ColorScheme scheme) {
+    final query = _query.trim().toLowerCase();
+    final hits = _searchHits(query);
+    final theme = Theme.of(context);
+    final caption = query.isEmpty
+        ? '输入关键词搜索本会话消息'
+        : (hits.isEmpty
+              ? '没有匹配的消息'
+              : '找到 ${hits.length} 条${hits.length >= 100 ? '（只列出最近 100 条）' : ''}');
+
+    return Container(
+      constraints: const BoxConstraints(maxHeight: 260),
+      color: scheme.surfaceContainerHighest,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.md,
+              vertical: AppSpacing.xs,
+            ),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    caption,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                if (query.isNotEmpty)
+                  TextButton(
+                    onPressed: () {
+                      _searchController.clear();
+                      setState(() => _query = '');
+                    },
+                    child: const Text('清空'),
+                  ),
+              ],
+            ),
+          ),
+          if (hits.isNotEmpty)
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: hits.length,
+                itemBuilder: (context, i) => _SearchHitTile(
+                  message: hits[i],
+                  query: query,
+                  isMine:
+                      hits[i].authorId == ref.read(myUinProvider).toString(),
+                  onTap: () => _showSearchHit(hits[i]),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 点搜索结果：弹出完整正文（列表里是截断的），可复制。
+  Future<void> _showSearchHit(Message m) async {
+    final text = _searchableText(m);
+    final mine = m.authorId == ref.read(myUinProvider).toString();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(mine ? '我发出的消息' : '对方的消息'),
+        content: SingleChildScrollView(
+          child: SelectableText(text.isEmpty ? '（无文本内容）' : text),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: text));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('已复制'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child: const Text('复制'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 定位「第一条未读消息」：历史还没加载完，所以只能首帧之后再算一次。
+  void _scheduleUnreadResolve() {
+    if (_unreadResolved || _unreadAtOpen <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _unreadResolved) return;
+      final msgs = _controller.messages;
+      if (msgs.length >= _unreadAtOpen) {
+        _unreadResolved = true;
+        setState(() => _firstUnreadId = msgs[msgs.length - _unreadAtOpen].id);
+      }
+    });
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -180,7 +477,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _service.setViewing(null, null, autoRead: _autoRead);
     // 释放本会话控制器，避免 ChatBridge 的控制器映射随会话开关累积泄漏。
     _bridge.release(widget.type, widget.sessionId);
+    // 离开会话立刻落盘一次草稿：防抖窗口内退出会丢掉最后几个字。
+    _draftTimer?.cancel();
+    _saveDraft();
+    _composerController.removeListener(_onComposerChanged);
     _composerController.dispose();
+    _searchController.dispose();
     super.dispose();
   }
 
@@ -200,6 +502,7 @@ class _ChatPageState extends ConsumerState<ChatPage>
         ? (widget.type == ChatSessionType.group ? '群' : '好友')
         : widget.name;
     final isWide = MediaQuery.of(context).size.width >= 700;
+    _scheduleUnreadResolve();
 
     return Column(
       children: [
@@ -216,32 +519,49 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   onPressed: () =>
                       ref.read(activeSessionProvider.notifier).close(),
                 ),
-          title: RichTextView(
-            displayName,
-            style: const TextStyle(fontWeight: FontWeight.bold),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-          ),
-          actions: widget.type == ChatSessionType.group
-              ? [
-                  IconButton(
-                    tooltip: '群详情',
-                    icon: const Icon(Icons.info_outline),
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute(
-                          builder: (_) => GroupDetailPage(
-                            groupId: widget.sessionId,
-                            name: displayName,
-                          ),
-                        ),
-                      );
-                    },
+          title: _searching
+              ? TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  onChanged: (v) => setState(() => _query = v),
+                  style: const TextStyle(fontSize: 16),
+                  decoration: const InputDecoration(
+                    hintText: '搜索本会话消息',
+                    border: InputBorder.none,
+                    isDense: true,
                   ),
-                ]
-              : null,
+                )
+              : RichTextView(
+                  displayName,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+          actions: [
+            if (widget.type == ChatSessionType.group && !_searching)
+              IconButton(
+                tooltip: '群详情',
+                icon: const Icon(Icons.info_outline),
+                onPressed: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => GroupDetailPage(
+                        groupId: widget.sessionId,
+                        name: displayName,
+                      ),
+                    ),
+                  );
+                },
+              ),
+            IconButton(
+              tooltip: _searching ? '退出搜索' : '搜索消息',
+              icon: Icon(_searching ? Icons.close : Icons.search),
+              onPressed: _toggleSearch,
+            ),
+          ],
         ),
         const Divider(height: 1),
+        if (_searching) _buildSearchPanel(context, scheme),
         // 消息列表 + 输入区（flutter_chat_ui Chat 组件）
         Expanded(
           child: Stack(
@@ -297,6 +617,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       onInsert: _insertText,
                       phrases: _phrases,
                       onImfc: _sendImfc,
+                      // @成员只在群聊里给：好友会话没有成员可 @。
+                      onMention: widget.type == ChatSessionType.group
+                          ? _showMentionPicker
+                          : null,
                     ),
                   ),
                   // 消息外框统一换成 _ChatMessageRow：保留 ChatMessage 原有的
@@ -326,6 +650,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         ),
                         // 与前一条间隔超过 [kChatTimeDividerGap] 时插入时间条。
                         showTimeDivider: _showTimeDivider(index, message),
+                        // 进入会话时的未读边界。
+                        showUnreadDivider:
+                            _firstUnreadId != null &&
+                            message.id == _firstUnreadId,
                         child: child,
                       ),
                   // 空会话时用中文空态**替换消息列表区**（而不是覆盖整个 Chat）。
@@ -493,19 +821,42 @@ class _ChatPageState extends ConsumerState<ChatPage>
       // 本地乐观消息：立即回显（ChatBridge 经 eventStream 增量 reconcile 上屏，
       // 无需在此处手动操作 controller）
       service.addLocalMessage(widget.type, widget.sessionId, trimmed);
+      // 发出去了就清掉草稿：Composer 此时已把输入框清空，这里显式写一次，
+      // 避免「消息已发出、草稿还留在下一句」的错乱。
+      _draftTimer?.cancel();
+      _saveDraft();
     } catch (e) {
-      if (mounted) {
-        final scheme = Theme.of(context).colorScheme;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              '发送失败: $e',
-              style: TextStyle(color: scheme.onError),
-            ),
-            backgroundColor: scheme.error,
-          ),
+      if (!mounted) return;
+      // 发送失败：Composer 在回调前已经把输入框清空了，不把内容塞回去用户就得
+      // 重新敲一遍。这里回填 + 给一个「重试」，同时把草稿存下来（万一他直接关掉
+      // 会话，内容也不丢）。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _composerController.text = trimmed;
+        _composerController.selection = TextSelection.collapsed(
+          offset: trimmed.length,
         );
-      }
+        _saveDraft();
+      });
+      final scheme = Theme.of(context).colorScheme;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '发送失败: $e',
+            style: TextStyle(color: scheme.onError),
+          ),
+          backgroundColor: scheme.error,
+          duration: const Duration(seconds: 6),
+          action: SnackBarAction(
+            label: '重试',
+            textColor: scheme.onError,
+            onPressed: () {
+              _composerController.clear();
+              unawaited(_send(trimmed));
+            },
+          ),
+        ),
+      );
     }
   }
 
@@ -547,923 +898,5 @@ class _ChatPageState extends ConsumerState<ChatPage>
             .showSnackBar(SnackBar(content: Text('动态加载失败: $e')));
       }
     }
-  }
-}
-
-/// 中文空状态：覆盖 flutter_chat_ui 内置的英文 "No messages yet"。
-///
-/// 「打个招呼」按钮只把招呼语填进输入框（同快捷短语），发送由用户自己按发送键 ——
-/// 空态里任何一键直发都会在误触时真的给对方发消息。
-class _EmptyChatState extends StatelessWidget {
-  final VoidCallback onInsert;
-
-  const _EmptyChatState({required this.onInsert});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ColoredBox(
-      color: theme.colorScheme.surface,
-      child: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 56,
-              height: 56,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.primaryContainer,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.forum_outlined,
-                color: theme.colorScheme.onPrimaryContainer,
-              ),
-            ),
-            const SizedBox(height: 14),
-            Text(
-              '暂无消息，打个招呼吧 👋',
-              style: theme.textTheme.titleSmall?.copyWith(
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              '发送第一条消息，开启你们的冒险',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
-              ),
-            ),
-            const SizedBox(height: 14),
-            OutlinedButton.icon(
-              onPressed: onInsert,
-              icon: const Icon(Icons.waving_hand_outlined, size: 16),
-              label: const Text('打个招呼'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-/// 表情按钮：弹出游戏表情面板（「基础」内置表情 + 「我的」服务端表情包）。
-class _ComposerBar extends ConsumerWidget {
-  final ValueChanged<String> onInsert;
-  final List<String> phrases;
-
-  /// 互动表情（骰子/猜拳）：点按即发送，不走输入框。
-  final ValueChanged<ImfcEmoji>? onImfc;
-
-  const _ComposerBar({
-    required this.onInsert,
-    required this.phrases,
-    this.onImfc,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 快捷短语 chips
-        if (phrases.isNotEmpty)
-          SizedBox(
-            height: 36,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              itemCount: phrases.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 6),
-              itemBuilder: (context, i) => InkWell(
-                borderRadius: BorderRadius.circular(14),
-                onTap: () => onInsert(phrases[i]),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Text(phrases[i], style: const TextStyle(fontSize: 13)),
-                ),
-              ),
-            ),
-          ),
-        // 工具栏：emoji / 礼物（图片入口已移除）
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4),
-          child: Row(
-            children: [
-              _ToolBtn(
-                tooltip: '表情',
-                icon: Icons.emoji_emotions_outlined,
-                anchorKey: _emojiKey,
-                onTap: () => _showEmojiPicker(context, ref),
-              ),
-              _ToolBtn(
-                tooltip: '礼物',
-                icon: Icons.card_giftcard_outlined,
-                anchorKey: _giftKey,
-                onTap: () => _showGiftPicker(context, ref),
-              ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  /// 表情 / 礼物按钮的锚点：浮动面板要贴在按钮上方。
-  static final GlobalKey _emojiKey = GlobalKey();
-  static final GlobalKey _giftKey = GlobalKey();
-
-  Rect? _anchorOf(GlobalKey key) {
-    final box = key.currentContext?.findRenderObject() as RenderBox?;
-    if (box == null || !box.hasSize) return null;
-    return box.localToGlobal(Offset.zero) & box.size;
-  }
-
-  void _showEmojiPicker(BuildContext context, WidgetRef ref) {
-    showEmojiPicker(
-      context,
-      ref,
-      onPick: onInsert,
-      onImfc: onImfc,
-      anchor: _anchorOf(_emojiKey),
-    );
-  }
-
-  /// 当前会话的对方 uin（礼物只能送给好友）。群聊 / 未选中时不弹面板。
-  void _showGiftPicker(BuildContext context, WidgetRef ref) {
-    final active = ref.read(activeSessionProvider);
-    if (active == null || active.type != ChatSessionType.friend) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('礼物只能送给好友会话')),
-      );
-      return;
-    }
-    showGiftPicker(
-      context,
-      ref,
-      uin: active.id,
-      name: ref.read(sessionListProvider).asData?.value.sessions
-              .where((s) => s.type == active.type && s.id == active.id)
-              .firstOrNull
-              ?.name ??
-          '${active.id}',
-      anchor: _anchorOf(_giftKey),
-    );
-  }
-}
-
-class _ToolBtn extends StatelessWidget {
-  final String tooltip;
-  final IconData icon;
-  final VoidCallback onTap;
-
-  /// 浮动面板的锚点（面板贴这个按钮弹出）。
-  final Key? anchorKey;
-
-  const _ToolBtn({
-    required this.tooltip,
-    required this.icon,
-    required this.onTap,
-    this.anchorKey,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return IconButton(
-      key: anchorKey,
-      tooltip: tooltip,
-      visualDensity: adaptiveDensity(context),
-      icon: Icon(icon, size: 22),
-      onPressed: onTap,
-    );
-  }
-}
-
-/// 发送按钮图标：输入为空时用弱化色（onSurfaceVariant），有非空白文本时
-/// 切换为主题强调色（primary）。
-///
-/// Composer 的 M3 发送按钮在 `onPressed == null` 时统一走禁用色
-///（`disabledColor`），传空的 `emptyFieldSendIconColor` 不生效；这里直接监听
-/// 外部输入控制器自行着色，保证每次按键都即时更新（触屏/桌面一致）。
-class _SendButtonIcon extends StatelessWidget {
-  final TextEditingController controller;
-
-  const _SendButtonIcon({required this.controller});
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (context, value, _) => Icon(
-        Icons.send,
-        color: value.text.trim().isEmpty
-            ? scheme.onSurfaceVariant
-            : scheme.primary,
-      ),
-    );
-  }
-}
-
-/// 聊天气泡：把 `#A1xx` 表情码渲染为行内真实游戏贴图（EmoticonImage），
-/// 其余为普通文本；按是否我发出对齐并应用气泡底色。
-class _InlineEmojiBubble extends StatelessWidget {
-  final Message message;
-  final bool isSentByMe;
-
-  const _InlineEmojiBubble({required this.message, required this.isSentByMe});
-
-  /// 只有「本进程运行期间到的」（新收到 / 自己刚发）才播动画；
-  /// 历史消息直接显示结果帧 —— 骰子/猜拳是即时反馈，翻旧记录不该重播。
-  bool get _animateEmoji => message.metadata?['live'] == true;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final raw =
-        (message.metadata?['raw'] as String?) ??
-        switch (message) {
-          TextMessage m => m.text,
-          SystemMessage m => m.text,
-          _ => '',
-        };
-    // 动态/互动表情的真身在 extend_data.interCode 里（文本只是低版本提示文案）。
-    final emojiCode = emojiCodeForMessage(
-      text: raw,
-      interCode: message.metadata?['interCode']?.toString(),
-    );
-    final maxWidth =
-        MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor;
-    return Align(
-      alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: maxWidth),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          decoration: BoxDecoration(
-            color: isSentByMe
-                ? theme.colorScheme.primaryContainer
-                : theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            crossAxisAlignment: isSentByMe
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 动态/互动表情：渲染成图，不显示低版本提示文案或 JSON 原文。
-              if (emojiCode != null)
-                _EmojiMessageBody(code: emojiCode, animate: _animateEmoji)
-              else if (isDynamicEmojiHint(raw))
-                // 解不出表情代码（老数据 / 离线历史 / 素材缺失）时，也别把
-                // 那句「请升级到最新版本查看」当正文显示 —— 给个中性提示。
-                const _DynamicEmojiHintChip()
-              else
-                // 复用共享富文本解析：支持 [color=] / #cRRGGBB / #n / #A1xx 表情 /
-                // @提及 等（见 rich_text_view.dart）。
-                Text.rich(
-                  TextSpan(
-                    children: buildRichSpans(
-                      raw,
-                      context: context,
-                      emojiSize: 24,
-                      emojiAnimate: _animateEmoji,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 时间分隔条文案：同一天 → `HH:mm`，跨天 → `MM-DD HH:mm`。
-///
-/// 与 `session_list_page.dart` / `friend_request_page.dart` 的 `_fmtTime`
-/// 同源（同天只显示时分），跨天追加月日以免丢失日期信息。
-String _fmtDividerTime(DateTime dt) {
-  final l = dt.toLocal();
-  final now = DateTime.now();
-  final sameDay =
-      l.year == now.year && l.month == now.month && l.day == now.day;
-  final hh = l.hour.toString().padLeft(2, '0');
-  final mm = l.minute.toString().padLeft(2, '0');
-  if (sameDay) return '$hh:$mm';
-  final mo = l.month.toString().padLeft(2, '0');
-  final dd = l.day.toString().padLeft(2, '0');
-  return '$mo-$dd $hh:$mm';
-}
-
-/// 富媒体气泡（share / custom 消息卡片）。
-///
-/// 从 [CustomMessage.metadata] 的 `extend`（url→base64→JSON）解码 [RichMedia]：
-/// - 红包（Type=SendFriendRedPocket）→ 红包卡（点击占位提示，无法在外部客户端领取）
-/// - 动态通知/动态分享（shareType 19/18）→ 动态卡（点击打开详情）
-/// - 地图分享（shareType 1）→ 地图卡
-/// - 链接（shareType 9）→ 链接卡
-/// - 其余 → 回退为纯文本卡片。
-class _RichMediaBubble extends ConsumerWidget {
-  final CustomMessage message;
-  final bool isSentByMe;
-
-  /// 点击动态卡片回调（仅好友会话有效；群会话不跳动态详情）。
-  final ValueChanged<String>? onOpenDynamics;
-
-  /// 同上：只有运行期间新到的才播动画。
-  bool get _isLive => message.metadata?['live'] == true;
-
-  const _RichMediaBubble({
-    required this.message,
-    required this.isSentByMe,
-    this.onOpenDynamics,
-  });
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final theme = Theme.of(context);
-    final rawExt = message.metadata?['extend']?.toString();
-    final media = RichMedia.decode(rawExt);
-
-    return Align(
-      alignment: isSentByMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth:
-              MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor,
-        ),
-        child: Container(
-          margin: const EdgeInsets.symmetric(vertical: 2, horizontal: 8),
-          decoration: BoxDecoration(
-            color: isSentByMe
-                ? theme.colorScheme.primaryContainer
-                : theme.colorScheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: media == null
-              ? _plainText()
-              : media.isFriendGift
-              ? _giftCard(context, ref, media, theme)
-              : (media.isMap || media.isRoomInvite)
-              ? _mapCard(context, media, theme)
-              : _card(context, media, theme),
-        ),
-      ),
-    );
-  }
-
-  /// 礼物卡（紧凑两行）：礼物图 + 名称×数量，次行「默契礼物 · 来源 · 默契度」。
-  ///
-  /// 名称/图标来自服务端 visual-cfg（`new_give_gift_config` + `items`），
-  /// 还没加载出来时退回「礼物 #id」+ 通用礼物图标。刻意做窄做矮：礼物在会话里
-  /// 常连发，原三行大卡（56 图 + 独立标题行）太占竖向空间。
-  Widget _giftCard(
-    BuildContext context,
-    WidgetRef ref,
-    RichMedia media,
-    ThemeData theme,
-  ) {
-    final gift = ref
-        .watch(giftCatalogProvider)
-        .asData
-        ?.value
-        .byId(media.giftItemId);
-    final name = gift?.displayName ?? '礼物 ${media.giftItemId}';
-    final icon = gift?.icon;
-    final num = media.giftNum > 0 ? media.giftNum : 1;
-    final who = media.giftSrcName.isNotEmpty
-        ? media.giftSrcName
-        : media.nickname;
-    final meta = [
-      '默契礼物',
-      if (who.isNotEmpty) who,
-      if (media.giftAddValue > 0) '默契度 +${media.giftAddValue}',
-    ].join(' · ');
-    return InkWell(
-      borderRadius: AppRadius.inputR,
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$name ×$num')),
-        );
-      },
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Center(
-                child: icon != null && icon.startsWith('http')
-                    ? Image.network(
-                        icon,
-                        width: 32,
-                        height: 32,
-                        fit: BoxFit.contain,
-                        errorBuilder: (_, _, _) =>
-                            const Icon(Icons.card_giftcard, size: 22),
-                      )
-                    : const Icon(Icons.card_giftcard, size: 22),
-              ),
-            ),
-            const SizedBox(width: 8),
-            Flexible(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    '$name ×$num',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  Text(
-                    meta,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.outline,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 无法解码 → 回退纯文本卡。
-  ///
-  /// 但动态表情要先看一眼 `extend_data.interCode`：它可能被归成 share/custom
-  /// 类型走到这里，此时正文只是「请升级到最新版本查看」，必须改成渲染表情。
-  Widget _plainText() {
-    final code = _emojiCodeOrNull;
-    return Padding(
-      padding: const EdgeInsets.all(12),
-      child: Column(
-        crossAxisAlignment: isSentByMe
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (code != null)
-            _EmojiMessageBody(code: code, animate: _isLive)
-          else if (isDynamicEmojiHint(customMessageText(message)))
-            const _DynamicEmojiHintChip()
-          else
-            Text(
-              customMessageText(message),
-              style: const TextStyle(fontStyle: FontStyle.italic),
-            ),
-        ],
-      ),
-    );
-  }
-
-  /// 本条消息应渲染的表情代码（interCode 优先，其次动态表情的 JSON 信封）。
-  String? get _emojiCodeOrNull {
-    final ext = message.metadata?['extend']?.toString();
-    final interCode =
-        message.metadata?['interCode']?.toString() ??
-        decodeChatExtendData(ext)?['interCode']?.toString();
-    return emojiCodeForMessage(
-      text: message.metadata?['text']?.toString() ?? ext,
-      interCode: interCode,
-    );
-  }
-
-  /// 地图 / 房间分享：两列卡（缩略图 + 标题 + 说明 + 标签），对齐游戏样式。
-  Widget _mapCard(BuildContext context, RichMedia media, ThemeData theme) {
-    final isRoom = media.isRoomInvite;
-    final title = isRoom
-        ? (media.roomName.isNotEmpty ? media.roomName : '房间邀请')
-        : (media.name.isNotEmpty ? media.name : '地图分享');
-    final desc = isRoom ? '邀请你一起玩 · 需在游戏内加入房间' : '邀请你一起玩 · 发现一个好玩的地图，快来一起吧';
-    return InkWell(
-      borderRadius: AppRadius.inputR,
-      onTap: () {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(isRoom ? '房间需在游戏内加入' : '地图需在游戏内打开')),
-        );
-      },
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              children: [
-                Container(
-                  width: 76,
-                  height: 58,
-                  decoration: BoxDecoration(
-                    borderRadius: AppRadius.inputR,
-                    color: theme.colorScheme.primaryContainer,
-                  ),
-                  child: Icon(
-                    isRoom ? Icons.meeting_room_outlined : Icons.map_outlined,
-                    color: theme.colorScheme.onPrimaryContainer,
-                    size: 22,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        desc,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.outline,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        isRoom ? '房间' : '地图',
-                        style: theme.textTheme.labelSmall?.copyWith(
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _card(BuildContext context, RichMedia media, ThemeData theme) {
-    // 除图标+标题外是否有可展示的细节；没有则给一句兜底说明，避免空卡片。
-    final hasDetail =
-        media.name.isNotEmpty ||
-        media.author.isNotEmpty ||
-        media.content.isNotEmpty ||
-        media.picList.isNotEmpty ||
-        (media.isUrl && media.url.isNotEmpty) ||
-        media.isRedPacket ||
-        ((media.isPat || media.isCustomPanel) && media.subtitle.isNotEmpty);
-    return InkWell(
-      borderRadius: BorderRadius.circular(12),
-      onTap: media.isDynamicNotice || media.isDynamics
-          ? (media.pid.isNotEmpty && onOpenDynamics != null
-                ? () => onOpenDynamics!(media.pid)
-                : null)
-          : media.isRedPacket
-          ? () {
-              // 外部客户端无支付流，无法领取红包；仅提示。
-              ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('红包需在游戏内领取')));
-            }
-          : media.isRoomInvite
-          ? () {
-              // 外部客户端无法进入游戏房间；展示房间信息。
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(
-                    '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}'
-                    '（需在游戏内加入）',
-                  ),
-                ),
-              );
-            }
-          : null,
-      child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: isSentByMe
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  _iconFor(media),
-                  size: 18,
-                  color: theme.colorScheme.primary,
-                ),
-                const SizedBox(width: 6),
-                Text(
-                  media.title,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            // 图片预览（动态/红包图）
-            if (media.picList.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
-                  child: Image(image: CachedNetworkImageProvider(media.picList.first),
-                    width: 120,
-                    height: 90,
-                    fit: BoxFit.cover,
-                    errorBuilder: (_, _, _) => Container(
-                      width: 120,
-                      height: 90,
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: const Icon(Icons.image_outlined),
-                    ),
-                  ),
-                ),
-              ),
-            // 名称 / 内容摘要
-            if (media.name.isNotEmpty)
-              Text(
-                media.name,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  fontWeight: FontWeight.w500,
-                ),
-              ),
-            if (media.author.isNotEmpty)
-              Text(
-                '作者: ${media.author}',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.outline,
-                ),
-              ),
-            if (media.content.isNotEmpty)
-              Text(
-                media.content,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-              ),
-            // 拍一拍 / 自定义面板：正文取 tapText / customData.strContent。
-            if ((media.isPat || media.isCustomPanel) &&
-                media.content.isEmpty &&
-                media.subtitle.isNotEmpty)
-              Text(
-                media.subtitle,
-                maxLines: 3,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(height: 1.4),
-              ),
-            if (media.isUrl && media.url.isNotEmpty)
-              Text(
-                media.url,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.primary,
-                ),
-              ),
-            if (media.isRedPacket)
-              Text(
-                '金额 ¥${media.amount > 0 ? media.amount / 10 : '?'}',
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.error,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-            if (!hasDetail)
-              Text(
-                media.hint,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.outline,
-                ),
-              ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _iconFor(RichMedia media) {
-    if (media.isFriendGift) return Icons.card_giftcard;
-    if (media.isRedPacket || media.shareType == ShareType.familyRedPacket) {
-      return Icons.redeem;
-    }
-    if (media.isRoomInvite) return Icons.videogame_asset_outlined;
-    if (media.isPat) return Icons.touch_app_outlined;
-    if (media.isAchieve) return Icons.emoji_events_outlined;
-    if (media.isCustomPanel) return Icons.style_outlined;
-    if (media.isDynamicNotice || media.isDynamics) return Icons.public;
-    if (media.isMap) return Icons.map_outlined;
-    if (media.isUrl) return Icons.link;
-    switch (media.shareType) {
-      case ShareType.role:
-        return Icons.person_outline;
-      case ShareType.skin:
-      case ShareType.chameleon:
-        return Icons.checkroom_outlined;
-      case ShareType.ride:
-        return Icons.directions_car_outlined;
-      case ShareType.weapon:
-        return Icons.hardware_outlined;
-      case ShareType.avatar:
-      case ShareType.avatarMatch:
-        return Icons.account_circle_outlined;
-      case ShareType.familyRecruit:
-      case ShareType.familyInvite:
-      case ShareType.familyServer:
-      case ShareType.familyDynamics:
-        return Icons.family_restroom_outlined;
-      case ShareType.rankSystem:
-        return Icons.leaderboard_outlined;
-      case ShareType.contentFavsShare:
-        return Icons.bookmark_outline;
-      case ShareType.qixiPartnerInvite:
-      case ShareType.customPeerShare:
-        return Icons.favorite_outline;
-      case ShareType.resourceGoodShare:
-      case ShareType.versionResCrShare:
-        return Icons.inventory_2_outlined;
-      case ShareType.action:
-        return Icons.sports_martial_arts_outlined;
-      case ShareType.customPic:
-        return Icons.image_outlined;
-      default:
-        return Icons.article_outlined;
-    }
-  }
-}
-
-/// 把表情代码渲染成消息里的图。
-///
-/// 互动表情（骰子/猜拳 `@IMFC&N_M`）用图集结果帧/动图；动态表情（`[mdemo]...`）
-/// 用内置动图。
-class _EmojiMessageBody extends StatelessWidget {
-  /// 气泡里表情的渲染尺寸（比行内表情大得多，和游戏里一致）。
-  static const double kSize = 96;
-
-  final String code;
-
-  /// 是否播动画：新收到/刚发的播，历史消息直接显示结果帧。
-  final bool animate;
-
-  const _EmojiMessageBody({required this.code, this.animate = true});
-
-  @override
-  Widget build(BuildContext context) {
-    final imfc = parseImfc(code);
-    return imfc != null
-        ? ImfcEmojiImage(ref: imfc, size: kSize, animate: animate)
-        : EmojiCodeImage(code: code, size: kSize, animate: animate);
-  }
-}
-
-/// 「拿不到表情代码的动态表情」的中性提示。
-///
-/// 老数据 / 离线历史（`chat_query` 只回三元组）/ 游戏本身就缺素材的那一个，
-/// 都解不出 interCode —— 此时不要把「请升级到最新版本查看」当正文显示。
-class _DynamicEmojiHintChip extends StatelessWidget {
-  const _DynamicEmojiHintChip();
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          Icons.emoji_emotions_outlined,
-          size: 18,
-          color: theme.colorScheme.outline,
-        ),
-        const SizedBox(width: 6),
-        Text(
-          '动态表情',
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.outline,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// 单条消息外框：沿用 flutter_chat_ui 的 [ChatMessage]（动画 / 内边距 /
-/// 分组 / 点击手势全部保留），另外附加：
-/// - 时间戳：**气泡外**下方灰字常显，与气泡同侧对齐。此前内嵌在气泡顶部、
-///   默认透明并靠悬停淡入；手机端点按虽然接了 `GestureDetector`，但点按多半
-///   落在气泡内的富文本上被其手势吃掉，实际永远看不到；
-/// - `leadingWidget` / `trailingWidget` 展示双方头像：对方在气泡左、自己在右；
-/// - `headerWidget` 在消息间隔超过 [kChatTimeDividerGap] 时插入居中时间条。
-class _ChatMessageRow extends StatelessWidget {
-  final Message message;
-  final int index;
-  final Animation<double> animation;
-  final bool? isRemoved;
-  final MessageGroupStatus? groupStatus;
-
-  /// 对方消息的头像；自己的消息为 null（不显示）。
-  final Widget? avatar;
-
-  /// 是否在消息上方插入时间分隔条（见 [_ChatPageState._showTimeDivider]）。
-  final bool showTimeDivider;
-
-  /// 是否为自己发送（决定时间戳与气泡的左右对齐）。
-  final bool isSentByMe;
-
-  final Widget child;
-
-  const _ChatMessageRow({
-    required this.message,
-    required this.index,
-    required this.animation,
-    required this.isSentByMe,
-    required this.child,
-    this.isRemoved,
-    this.groupStatus,
-    this.avatar,
-    this.showTimeDivider = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final time = message.resolvedTime;
-    return ChatMessage(
-      message: message,
-      index: index,
-      animation: animation,
-      isRemoved: isRemoved,
-      groupStatus: groupStatus,
-      // 对方头像在气泡左侧、自己的头像在右侧 —— ChatMessage 的 Row 依次摆放
-      // leadingWidget / trailingWidget，正好让两侧头像对称。
-      leadingWidget: isSentByMe ? null : avatar,
-      trailingWidget: isSentByMe ? avatar : null,
-      headerWidget: showTimeDivider && time != null
-          ? _TimeDivider(time: time)
-          : null,
-      // 气泡下方不再常显灰字时间戳（观感差）。跨段的时间信息仍由 headerWidget
-      // 的居中时间条承载。
-      child: child,
-    );
-  }
-}
-
-/// 消息列表中的居中时间分隔条（相邻消息间隔超过 [kChatTimeDividerGap] 时）。
-class _TimeDivider extends StatelessWidget {
-  final DateTime time;
-
-  const _TimeDivider({required this.time});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Container(
-        margin: const EdgeInsets.only(top: 6, bottom: 2),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
-        decoration: BoxDecoration(
-          color: theme.colorScheme.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(10),
-        ),
-        child: Text(
-          _fmtDividerTime(time),
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ),
-    );
   }
 }

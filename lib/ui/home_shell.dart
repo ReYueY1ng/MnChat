@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -35,6 +36,9 @@ class _MainShellState extends ConsumerState<MainShell> {
   /// 缓存最近一次构建的聊天页，保证 IndexedStack 中状态不丢失。
   Widget? _chatInstance;
 
+  /// 宽屏下会话列表栏的宽度（桌面端可拖拽调整）。
+  double _chatListWidth = AppSizes.chatListWidth;
+
   @override
   void initState() {
     super.initState();
@@ -61,6 +65,33 @@ class _MainShellState extends ConsumerState<MainShell> {
         lifecycle == AppLifecycleState.hidden ||
         lifecycle == AppLifecycleState.detached;
     svc.setBackgroundMode(background);
+  }
+
+  /// 是否使用左侧常驻导航栏。
+  ///
+  /// 桌面端（有鼠标键盘、窗口通常够高）只要窗口不是极端窄就用侧栏 —— 以前用
+  /// 「横屏 && ≥800」判定，窄而高的桌面窗口会退化成底部导航栏，很别扭。
+  /// 移动端仍按宽度判定：竖屏手机保持底部栏，横屏手机（≥800）用侧栏。
+  bool _useRail(double maxWidth) => isDesktopPlatform
+      ? maxWidth >= AppSizes.railMinWindow
+      : maxWidth >= AppSizes.railBreakpoint;
+
+  /// 返回上一级：聊天打开 → 回会话列表；其他 tab → 回「会话」tab。
+  ///
+  /// [background] 为 true 时（系统返回键一路退到会话列表）才把应用退到后台；
+  /// ESC 不在其列 —— 把应用藏起来不该是键盘快捷键的后果。
+  ///
+  /// 关闭会话时必须一并清掉 [_chatInstance]，否则宽屏常驻聊天面板仍显示上一次
+  /// 的会话内容（见 lib/ui/AGENTS.md 的同名反模式）。
+  void _handleBack(bool chatOpen, {bool background = true}) {
+    if (chatOpen) {
+      ref.read(activeSessionProvider.notifier).close();
+      setState(() => _chatInstance = null);
+    } else if (_tab != 0) {
+      setState(() => _tab = 0);
+    } else if (background) {
+      NativeBridge.moveTaskToBack();
+    }
   }
 
   void _switchTab(int index) {
@@ -128,28 +159,28 @@ class _MainShellState extends ConsumerState<MainShell> {
     final chatPane = _chatInstance ?? const _EmptyChatPlaceholder();
 
     return LayoutBuilder(builder: (context, constraints) {
-      final isLandscape =
-          MediaQuery.orientationOf(context) == Orientation.landscape &&
-          constraints.maxWidth >= 800;
-      // 会话 tab 是否双栏：内容区足够宽（≥760）才并排，否则单页切换。
-      final convSessions = _conversations(list);
-      final contentWidth = isLandscape
-          ? constraints.maxWidth - 76 // NavigationRail 占宽
-          : constraints.maxWidth;
+      final useRail = _useRail(constraints.maxWidth);
       final chatOpen = activeSession != null;
-      final sessionWide = contentWidth >= 760;
 
-      final sessionsTab = _SessionsTab(
-        sessions: convSessions,
-        chatPane: chatPane,
-        chatOpen: chatOpen,
-        wide: sessionWide,
-        onOpenSession: _toggleSession,
-      );
-      final friendsTab = FriendsPage(onOpenChat: (uin) {
-        _openChat(ChatSessionType.friend, uin);
-      });
-      final dynamicsTab = const DynamicsPage();
+      // 内容区宽度 = 窗口宽 - 侧栏宽，而侧栏宽度由 Material 内部决定。这里不再
+      // 用硬编码的 76 去推算（rail 一改宽就错位），双栏判定交给内层
+      // LayoutBuilder 用实测的内容区宽度（见下面的 useRail 分支）。
+      Widget buildTabs(double availableWidth) {
+        final sessionsTab = _SessionsTab(
+          sessions: _conversations(list),
+          chatPane: chatPane,
+          chatOpen: chatOpen,
+          wide: availableWidth >= AppSizes.chatSplitBreakpoint,
+          listWidth: _chatListWidth,
+          onListWidthChanged: (w) => setState(() => _chatListWidth = w),
+          onOpenSession: _toggleSession,
+        );
+        final friendsTab = FriendsPage(
+          onOpenChat: (uin) => _openChat(ChatSessionType.friend, uin),
+        );
+        final dynamicsTab = const DynamicsPage();
+        return _buildTabBody(sessionsTab, friendsTab, dynamicsTab);
+      }
 
       return PopScope(
         canPop: false,
@@ -157,42 +188,46 @@ class _MainShellState extends ConsumerState<MainShell> {
           if (didPop) return;
           // 一级返回：聊天打开 → 回会话列表；其他 tab → 回"会话"tab；
           // 会话列表 → 后台（不退出，前台服务继续收消息）
-          if (chatOpen) {
-            ref.read(activeSessionProvider.notifier).close();
-          } else if (_tab != 0) {
-            setState(() => _tab = 0);
-          } else {
-            NativeBridge.moveTaskToBack();
-          }
+          _handleBack(chatOpen);
         },
-        child: RequestErrorListener(
-          child: isLandscape
-            // 横屏：常驻侧边栏 + 内容区
-            ? Scaffold(
-                floatingActionButton: const RequestErrorIndicator(),
-                body: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    _buildRail(),
-                    const VerticalDivider(width: 1),
-                    Expanded(
-                      child: _buildTabBody(
-                        sessionsTab,
-                        friendsTab,
-                        dynamicsTab,
+        child: CallbackShortcuts(
+          // 桌面端 ESC 与系统返回键同义，只是不会把应用退到后台。
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () =>
+                _handleBack(chatOpen, background: false),
+          },
+          child: Focus(
+            autofocus: true,
+            child: RequestErrorListener(
+              child: useRail
+                  // 宽屏：常驻侧边栏 + 内容区
+                  ? Scaffold(
+                      floatingActionButton: const RequestErrorIndicator(),
+                      body: Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          _buildRail(),
+                          const VerticalDivider(width: 1),
+                          Expanded(
+                            // 用内层约束实测内容区宽度，双栏判定不再依赖魔法数。
+                            child: LayoutBuilder(
+                              builder: (context, content) =>
+                                  buildTabs(content.maxWidth),
+                            ),
+                          ),
+                        ],
                       ),
+                    )
+                  // 窄屏：底部栏（聊天打开时隐藏，最大化聊天区域）
+                  : Scaffold(
+                      floatingActionButton: const RequestErrorIndicator(),
+                      body: buildTabs(constraints.maxWidth),
+                      bottomNavigationBar: chatOpen
+                          ? null
+                          : _buildBottomBar(),
                     ),
-                  ],
-                ),
-              )
-            // 竖屏：底部栏（聊天打开时隐藏，最大化聊天区域）
-            : Scaffold(
-                floatingActionButton: const RequestErrorIndicator(),
-                body: _buildTabBody(sessionsTab, friendsTab, dynamicsTab),
-                bottomNavigationBar: chatOpen
-                    ? null
-                    : _buildBottomBar(),
-              ),
+            ),
+          ),
         ),
       );
     });
@@ -279,6 +314,10 @@ class _SessionsTab extends StatelessWidget {
   final bool chatOpen;
   final bool wide;
 
+  /// 宽屏下会话列表栏的宽度，以及拖拽调整它的回调。
+  final double listWidth;
+  final ValueChanged<double> onListWidthChanged;
+
   /// 点击会话卡片的回调（HomeShell 负责"再次点击当前会话关闭"的切换）。
   final ValueChanged<ChatSession> onOpenSession;
 
@@ -287,24 +326,29 @@ class _SessionsTab extends StatelessWidget {
     required this.chatPane,
     required this.chatOpen,
     required this.wide,
+    required this.listWidth,
+    required this.onListWidthChanged,
     required this.onOpenSession,
   });
 
   @override
   Widget build(BuildContext context) {
     if (wide) {
-      // 宽屏：左会话列表 + 右聊天（双栏同时可见）
+      // 宽屏：左会话列表 + 右聊天（双栏同时可见），中间的分隔线可拖拽调宽。
       return Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: 320,
+            width: listWidth,
             child: SessionListPage(
               sessions: sessions,
               onOpenChat: onOpenSession,
             ),
           ),
-          const VerticalDivider(width: 1),
+          _ChatListResizeHandle(
+            width: listWidth,
+            onChanged: onListWidthChanged,
+          ),
           Expanded(child: chatPane),
         ],
       );
@@ -316,6 +360,38 @@ class _SessionsTab extends StatelessWidget {
         SessionListPage(sessions: sessions, onOpenChat: onOpenSession),
         chatPane,
       ],
+    );
+  }
+}
+
+/// 会话列表栏与聊天面板之间的拖拽手柄。
+///
+/// 视觉上仍是一条 1px 分隔线，但命中区域加宽到 7px，并给出左右缩放光标 ——
+/// 1px 的线在桌面上根本抓不住。宽度收敛在 [AppSizes.chatListMinWidth] 与
+/// [AppSizes.chatListMaxWidth] 之间，避免把聊天面板挤没或把列表拉满整屏。
+class _ChatListResizeHandle extends StatelessWidget {
+  const _ChatListResizeHandle({required this.width, required this.onChanged});
+
+  final double width;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      cursor: SystemMouseCursors.resizeColumn,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onHorizontalDragUpdate: (details) => onChanged(
+          (width + details.delta.dx).clamp(
+            AppSizes.chatListMinWidth,
+            AppSizes.chatListMaxWidth,
+          ),
+        ),
+        child: const SizedBox(
+          width: 7,
+          child: Center(child: VerticalDivider(width: 1)),
+        ),
+      ),
     );
   }
 }
@@ -335,9 +411,9 @@ class _EmptyChatPlaceholder extends StatelessWidget {
             size: 80,
             color: theme.colorScheme.outline,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
           Text('选择会话开始聊天', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpacing.xs),
           Text(
             '好友 / 群聊 · 无需进入房间',
             style: theme.textTheme.bodySmall?.copyWith(

@@ -4,6 +4,8 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import 'core/models/messages.dart';
+import 'core/models/mention.dart' show textMentions;
+import 'core/models/nickname.dart' show plainNickname;
 import 'core/models/skin_head_catalog.dart' show headIconAsset;
 import 'core/services/app_lock.dart';
 import 'core/services/chat/online_notify.dart'
@@ -15,6 +17,7 @@ import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
 import 'core/utils/log.dart';
+import 'package:window_manager/window_manager.dart';
 import 'state/providers.dart';
 import 'ui/home_shell.dart' show MainShell;
 import 'ui/lock_page.dart';
@@ -66,8 +69,60 @@ Future<void> _initDesktopShell(AppDatabase db) async {
         tag: _logTag,
       );
     }
+    await _restoreWindowSize(store);
   } catch (e) {
     log.warn('桌面壳层初始化失败（已忽略）: $e', tag: _logTag);
+  }
+}
+
+/// 恢复上次的窗口尺寸，并监听后续变化。
+///
+/// 放在 main.dart 而不是 TrayService：它要读 SettingsStore（storage 层），
+/// 而 tray_service 只管托盘与窗口生命周期，不碰存储。
+Future<void> _restoreWindowSize(SettingsStore store) async {
+  if (!TrayService.isDesktop) return;
+  try {
+    final w = await store.getInt(SettingsKeys.windowWidth);
+    final h = await store.getInt(SettingsKeys.windowHeight);
+    // 低于最小可用尺寸的脏数据直接忽略（可能是手动改库或早期版本写的）。
+    if (w != null && h != null && w >= 480 && h >= 360) {
+      await windowManager.setSize(Size(w.toDouble(), h.toDouble()));
+    }
+    _windowKeeper = _WindowSizeKeeper(store);
+    windowManager.addListener(_windowKeeper!);
+  } catch (e) {
+    log.warn('窗口尺寸恢复失败（已忽略）: $e', tag: _logTag);
+  }
+}
+
+_WindowSizeKeeper? _windowKeeper;
+
+/// 记住窗口尺寸：拖动过程中会连续触发事件，停手 1.5s 才落盘。
+class _WindowSizeKeeper with WindowListener {
+  _WindowSizeKeeper(this._store);
+
+  final SettingsStore _store;
+  Timer? _debounce;
+
+  @override
+  void onWindowResize() {
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 1500), _save);
+  }
+
+  /// 关窗时补一次：否则「拖完立刻关窗」那次尺寸会丢。
+  @override
+  void onWindowClose() => _save();
+
+  Future<void> _save() async {
+    _debounce?.cancel();
+    try {
+      final size = await windowManager.getSize();
+      await _store.setInt(SettingsKeys.windowWidth, size.width.round());
+      await _store.setInt(SettingsKeys.windowHeight, size.height.round());
+    } catch (e) {
+      log.warn('窗口尺寸保存失败（已忽略）: $e', tag: _logTag);
+    }
   }
 }
 
@@ -288,6 +343,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
           group: false,
           avatarUrl: session?.avatar,
           avatarAsset: _headAssetOf(session),
+          sound: ref.read(notifySoundProvider),
+          vibrate: ref.read(notifyVibrateProvider),
         ),
       );
     } catch (_) {
@@ -315,6 +372,17 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       final key = '${event.sessionType.name}_${event.sessionId}';
       final hide = ref.read(hideNotifyContentProvider);
       final raw = event.message.text;
+      final isGroup = event.sessionType == ChatSessionType.group;
+      // 「群里仅 @我时提醒」：群消息正文没提到本人昵称就直接不弹。
+      // @ 在迷你世界里是纯文本（服务端没有独立的提及字段），判定口径见
+      // core/models/mention.dart；昵称与去富文本后的昵称都比一遍，任一命中即可。
+      if (isGroup && ref.read(notifyMentionOnlyProvider)) {
+        final nick = service.myNickname;
+        if (!textMentions(raw, nick) &&
+            !textMentions(raw, plainNickname(nick))) {
+          return;
+        }
+      }
       // 该会话最近几条正文（隐私模式下不收集）
       final recent = _recentTexts.putIfAbsent(key, () => <String>[]);
       if (!hide && raw.isNotEmpty) {
@@ -322,7 +390,6 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         if (recent.length > 5) recent.removeRange(0, recent.length - 5);
       }
       final session = _sessionOf(service, event);
-      final isGroup = event.sessionType == ChatSessionType.group;
       svc.showMessage(
         MessageNotification(
           sessionKey: key,
@@ -339,6 +406,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
           // 通知头像：优先本地头像本体图标（无需联网），其次网络头像
           avatarUrl: session?.avatar,
           avatarAsset: _headAssetOf(session),
+          sound: ref.read(notifySoundProvider),
+          vibrate: ref.read(notifyVibrateProvider),
         ),
       );
     });
