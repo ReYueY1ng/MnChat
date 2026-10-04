@@ -1,0 +1,57 @@
+name: Windows amd64
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Windows runner 默认 shell 是 pwsh，那里 "$GITHUB_OUTPUT" 不会展开成环境
+      # 变量，必须显式指定 bash（Git Bash 在 runner 上始终可用）。
+      - name: Read Flutter version from .fvmrc
+        id: fvm
+        shell: bash
+        run: echo "version=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+          cache: true
+
+      # windows-latest 镜像自带 VS2022（含“使用 C++ 的桌面开发”工作负载，Flutter
+      # Windows 构建必需）、CMake、Ninja 与 LLVM/Clang，无需额外安装：pubspec 的
+      # hooks.user_defines 会用这套工具链从 tool/sqlite3/sqlite3.c 编译 sqlite3。
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release bundle (x64)
+        run: flutter build windows --release
+
+      - name: Package bundle
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* `
+            -DestinationPath "mnchat-windows-amd64-${{ steps.fvm.outputs.version }}.zip"
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnchat-windows-amd64-${{ steps.fvm.outputs.version }}
+          path: mnchat-windows-amd64-${{ steps.fvm.outputs.version }}.zip
+          if-no-files-found: error
