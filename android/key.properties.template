@@ -1,0 +1,22 @@
+# 发布签名配置模板。复制为 android/key.properties 后填入真实值。
+#
+#   cp android/key.properties.template android/key.properties
+#
+# android/key.properties 与 .jks/.keystore 都已被 android/.gitignore 忽略，
+# 切勿提交。CI 上通过 GitHub Secrets 注入（见 .github/workflows/build_apk.yml）。
+#
+# 生成 keystore（有效期建议 25 年，丢失后无法再给同一个包名发更新）：
+#
+#   keytool -genkeypair -v \
+#     -keystore ~/mnchat-release.jks \
+#     -keyalg RSA -keysize 2048 -validity 9125 \
+#     -alias mnchat \
+#     -dname "CN=MNChat, OU=Dev, O=MNChat, L=, ST=, C=CN"
+#
+# storeFile 支持相对 android/ 的路径（如 ../keystore/mnchat-release.jks）
+# 或绝对路径；CI 上由工作流写入绝对路径。
+
+storePassword=
+keyPassword=
+keyAlias=mnchat
+storeFile=
