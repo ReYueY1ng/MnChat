@@ -8,6 +8,7 @@ import 'dart:ui' show Color;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_bridge.dart';
+import '../core/models/account_inventory.dart' show AccountInventory;
 import '../core/models/friend_tag.dart' show FriendTag, parseFriendTagPool;
 import '../core/models/gift_catalog.dart' show GiftCatalog;
 import '../core/models/messages.dart';
@@ -1020,6 +1021,19 @@ final friendTagPoolProvider = FutureProvider<List<FriendTag>>((ref) async {
 /// 拉不到时返回空目录，赠送面板会提示「取不到礼物配置」而不是瞎编列表。
 final giftCatalogProvider = FutureProvider<GiftCatalog>((ref) async {
   return GiftConfigClient().catalog();
+});
+
+/// 账号道具背包（主账号长连接 `baseinfo.update` → `Account.BillDataSvr.ItemInfo`）。
+///
+/// 礼物面板用它显示每个礼物「仓库 ×N」，并在有存货时默认「从仓库赠送」。
+/// 拉不到（未登录/断网/连接建不起来）就当空背包：面板退回按礼物配置扣费、
+/// 免费或看广告，只是当作「仓库没货」处理，不会把用户卡住。
+final giftInventoryProvider = FutureProvider<AccountInventory>((ref) async {
+  try {
+    return await ref.watch(chatServiceProvider).accountInventory();
+  } catch (_) {
+    return AccountInventory.empty;
+  }
 });
 
 /// 交友宣言标签表（服务端 visual-cfg `FriendShipDeclaration`）。

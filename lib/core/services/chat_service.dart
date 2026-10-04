@@ -9,9 +9,11 @@ import 'dart:math' show Random;
 
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
+import '../models/account_inventory.dart' show AccountInventory;
 import '../models/emoji_catalog.dart' show ImfcEmoji, imfcInterCode, imfcMessageText;
 import '../models/messages.dart';
 import '../models/session_key.dart' show sessionKeyOf;
+import '../net/config.dart' show kApiId, kCltVersion;
 import '../storage/app_database.dart';
 import 'auth.dart';
 import 'chat/command_client.dart';
@@ -68,9 +70,12 @@ class SessionSnapshot {
   const SessionSnapshot(this.sessions, this.contacts);
 }
 
-/// 礼物接口业务码 → 人话（120264 = `ErrorCode.ERROR_COST`，货币不足）。
+/// 礼物接口业务码 → 人话（120264 = `ErrorCode.ERROR_COST`）。
+///
+/// 这个码在「从仓库赠送」时表示**仓库里没有足够的这件礼物**，
+/// 在「扣费购买赠送」时表示迷你币/迷你豆不足 —— 服务端两路共用一个码。
 String _giftErrorText(String code) => switch (code) {
-  '120264' => '迷你币/迷你豆不足',
+  '120264' => '仓库库存不足，或迷你币/迷你豆不足',
   _ => '赠送失败（错误码 $code）',
 };
 
@@ -93,6 +98,9 @@ class ChatService {
   BubbleClient? _bubble;
   FriendGiftClient? _gift;
   RedPacketClient? _redPacket;
+
+  /// 主账号长连接（`container.lua` 的 `self.conn`）；只用来拉账号数据，懒建。
+  MainAccountConnection? _mainConn;
 
   /// 纯 RPC 命令客户端（好友/群/conn 的网络调用剥离至此）。
   final ChatCommandClient _commands = ChatCommandClient();
@@ -893,16 +901,35 @@ class ChatService {
   /// 成功后按游戏客户端的做法，在聊天里补一条 `Type=SendFriendGift` 的卡片消息
   /// （`friendgiftdatamgr.lua:389-460` 的 `NewSendGiftMsg`）：游戏端也是自己发
   /// 这条消息的，不发的话对方只能拿到礼物、聊天里什么都没有。
+  ///
+  /// 成功返回 `true`；失败抛 [StateError]（业务码翻成人话）。
+  ///
+  /// [payType]：`1`=从仓库扣库存、`2`=免费、`3`=看广告（只有 1/3 真发货，见
+  /// `gift_picker.dart` 的实测说明）。[buyFirst] 为 true 时先走 `buy_give_gift`
+  /// 把礼物买进仓库（扣迷你币/豆），再按 `payType=1` 送出 —— 即游戏里「扣费发」
+  /// 的做法（`main_newgiftsetCtrl`：差额 `BuyItemGift` 后再 `SendFriendGift(...,1,...)`）。
   Future<bool> sendGift({
     required int desUin,
     required int itemId,
     required int num,
     required int payType,
+    bool buyFirst = false,
     int addValue = 0,
   }) async {
     final friend = _friend;
     final gift = _gift;
     if (friend == null || gift == null) throw StateError('not logged in');
+    if (buyFirst) {
+      final buy = await gift.buyGiveGift(
+        opUin: desUin,
+        itemId: itemId,
+        num: num,
+      );
+      final buyCode = buy['ret'] ?? buy['code'];
+      if (buyCode == null || '$buyCode' != '0') {
+        throw StateError(_giftErrorText('$buyCode'));
+      }
+    }
     final resp = await gift.giveGift(
       opUin: desUin,
       itemId: itemId,
@@ -954,6 +981,57 @@ class ChatService {
       ),
     );
     return true;
+  }
+
+  /// 账号道具背包（`baseinfo.update` → `Account.BillDataSvr.ItemInfo` + leveldb）。
+  ///
+  /// 礼物面板用它显示「仓库里有几个」，并判断能不能走「从仓库赠送」。
+  /// 前置的 `[0,0,0,0,0,0]` 不能省：漏掉它服务端回 `4001 PRECHECK_TYPE_ERROR`
+  /// （2026-10-04 用游戏抓包对照出来的就是这个差异）。
+  Future<AccountInventory> accountInventory() async {
+    final auth = _auth;
+    if (auth == null) throw StateError('not logged in');
+    final conn = await _mainConnection(auth);
+    final apiId = int.tryParse(kApiId) ?? 110;
+    try {
+      final resp = await conn.sendRpc('baseinfo', 'update', [
+        const <int>[0, 0, 0, 0, 0, 0],
+        <String, Object?>{
+          'CltVersion': kCltVersion,
+          'ApiID': apiId,
+          'RoleInfo': const {'Model': 0, 'NickName': '', 'SkinID': 0},
+          'extra': {
+            'Country': 'CN',
+            'CltLang': 0,
+            'DeviceVender': 'NULL',
+            'DeviceToken': '',
+            'DeviceID': 'MNClientDefault',
+            'DeviceSystem': '',
+            'DeviceModel': '[]',
+            'CltApiID': apiId,
+          },
+          'CltType': 0,
+          'Latitude': 0,
+          'Longitude': 0,
+        },
+      ], timeout: const Duration(seconds: 12));
+      return AccountInventory.fromUpdateResponse(resp);
+    } catch (_) {
+      // 连接坏了就让下次重建，别把死连接缓存住
+      final dead = _mainConn;
+      _mainConn = null;
+      unawaited(dead?.close() ?? Future<void>.value());
+      rethrow;
+    }
+  }
+
+  Future<MainAccountConnection> _mainConnection(MiniAuth auth) async {
+    final cached = _mainConn;
+    if (cached != null) return cached;
+    final conn = MainAccountConnection();
+    await conn.connect(jwt: auth.jwt, uin: auth.uin);
+    _mainConn = conn;
+    return conn;
   }
 
   /// 礼物卡的 extend_data：`url_encode(base64(JSON{Type:"SendFriendGift",...}))`。
@@ -1289,6 +1367,9 @@ class ChatService {
   /// 登出时调用：关闭连接、清空缓存，保留控制器以支持重新登录。
   Future<void> reset() async {
     await _connection.close();
+    final mainConn = _mainConn;
+    _mainConn = null;
+    if (mainConn != null) unawaited(mainConn.close());
     _auth = null;
     _friend = null;
     _group = null;
