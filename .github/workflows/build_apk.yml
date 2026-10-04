@@ -16,6 +16,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
+    # secrets 上下文在 steps[*].if 里不可用（用它会报 Unrecognized named-value:
+    # 'secrets'），所以先在这里把 Secret 注入 job 级 env，再在 if 中判断 env。
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -50,9 +55,9 @@ jobs:
       # 未配置 Secret 时保持 key.properties 缺失，构建照常进行（产物为 debug
       # 签名，仅供内部验证，不可分发）。
       - name: Set up release signing
-        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        if: ${{ env.ANDROID_KEYSTORE_BASE64 != '' }}
         env:
-          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_B64: ${{ env.ANDROID_KEYSTORE_BASE64 }}
           STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
