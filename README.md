@@ -36,9 +36,33 @@ fvm flutter test         # 基线：全部通过
 fvm flutter run -d linux # 或： fvm flutter build apk
 ```
 
-CI（`.github/workflows/ci.yml`）在推送 / PR 时跑 `analyze` + `test`；
-Flutter 版本取自 `.fvmrc`。注意当前 `origin` 为自建服务器，该 workflow
-仅在推送到 GitHub 镜像时生效。
+CI：`.github/workflows/ci.yml` 在推送 / PR 时跑 `analyze` + `test`；
+`.github/workflows/build_apk.yml` 构建 arm64-v8a release APK 并上传制品
+（Flutter 版本同样取自 `.fvmrc`）。注意当前 `origin` 为自建服务器，
+workflow 仅在推送到 GitHub 镜像时生效。
+
+Termux 本地构建：`android/gradle.properties` 里 `android.aapt2FromMavenOverride`
+与 `android.enableResourceOptimizations` 默认注释，需在 Termux 下自行取消注释
+（官方 build-tools 是 x86_64，在 aarch64 上无法执行）。
+
+## 发布签名
+
+release 构建默认读取 `android/key.properties`（该文件与 `.jks`/`.keystore`
+均被 `.gitignore` 忽略，切勿提交）：
+
+```sh
+cp android/key.properties.template android/key.properties   # 再填入真实值
+# keytool -genkeypair -v -keystore mnchat-release.jks -keyalg RSA \
+#   -keysize 2048 -validity 9125 -alias mnchat \
+#   -dname "CN=MNChat, O=MNChat, C=CN"
+```
+
+**缺少 `key.properties` 时会回退到 debug key 并打印警告**，仅为让本地
+`flutter run --release` 能跑通；这种包任何人可用公开的 debug key 伪造，
+不可分发。CI 上通过 4 个 Secret 注入（keystore 以 base64 存储）：
+`ANDROID_KEYSTORE_BASE64`、`ANDROID_KEYSTORE_PASSWORD`、
+`ANDROID_KEY_ALIAS`、`ANDROID_KEY_PASSWORD`。未配置时 CI 仍会构建，
+但产物同样是 debug 签名。
 
 ## 安全模型
 

@@ -1,0 +1,78 @@
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read Flutter version from .fvmrc
+        id: fvm
+        run: echo "version=$(jq -r .flutter .fvmrc)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ steps.fvm.outputs.version }}
+          channel: stable
+          cache: true
+
+      # pubspec 的 hooks.user_defines 让 sqlite3 从本地源码（tool/sqlite3/sqlite3.c）
+      # 编译成 native asset，缺 C 工具链会在 build 阶段失败。
+      - name: Install native toolchain (sqlite3 native assets)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang ninja-build libclang-dev
+
+      # 接受 Android SDK 许可，否则 aapt2/d8 无法下载安装。
+      - name: Accept Android SDK licenses
+        run: yes | flutter doctor --android-licenses > /dev/null || true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      # 发布签名：keystore 以 base64 存进 Secret，避免明文入库。
+      # 未配置 Secret 时保持 key.properties 缺失，构建照常进行（产物为 debug
+      # 签名，仅供内部验证，不可分发）。
+      - name: Set up release signing
+        if: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' }}
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/keystore"
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/keystore/release.jks"
+          {
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyPassword=$KEY_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "storeFile=$RUNNER_TEMP/keystore/release.jks"
+          } > android/key.properties
+          echo "key.properties written (contents not echoed)."
+
+      - name: Build release APK (arm64-v8a)
+        run: flutter build apk --release
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mnchat-arm64-v8a-apk-${{ steps.fvm.outputs.version }}
+          path: build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error

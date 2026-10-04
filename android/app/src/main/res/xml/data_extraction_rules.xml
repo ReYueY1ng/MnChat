@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+（API 31）起生效：控制云备份与设备迁移的行为。
+
+  数据库与加密凭据不可再生（凭据密钥由固定盐 + uin 派生，源码一旦公开即可
+  还原），把 /data/data/<pkg>/files/ 整体交给云端或换机迁移并不合适，
+  因此这里对 data 分类全量排除，只保留 cache（图片/表情等可重新下载）。
+
+  配合 manifest 里的 allowBackup=false（旧版 adb backup 通道）与
+  fullBackupContent=false（API 23~30）一起生效。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="device_root" />
+        <exclude domain="device_file" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+        <exclude domain="device_root" />
+        <exclude domain="device_file" />
+        <exclude domain="device_database" />
+        <exclude domain="device_sharedpref" />
+    </device-transfer>
+</data-extraction-rules>

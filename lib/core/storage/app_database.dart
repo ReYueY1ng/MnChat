@@ -1,4 +1,7 @@
 import 'package:drift/drift.dart';
+import 'package:drift_flutter/drift_flutter.dart'
+    show DriftNativeOptions, driftDatabase;
+import 'package:path_provider/path_provider.dart';
 
 part 'app_database.g.dart';
 
@@ -272,4 +275,28 @@ class AppDatabase extends _$AppDatabase {
           .write(FriendsCompanion(ownerUin: Value(ownerUin)));
     });
   }
+}
+
+/// 数据库文件名（不含扩展名）。
+const String kDbName = 'mnchat';
+
+/// 打开应用数据库连接。
+///
+/// **为什么不用 `driftDatabase(name:)` 的默认目录**：那个默认走
+/// `getApplicationDocumentsDirectory()`，Linux 下映射到 XDG Documents，
+/// 于是 `mnchat.sqlite`（含聊天记录、好友列表与加密凭据）会直接躺在
+/// `~/Documents/` 里被文件管理器、同步盘、备份脚本扫到。应用私有数据应当
+/// 落在 `getApplicationSupportDirectory()`（Linux: `~/.local/share/<id>/`，
+/// Android: `/data/data/<pkg>/files/`），与 `config_text_cache.dart` 的
+/// `cfg_cache` 归拢在同一个目录下。
+///
+/// 可丢弃的缓存（图片、表情包）仍留在 cache 目录，由系统按需回收；
+/// 这里只安置不可再生的聊天数据。
+DatabaseConnection openAppDatabaseConnection() {
+  return driftDatabase(
+    name: kDbName,
+    native: DriftNativeOptions(
+      databaseDirectory: getApplicationSupportDirectory,
+    ),
+  );
 }

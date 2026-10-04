@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:drift_flutter/drift_flutter.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -27,7 +26,7 @@ const String _logTag = 'Main';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  final db = AppDatabase(driftDatabase(name: 'mnchat'));
+  final db = AppDatabase(openAppDatabaseConnection());
   // 托盘/窗口初始化必须在 runApp **之后**、且不能 await：
   // 它要走平台通道（window_manager）与根 bundle（图标解码），这两者在
   // hot restart 后可能迟迟不返回；若像以前那样在 runApp 之前 await，
