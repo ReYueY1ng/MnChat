@@ -34,15 +34,12 @@ jobs:
       # Flutter Linux 桌面构建的依赖：cmake/ninja-build/clang/pkg-config 是
       # linux/ runner 的构建工具链，libgtk-3-dev 是桌面窗口必需的头文件，
       # liblzma-dev 是 Flutter 官方列出的依赖，libayatana-appindicator3-dev
-      # 供 tray_manager 编译托盘支持。
-      # 另外 pubspec 的 hooks.user_defines 让 sqlite3 从本地源码
-      # （tool/sqlite3/sqlite3.c）编译成 native asset，缺 clang/libclang-dev
-      # 会在 build 阶段失败。
-      - name: Install Linux desktop + native toolchain deps
+      # 供 tray_manager 编译托盘支持。sqlite3 走预编译 native asset，无需 C 工具链。
+      - name: Install Linux desktop deps
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            clang cmake ninja-build pkg-config libclang-dev \
+            clang cmake ninja-build pkg-config \
             libgtk-3-dev liblzma-dev libayatana-appindicator3-dev
 
       - name: Install dependencies

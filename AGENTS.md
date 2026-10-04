@@ -87,8 +87,7 @@ fvm dart run build_runner build        # regenerate app_database.g.dart after sc
 fvm dart run tool/acceptance_login.dart
 fvm dart run tool/headless_chat_flow.dart
 
-# CI deps (clang, ninja-build, libclang-dev) required for native asset compilation
-# pubspec hooks.user_defines compiles tool/sqlite3/sqlite3.c from local source
+# sqlite3 是预编译 native asset（hook 下载 + sha256 校验），native-assets 环节不再需要 clang/libclang-dev
 ```
 
 ## NOTES
@@ -96,4 +95,4 @@ fvm dart run tool/headless_chat_flow.dart
 - Biggest hotspots: chat_page.dart (1439), mail_page.dart (1296), core/services/dynamics.dart (1275), core/services/chat_service.dart (1213), friends_page.dart (1125), state/providers.dart (994). profile_page.dart (2191→450) and avatar_edit_dialog.dart (2013→317) were split into `part` files — see lib/ui/AGENTS.md
 - `sessionKeyOf` is defined exactly once, in `lib/core/models/session_key.dart`. `storage/chat_mapper.dart` imports + re-exports it, and `message_adapter.dart` / `message_store.dart` / `settings_store.dart` (`SettingsKeys.sessionKey`) / `home_shell.dart` all forward to it. It used to be 5 hand-copied string literals; do not reintroduce a copy — import the model instead (it pulls in no drift, no Flutter)
 - `keep-alive` service (`notificationServiceProvider`) is only stopped in MainShell; start/stop is owned by app lifecycle callbacks, not the shell
-- SQLite amalgamation sources live in `tool/sqlite3/` — vendored, compiled via pubspec hook, not tracked as app code
+- sqlite3 用 native asset 预编译：hook 下载 sqlite3 包对应 GitHub release 的库，按包内 asset_hashes.dart 校验 sha256，缓存在 `.dart_tool/hooks_runner/shared/sqlite3/`。仓库不再 vendored amalgamation；构建网络打不开 GitHub 时用 sqlite3 的 `url_pattern` user-define 指向镜像（校验仍然生效）

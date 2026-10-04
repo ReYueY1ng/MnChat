@@ -36,14 +36,6 @@ jobs:
           channel: stable
           cache: true
 
-      # pubspec 的 hooks.user_defines 让 sqlite3 从本地源码（tool/sqlite3/sqlite3.c）
-      # 编译成 native asset，缺 C 工具链会在 build 阶段失败。
-      - name: Install native toolchain (sqlite3 native assets)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang ninja-build libclang-dev
-
       # 接受 Android SDK 许可，否则 aapt2/d8 无法下载安装。
       - name: Accept Android SDK licenses
         run: yes | flutter doctor --android-licenses > /dev/null || true

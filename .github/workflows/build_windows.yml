@@ -35,8 +35,8 @@ jobs:
           cache: true
 
       # windows-latest 镜像自带 VS2022（含“使用 C++ 的桌面开发”工作负载，Flutter
-      # Windows 构建必需）、CMake、Ninja 与 LLVM/Clang，无需额外安装：pubspec 的
-      # hooks.user_defines 会用这套工具链从 tool/sqlite3/sqlite3.c 编译 sqlite3。
+      # Windows 构建必需）、CMake、Ninja 与 LLVM/Clang，无需额外安装。sqlite3 走
+      # 预编译 native asset（hook 下载 + sha256 校验），不占用这套工具链。
       - name: Install dependencies
         run: flutter pub get
 

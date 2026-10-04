@@ -80,22 +80,14 @@ dependency_overrides:
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 
-# Native assets build configuration for sqlite3.
-#
-# We keep the vendored amalgamation in tool/sqlite3/ (sqlite3.c/.h) and compile it
-# from source. The package's default is to download a prebuilt libsqlite3 from
-# GitHub releases (sqlite3 user_defines 'source' absent => GitHub download,
-# sha-checked against asset_hashes.dart), which would let us drop these ~10 MB
-# of vendored C. We stay on the local source because that GitHub download is not
-# reachable from this project's primary build network; CI on GitHub Actions can
-# reach it fine, but the source path also keeps builds hermetic (no third-party
-# fetch at build time). To switch to the download, delete the user_defines block
-# below — no other change needed.
-hooks:
-  user_defines:
-    sqlite3:
-      source: source
-      path: tool/sqlite3/sqlite3.c
+# sqlite3 ships as a prebuilt native asset: the package hook downloads the
+# library for the pinned sqlite3 version from its GitHub release, checks it
+# against the sha256 recorded in that package's asset_hashes.dart, and caches it
+# under .dart_tool/hooks_runner/shared/sqlite3/. No vendored amalgamation and no
+# C toolchain is required for the hook. On a network where GitHub is
+# unreachable, add a sqlite3 url_pattern user-define pointing at an internal
+# mirror or set a proxy — the sha256 check still applies either way. See
+# package:sqlite3/doc/hook.md.
 
 # The following section is specific to Flutter packages.
 flutter:
