@@ -42,6 +42,14 @@ abstract final class MsgBoxChannel {
   static const String sys = 'post_sys'; // 动态助手（消息中心 0 频道）
 }
 
+/// 动态互动筛选项 —— 游戏下拉的 textList（`mainchatinteractivemsg.lua:65-71`）：
+/// 全部(3820) / 评论(32034) / 点赞(6660446) / @我(9314037) / 回答(9314113)。
+const List<String> kDynamicsNoticeFilters = ['全部', '评论', '点赞', '@我', '回答'];
+
+/// 作品互动筛选项（同文件 72-78）：全部(3820) / 讨论(192151) / 点赞(6660446)
+/// / 投块(25229) / 收藏(25228)。
+const List<String> kWorksNoticeFilters = ['全部', '讨论', '点赞', '投块', '收藏'];
+
 /// 消息中心顶部 3 个圆入口（对齐 `MainChatInteractiveMsg.MsgType`）。
 ///
 /// 三者共用 `/miniw/msg_box` 的 `get_channel_msg_list` / `read_channel_msg`
@@ -54,17 +62,20 @@ enum MsgBoxEntry {
     MsgBoxChannel.rep,
     MsgBoxChannel.prize,
     MsgBoxChannel.at,
-  ]),
-  fans('新增粉丝', [MsgBoxChannel.fans]),
-  works('作品互动', [MsgBoxChannel.mapInteract]);
+  ], kDynamicsNoticeFilters),
+  fans('新增粉丝', [MsgBoxChannel.fans], null),
+  works('作品互动', [MsgBoxChannel.mapInteract], kWorksNoticeFilters);
 
-  const MsgBoxEntry(this.label, this.channels);
+  const MsgBoxEntry(this.label, this.channels, this.filters);
 
   /// 入口标题（9314036 / 9312658 / 9310022）。
   final String label;
 
   /// 该入口聚合的 msg_box 频道（按序合并）。
   final List<String> channels;
+
+  /// 右栏「全部 ▾」的类型筛选项，首项固定「全部」（粉丝入口无类型维度 → null）。
+  final List<String>? filters;
 }
 
 /// 一条互动通知（`get_channel_msg_list` 的 `msg_list` 条目）。
@@ -133,40 +144,49 @@ class MsgBoxMessage {
   /// 是否有可跳转的详情（动态 pid）。
   bool get hasDetail => pid.isNotEmpty && pid != '0';
 
-  /// 行动作文案（对齐 `DynamicsNoticeType` 1..11 与作品 `msg_type`）。
+  /// 行动作文案 —— 逐条对齐游戏卡片的 GetS 取值
+  /// （动态 `chatdynamicsmsg.lua:248-320`、作品 `chatworksmsg.lua:140-225`）：
+  /// 评论 / 回复 / 点赞 / @我 / 回答 各自一句；未知类型原样回退 msg_type。
   ///
-  /// 类型枚举来自调研结论；未知类型原样回退 msg_type，不臆造协议字段。
+  /// 点赞类在游戏里由模板图标（控制器 `c1`）承担「赞」这个动作，文案本身
+  /// 就是「了这条动态：@1」这样的半句，故此处保持一致。
   String get actionLabel {
     if (channel == MsgBoxChannel.fans) return '关注了你';
     switch (msgType) {
-      case 'prized':
-      case 'comment_prized':
-      case 'comment2_prized':
-        return '👍了这条动态';
-      case 'commented':
-      case 'comment2':
+      // ── 动态互动（DynamicsNoticeType，数字为枚举值）──
+      case 'commented': // 1  9314032
         return '评论了你的动态';
-      case 'add_at':
-      case 'comment_at':
-      case 'comment2_at':
-        return '@了你';
-      case 'comment_reply':
-      case 'comment2_rep':
+      case 'prized': // 2  9312671
+        return '了这条动态';
+      case 'add_at': // 3  9314034
+        return '在动态@了你';
+      case 'comment_at': // 4  9314035
+      case 'comment2_at': // 8  9314035
+        return '在评论@了你';
+      case 'comment_reply': // 5  9314033
         return '回复了你的评论';
-      case 'answer':
+      case 'comment_prized': // 6  9312663
+      case 'comment2_prized': // 10 9312663
+        return '了这条评论';
+      case 'comment2': // 7  9312664
+      case 'comment2_rep': // 9  9312664
+        return '回复了你';
+      case 'answer': // 11 9314123
         return '回答了你的问题';
-      case 'map_posting':
-        return '发布了作品';
-      case 'map_prize':
+      // ── 作品互动（works msg_type）──
+      case 'map_posting': // 9310023
+        return '评论了你的作品';
+      case 'map_prize': // 9310024
         return '赞了你的作品';
-      case 'map_collect':
+      case 'map_collect': // 9310025
         return '收藏了你的作品';
-      case 'map_tip':
-        return '作品有新提醒';
-      case 'template_like':
-        return '点赞';
-      case 'template_collect':
-        return '收藏';
+      case 'map_tip': // 9310026
+        return '投块了你的作品';
+      case 'template_like': // 9310049
+        return '赞了你的模板';
+      case 'template_collect': // 9310050
+        return '收藏了你的模板';
+      // ── 动态助手（频道 0，`actMsgType`，mainchatsystemmsg.lua:195-206）──
       case '1':
         return '动态投票消息';
       case '2':
@@ -184,10 +204,78 @@ class MsgBoxMessage {
     }
   }
 
+  /// 该条互动在游戏卡片里走「点赞」样式 —— 模板控制器 `c1` 置 1
+  /// （`chatdynamicsmsg.lua:56-62`、`chatworksmsg.lua:59-66`），文案前面那个
+  /// 「赞」就是这个图标；[actionLabel] 因此只给半句。
+  bool get isLikeStyle {
+    switch (msgType) {
+      case 'prized':
+      case 'comment_prized':
+      case 'comment2_prized':
+      case 'map_prize':
+      case 'template_like':
+        return true;
+      default:
+        return false;
+    }
+  }
+
   /// 摘要行（行动作 + 被互动动态正文；无则回退评论正文）。
   String get headline {
     final body = pidContent.isNotEmpty ? pidContent : (question.isNotEmpty ? question : content);
     return body.isEmpty ? actionLabel : '$actionLabel：$body';
+  }
+
+  /// 该条目归属的筛选分类（对齐 `MainChatInteractiveMsg:GetFilterData`，
+  /// mainchatinteractivemsg.lua:150-208；未知类型返回空串，不进任何分类）。
+  /// 取值与 [kDynamicsNoticeFilters] / [kWorksNoticeFilters] 除首项外的字面量一致。
+  String get filterLabel {
+    switch (msgType) {
+      case 'commented':
+      case 'comment_reply':
+      case 'comment2':
+      case 'comment2_rep':
+        return '评论';
+      case 'prized':
+      case 'comment_prized':
+      case 'comment2_prized':
+        return '点赞';
+      case 'add_at':
+      case 'comment_at':
+      case 'comment2_at':
+        return '@我';
+      case 'answer':
+        return '回答';
+      // ── 作品互动 ──
+      case 'map_posting':
+        return '讨论';
+      case 'map_prize':
+      case 'template_like':
+        return '点赞';
+      case 'map_tip':
+        return '投块';
+      case 'map_collect':
+      case 'template_collect':
+        return '收藏';
+      default:
+        return '';
+    }
+  }
+
+  /// 摘要行 `行动作：参数` 里的 @1（游戏卡片 `tf_title` 的参数）：
+  /// 作品 / 模板类的参数是**作品名 / 模板名**（`chatworksmsg.lua:185-221`，
+  /// 作品名要用 `data.map_id` 查表 → [mapNames]），其余是被互动正文
+  /// （pid_content / question）。查不到名字时返回空串，卡片退化成只显示行动作。
+  String summaryParam({Map<String, String> mapNames = const {}}) {
+    if (msgType == 'template_like' || msgType == 'template_collect') {
+      final n = (data['name'] ?? '').toString();
+      return n.isEmpty ? '' : '"$n"';
+    }
+    if (msgType.startsWith('map_')) {
+      final n = mapNames[(data['map_id'] ?? '').toString()] ?? '';
+      return n.isEmpty ? '' : '"$n"';
+    }
+    return pidContent.isNotEmpty ? pidContent : question;
   }
 
   MsgBoxMessage copyWith({int? status}) => MsgBoxMessage(
@@ -225,11 +313,12 @@ class MsgBoxMessage {
     }
 
     final ch = m['channel']?.toString();
+    final msgType = _canonicalMsgType(pick(['msg_type', 'type'])?.toString() ?? '');
     return MsgBoxMessage(
       msgId: msgId,
       channel: (ch == null || ch.isEmpty) ? channel : ch,
-      msgType: pick(['msg_type', 'type'])?.toString() ?? '',
-      uin: _int(pick(['uin', 'op_uin', 'act_uin'])),
+      msgType: msgType,
+      uin: _actorUin(msgType, m, flat),
       nickname: pick(['nickname', 'nick_name'])?.toString() ?? '',
       title: _safeDecode(pick(['title'])?.toString() ?? ''),
       content: _safeDecode(pick(['content', 'text'])?.toString() ?? ''),
@@ -242,6 +331,55 @@ class MsgBoxMessage {
       status: _int(pick(['status', 'state'])),
       data: flat,
     );
+  }
+
+  /// 线上 `msg_type` 字符串（`DynamicsNoticeMsgBoxType` 的键，
+  /// dynamicsdatamanager.lua:16-28）→ 本类沿用的一套规范名
+  /// （`DynamicsNoticeType` 的键，同文件 4-15）。实测 post_prize 频道回的是
+  /// `"prize"`、post_rep 回 `"rep"`；未知取值原样返回。
+  static const Map<String, String> _wireMsgTypes = {
+    'rep': 'commented',
+    'prize': 'prized',
+    'at': 'add_at',
+    'com_at': 'comment_at',
+    'com_rep': 'comment_reply',
+    'com_prize': 'comment_prized',
+    'com2': 'comment2',
+    'com2_at': 'comment2_at',
+    'com2_rep': 'comment2_rep',
+    'com2_prize': 'comment2_prized',
+  };
+
+  static String _canonicalMsgType(String wire) =>
+      _wireMsgTypes[wire] ?? wire;
+
+  /// 互动者 uin —— **不要**用条目顶层的 `uin`：那是这条通知的接收者（本人），
+  /// 拿它渲染就会把卡片昵称显示成自己（实测 `get_channel_msg_list` 的条目里
+  /// 顶层 `uin` 恒为本人，互动者在 `data` 里）。
+  ///
+  /// 对齐游戏：`data` 平铺覆盖条目字段后再取
+  /// （`chatdynamicsmsg.lua:78-84 ChatDynamicsMsg:SetUserInfo`、
+  /// `mainchatinteractivemsg.lua:271-279 ReqNecessaryData`）——
+  /// `prized`（点赞）取 `op_uin`，`comment_prized`（评论被赞）取 `act_uin`，
+  /// 其余取 `uin`；取不到（评论类条目里 `op_uin` 为 0）时回落 `uin`。
+  static int _actorUin(
+    String msgType,
+    Map<String, Object?> m,
+    Map<String, Object?> flat,
+  ) {
+    // 作品发布类列出的是**动态作者**（`data.pid` 的 uin 前缀），
+    // chatworksmsg.lua:34-39 / mainchatinteractivemsg.lua:299-303。
+    if (msgType == 'map_posting') {
+      final pid = flat['pid'] ?? m['pid'];
+      final head = pid == null ? '' : '$pid'.split('_').first;
+      final owner = int.tryParse(head) ?? 0;
+      if (owner > 0) return owner;
+    }
+    final actorKey = msgType == 'prized'
+        ? 'op_uin'
+        : (msgType == 'comment_prized' ? 'act_uin' : 'uin');
+    final actor = _int(flat[actorKey] ?? m[actorKey]);
+    return actor > 0 ? actor : _int(flat['uin'] ?? m['uin']);
   }
 
   /// `data` 可能是 JSON 字符串或已是 Map；解析失败返回空 map。

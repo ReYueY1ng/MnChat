@@ -4,7 +4,7 @@
 ///   冒险家 / 称号 / 勋章 + 个人中心 / 置顶 / 赠送 / 更多），替代原先的全屏
 ///   底部弹窗；
 /// - [showFriendMenu]：长按 / 右键 / 信息卡「更多」共用的好友操作菜单（上线
-///   通知 / 拍一拍 / 置顶 / 备注 / 家园 / 删除好友，会话列表另带免打扰）；
+///   通知 / 拍一拍 / 置顶 / 备注 / 删除好友，会话列表另带免打扰）；
 /// - 内容片段与会话缓存复用 `player_info_common.dart`。[SessionPlayerInfo]
 ///   由此文件继续对外暴露。
 library;
@@ -341,7 +341,7 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
 
 /// 好友/会话操作菜单（长按 / 右键 / 信息卡「更多」共用）。
 ///
-/// [type] 决定菜单项：好友会话额外提供上线通知 / 备注 / 家园 / 删除好友，
+/// [type] 决定菜单项：好友会话额外提供上线通知 / 备注 / 删除好友，
 /// 群会话只保留置顶（[showMute] 为 true 时再带免打扰，供会话列表沿用旧入口）。
 Future<void> showFriendMenu(
   BuildContext context,
@@ -413,11 +413,6 @@ Future<void> showFriendMenu(
                 leading: const Icon(Icons.edit_note),
                 title: const Text('备注'),
                 onTap: () => Navigator.pop(ctx, 'note'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.home_outlined),
-                title: const Text('家园'),
-                onTap: () => Navigator.pop(ctx, 'home'),
               ),
               ListTile(
                 leading: Icon(
@@ -493,12 +488,6 @@ Future<void> showFriendMenu(
       }
     case 'note':
       await _editFriendNote(context, ref, uin);
-    case 'home':
-      unawaited(
-        Navigator.of(context).push(
-          MaterialPageRoute(builder: (_) => PlayerHomePage(targetUin: uin)),
-        ),
-      );
     case 'remove':
       await _confirmRemoveFriend(context, ref, uin: uin, name: name);
   }

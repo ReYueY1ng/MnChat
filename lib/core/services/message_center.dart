@@ -7,6 +7,8 @@
 /// 签名与 dynamics 相同(http_getParamMD5)，路径不同。
 library;
 
+import 'dart:convert' show jsonDecode;
+
 import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
@@ -282,6 +284,10 @@ class MsgItem {
   final String jumpTo;
   final String jumpName;
 
+  /// 发送者原始串（游戏 `GetMailDesc` 读的 `maildata.sender`，形如 `昵称(12345)`；
+  /// 好友类邮件的昵称也可能只由 `ctx.sendname` 给出）；空 = 官方邮件。
+  final String sender;
+
   /// 附件是否已领取（服务器 take_attachments 返回 data[id] 非空后置 true）。
   bool attachmentTaken;
 
@@ -298,6 +304,7 @@ class MsgItem {
     this.attach = const [],
     this.jumpTo = '',
     this.jumpName = '',
+    this.sender = '',
     this.attachmentTaken = false,
   });
 
@@ -320,8 +327,20 @@ class MsgItem {
         attach: attach,
         jumpTo: jumpTo,
         jumpName: jumpName,
+        sender: sender,
         attachmentTaken: attachmentTaken ?? this.attachmentTaken,
       );
+
+  /// 发送者昵称：`发送者(12345)` → `发送者`（对齐 `GetMailDesc` 的
+  /// `string.find(maildata.sender, "(.+)%((%d+)%)")`）。纯数字或空 → 空串，
+  /// 由卡片回退「来自迷你官方」（4082）。
+  String get senderName {
+    final raw = sender.trim();
+    if (raw.isEmpty) return '';
+    final m = RegExp(r'^(.+)\((\d+)\)$').firstMatch(raw);
+    if (m != null) return m.group(1)!.trim();
+    return RegExp(r'^\d+$').hasMatch(raw) ? '' : raw;
+  }
 
   static MsgItem fromDetail(int channel, Map<String, Object?> m) {
     final id = '${m['id'] ?? m['msgid'] ?? 0}';
@@ -370,6 +389,23 @@ class MsgItem {
       }
     }
 
+    // 发送者：优先条目顶层 `sender`（"昵称(12345)"），其次 `extra.ctx` 的
+    // `sendname`（好友送礼类邮件的昵称只在那里，对齐 `GetMailDesc`）。
+    var sender = m['sender']?.toString() ?? '';
+    if (sender.isEmpty && extra is Map) {
+      Object? ctx = extra.cast<String, Object?>()['ctx'];
+      if (ctx is String && ctx.isNotEmpty) {
+        try {
+          ctx = jsonDecode(ctx);
+        } catch (_) {
+          // 非 JSON（LuaTable 等）：按无 ctx 处理
+        }
+      }
+      if (ctx is Map) {
+        sender = ctx.cast<String, Object?>()['sendname']?.toString() ?? '';
+      }
+    }
+
     int ts = 0;
     final t = m['create_time'] ?? m['createtime'] ?? m['time'] ?? m['ts'];
     if (t is num) {
@@ -405,6 +441,7 @@ class MsgItem {
       attach: attach,
       jumpTo: jumpTo,
       jumpName: jumpName,
+      sender: sender,
       attachmentTaken: (status & 2) != 0,
     );
   }

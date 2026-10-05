@@ -18,6 +18,7 @@ import '../core/services/chat_service.dart';
 import '../core/services/dynamics.dart';
 import '../core/services/emoji_store.dart';
 import '../core/services/gift_config.dart' show GiftConfigClient;
+import '../core/services/map_info.dart';
 import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
 import '../core/services/notification_service.dart';

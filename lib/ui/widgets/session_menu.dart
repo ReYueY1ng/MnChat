@@ -2,13 +2,11 @@
 ///
 /// [showSessionMenu] 用 `showMenu` + 指针位置换算的 `RelativeRect` 弹出真正
 /// 的浮动菜单（替代原底部弹窗），保留原有全部操作并新增「移除会话」：
-/// 好友会话 = 上线通知 / 置顶 / 免打扰 / 备注 / 家园 / 移除会话 / 删除好友，
+/// 好友会话 = 上线通知 / 置顶 / 免打扰 / 备注 / 移除会话 / 删除好友，
 /// 群会话 = 置顶 / 免打扰 / 移除会话。
 ///
 /// 移除会话由调用方通过 [onRemoved] 落库 / 刷新（本文件不持有会话列表状态）。
 library;
-
-import 'dart:async' show unawaited;
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,7 +15,6 @@ import '../../core/models/messages.dart';
 import '../../core/models/nickname.dart' show plainNickname;
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
-import '../player_home_page.dart';
 import 'friend_tag_dialog.dart' show showFriendTagDialog;
 import '../theme/app_tokens.dart';
 
@@ -29,7 +26,6 @@ enum _SessionMenuAction {
   pat,
   tag,
   note,
-  home,
   remove,
   deleteFriend,
 }
@@ -100,7 +96,6 @@ Future<void> showSessionMenu(
         _menuItem(_SessionMenuAction.pat, Icons.touch_app_outlined, '拍一拍'),
         _menuItem(_SessionMenuAction.tag, Icons.label_outline, '标签'),
         _menuItem(_SessionMenuAction.note, Icons.edit_note, '备注'),
-        _menuItem(_SessionMenuAction.home, Icons.home_outlined, '家园'),
       ],
       // 「移除会话」只在宿主能真的把它从列表里撤掉时才有意义
       //（好友页是按好友维度列人，不是会话列表 → 不传 onRemoved）。
@@ -147,14 +142,6 @@ Future<void> showSessionMenu(
       await showFriendTagDialog(context, ref, uins: [uin]);
     case _SessionMenuAction.note:
       await _editFriendNote(context, ref, uin);
-    case _SessionMenuAction.home:
-      unawaited(
-        Navigator.of(context).push(
-          MaterialPageRoute<void>(
-            builder: (_) => PlayerHomePage(targetUin: uin),
-          ),
-        ),
-      );
     case _SessionMenuAction.remove:
       onRemoved?.call();
     case _SessionMenuAction.deleteFriend:

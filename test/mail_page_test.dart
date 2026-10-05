@@ -1,6 +1,7 @@
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/services/map_info.dart';
 import 'package:mnchat/core/services/message_center.dart';
 import 'package:mnchat/core/services/msg_box.dart';
 import 'package:mnchat/state/providers.dart';
@@ -45,7 +46,7 @@ class _FakeCenter extends MessageCenterClient {
         channel: channel,
         title: id == 'm1' ? '欢迎使用MNChat' : '系统维护公告',
         content: '正文-$id',
-        createTime: 1700000000,
+        createTime: id == 'm1' ? 1700000000 : 1700000100,
         readState: 0,
       );
     }
@@ -99,12 +100,44 @@ class _FakeBox extends MsgBoxClient {
         0,
       );
     }
+    if (channel == MsgBoxChannel.mapInteract) {
+      return const MsgBoxPage(
+        [
+          MsgBoxMessage(
+            msgId: 'w1',
+            channel: MsgBoxChannel.mapInteract,
+            msgType: 'map_prize',
+            uin: 20003,
+            content: '这图好玩',
+            time: 1700000000,
+            data: {'map_id': 42},
+          ),
+          MsgBoxMessage(
+            msgId: 'w2',
+            channel: MsgBoxChannel.mapInteract,
+            msgType: 'template_like',
+            uin: 20004,
+            time: 1700000100,
+            data: {'name': '大乱斗模板'},
+          ),
+        ],
+        0,
+      );
+    }
     return MsgBoxPage.empty;
   }
 
   @override
   Future<Map<String, int>> getChannelMsgListX(List<String> channels) async =>
       {for (final c in channels) c: 0};
+}
+
+class _FakeMapInfo extends MapInfoClient {
+  _FakeMapInfo() : super(uin: 10001, s2: 's', s2t: 't');
+
+  @override
+  Future<Map<String, String>> fetchMapNames(List<String> owids) async =>
+      {for (final id in owids) id: '一个幸运方块生存'};
 }
 
 void main() {
@@ -121,6 +154,7 @@ void main() {
         overrides: [
           messageCenterClientProvider.overrideWithValue(_FakeCenter()),
           msgBoxClientProvider.overrideWithValue(_FakeBox()),
+          mapInfoClientProvider.overrideWithValue(_FakeMapInfo()),
           dynamicsClientProvider.overrideWithValue(null),
           profileClientProvider.overrideWithValue(null),
         ],
@@ -158,8 +192,11 @@ void main() {
     await tester.tap(find.text('官方邮件').first);
     await tester.pumpAndSettle();
 
-    expect(find.text('欢迎使用MNChat'), findsOneWidget);
-    expect(find.text('系统维护公告'), findsOneWidget);
+    // 左列摘要就是最新一封邮件的**标题**（对齐游戏 tfContent = strTitle），
+    // 所以最新那封的标题在左列行和右栏卡片各出现一次。
+    expect(find.text('系统维护公告'), findsNWidgets(2),
+        reason: '左列摘要 + 右栏卡片');
+    expect(find.text('欢迎使用MNChat'), findsOneWidget, reason: '旧的一封只在右栏');
     expect(find.text('详情'), findsWidgets);
     expect(find.text('一键已读'), findsOneWidget);
     expect(find.text('删除已读'), findsOneWidget);
@@ -170,6 +207,46 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.textContaining('评论了你的动态'), findsWidgets);
     expect(find.textContaining('IP 广东'), findsWidgets);
+  });
+
+  group('时间与来源格式化（对齐 convertTime2 / GetMailDesc）', () {
+    test('邮件卡时间：固定 YYYY-MM-DD HH:MM', () {
+      expect(fmtMailTime(0), '');
+      expect(
+        fmtMailTime(1700000000),
+        matches(RegExp(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$')),
+      );
+    });
+
+    test('左列时间：半年内 MM-DD HH:MM，更早 YYYY-MM-DD', () {
+      expect(fmtMailTimeShort(0), '');
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      expect(
+        fmtMailTimeShort(now - 60),
+        matches(RegExp(r'^\d{2}-\d{2} \d{2}:\d{2}$')),
+      );
+      expect(
+        fmtMailTimeShort(now - 200 * 86400),
+        matches(RegExp(r'^\d{4}-\d{2}-\d{2}$')),
+      );
+    });
+  });
+
+  testWidgets('宽屏：作品互动卡片显示作品名 / 模板名（行动作 + 参数）', (tester) async {
+    await pumpMailPage(tester);
+    await tester.tap(find.text('作品互动').first);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(
+      find.textContaining('赞了你的作品："一个幸运方块生存"'),
+      findsWidgets,
+      reason: '作品名由 map_id 查表补上（chatworksmsg.lua:203）',
+    );
+    expect(
+      find.textContaining('赞了你的模板："大乱斗模板"'),
+      findsWidgets,
+      reason: '模板名直接来自 data.name（chatworksmsg.lua:150）',
+    );
   });
 
   testWidgets('窄屏：单栏列表，点分类 push 详情页', (tester) async {

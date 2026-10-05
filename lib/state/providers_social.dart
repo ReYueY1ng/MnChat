@@ -30,6 +30,13 @@ final profileClientProvider = Provider<ProfileClient?>((ref) {
   return ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 });
 
+/// 地图信息客户端（作品互动卡片的作品名；未登录返回 null）。
+final mapInfoClientProvider = Provider<MapInfoClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return MapInfoClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
 
 // ── 请求失败提示 ────────────────────────────────────────────────────────
 

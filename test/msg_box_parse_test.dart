@@ -158,15 +158,29 @@ void main() {
       );
     });
 
-    test('actionLabel：已知类型 / 粉丝频道 / 未知回退', () {
+    test('actionLabel：逐条对齐游戏 GetS 文案（含点赞类半句）', () {
       MsgBoxMessage msg(String type) =>
           MsgBoxMessage(msgId: '1', channel: MsgBoxChannel.rep, msgType: type);
+      // 动态互动（chatdynamicsmsg.lua:248-320）
       expect(msg('commented').actionLabel, '评论了你的动态');
-      expect(msg('prized').actionLabel, '👍了这条动态');
-      expect(msg('add_at').actionLabel, '@了你');
+      expect(msg('prized').actionLabel, '了这条动态');
+      expect(msg('add_at').actionLabel, '在动态@了你');
+      expect(msg('comment_at').actionLabel, '在评论@了你');
+      expect(msg('comment2_at').actionLabel, '在评论@了你');
       expect(msg('comment_reply').actionLabel, '回复了你的评论');
+      expect(msg('comment_prized').actionLabel, '了这条评论');
+      expect(msg('comment2_prized').actionLabel, '了这条评论');
+      expect(msg('comment2').actionLabel, '回复了你');
+      expect(msg('comment2_rep').actionLabel, '回复了你');
       expect(msg('answer').actionLabel, '回答了你的问题');
+      // 作品互动（chatworksmsg.lua:140-225）
+      expect(msg('map_posting').actionLabel, '评论了你的作品');
       expect(msg('map_prize').actionLabel, '赞了你的作品');
+      expect(msg('map_collect').actionLabel, '收藏了你的作品');
+      expect(msg('map_tip').actionLabel, '投块了你的作品');
+      expect(msg('template_like').actionLabel, '赞了你的模板');
+      expect(msg('template_collect').actionLabel, '收藏了你的模板');
+      // 动态助手（频道 0）与回退
       expect(msg('1').actionLabel, '动态投票消息');
       expect(msg('9').actionLabel, '动态问答消息');
       expect(msg('something_new').actionLabel, 'something_new');
@@ -175,6 +189,124 @@ void main() {
         MsgBoxMessage(msgId: '1', channel: MsgBoxChannel.fans).actionLabel,
         '关注了你',
       );
+    });
+
+    test('filterLabel 与筛选项字面量对得上，且每个筛选项都有来源', () {
+      MsgBoxMessage msg(String type) =>
+          MsgBoxMessage(msgId: '1', channel: MsgBoxChannel.rep, msgType: type);
+      expect(kDynamicsNoticeFilters, ['全部', '评论', '点赞', '@我', '回答']);
+      expect(kWorksNoticeFilters, ['全部', '讨论', '点赞', '投块', '收藏']);
+      expect(msg('commented').filterLabel, '评论');
+      expect(msg('comment2_rep').filterLabel, '评论');
+      expect(msg('prized').filterLabel, '点赞');
+      expect(msg('comment2_prized').filterLabel, '点赞');
+      expect(msg('add_at').filterLabel, '@我');
+      expect(msg('comment2_at').filterLabel, '@我');
+      expect(msg('answer').filterLabel, '回答');
+      expect(msg('map_posting').filterLabel, '讨论');
+      expect(msg('map_prize').filterLabel, '点赞');
+      expect(msg('template_like').filterLabel, '点赞');
+      expect(msg('map_tip').filterLabel, '投块');
+      expect(msg('map_collect').filterLabel, '收藏');
+      expect(msg('template_collect').filterLabel, '收藏');
+      expect(msg('something_new').filterLabel, '', reason: '未知类型不进任何分类');
+      // 筛选项（除「全部」）必须至少有一个消息类型能命中，否则选了就是空列表
+      expect(
+        {
+          for (final t in const [
+            'commented', 'comment_reply', 'comment2', 'comment2_rep',
+            'prized', 'comment_prized', 'comment2_prized',
+            'add_at', 'comment_at', 'comment2_at', 'answer',
+          ])
+            msg(t).filterLabel,
+        },
+        containsAll(kDynamicsNoticeFilters.skip(1)),
+      );
+      expect(
+        {
+          for (final t in const [
+            'map_posting', 'map_prize', 'template_like',
+            'map_tip', 'map_collect', 'template_collect',
+          ])
+            msg(t).filterLabel,
+        },
+        containsAll(kWorksNoticeFilters.skip(1)),
+      );
+    });
+
+    test('互动者 uin：取 data 里的行动者，不用条目顶层的本人 uin（实测抓包）', () {
+      // 实测 /miniw/msg_box get_channel_msg_list（本人 uin=279630451）：条目顶层
+      // uin 恒为本人，点赞者在 data.op_uin、评论者在 data.uin。
+      final prize = MsgBoxMessage.fromItem(const {
+        'msg_id': '90939461',
+        'msg_type': 'prize',
+        'uin': 279630451,
+        'data': '{"content":"好看捏","type":2,"sender":14213398,'
+            '"location":"海南","pid_uin":279630451,"op_uin":14213398,'
+            '"uin":279630451}',
+      }, channel: MsgBoxChannel.prize);
+      expect(prize!.msgType, 'prized');
+      expect(prize.uin, 14213398, reason: '点赞者 = op_uin，不是本人');
+      expect(prize.actionLabel, '了这条动态');
+
+      final rep = MsgBoxMessage.fromItem(const {
+        'msg_id': '85022774',
+        'msg_type': 'rep',
+        'uin': 279630451,
+        'data': '{"sender":"14213398","content":"我看见了坤坤","type":1,'
+            '"pid_uin":"279630451","op_uin":0,"uin":"14213398"}',
+      }, channel: MsgBoxChannel.rep);
+      expect(rep!.msgType, 'commented');
+      expect(rep.uin, 14213398, reason: '评论者 = data.uin，不是本人');
+      expect(rep.actionLabel, '评论了你的动态');
+    });
+
+    test('互动者 uin：评论被赞取 act_uin；data 缺 uin 时回落顶层', () {
+      final liked = MsgBoxMessage.fromItem(const {
+        'msg_id': 'c1',
+        'msg_type': 'com_prize',
+        'uin': 279630451,
+        'data': '{"uin":279630451,"op_uin":0,"act_uin":59312896}',
+      }, channel: MsgBoxChannel.prize);
+      expect(liked!.msgType, 'comment_prized');
+      expect(liked.uin, 59312896);
+      expect(liked.actionLabel, '了这条评论');
+
+      final noData = MsgBoxMessage.fromItem(const {
+        'msg_id': 'f1',
+        'msg_type': 'fans_change',
+        'uin': 14213398,
+      }, channel: MsgBoxChannel.fans);
+      expect(noData!.uin, 14213398, reason: 'data 缺 uin 才回落到顶层');
+    });
+
+    test('summaryParam：作品/模板取名称，其余取被互动正文', () {
+      MsgBoxMessage msg(String type, {Map<String, Object?> data = const {}}) =>
+          MsgBoxMessage(
+            msgId: '1',
+            channel: MsgBoxChannel.mapInteract,
+            msgType: type,
+            pidContent: '动态正文',
+            data: data,
+          );
+      // 作品：参数是作品名（owid 查表，chatworksmsg.lua:185-221）
+      expect(
+        msg('map_prize', data: const {'map_id': 42})
+            .summaryParam(mapNames: const {'42': '一个幸运方块生存'}),
+        '"一个幸运方块生存"',
+      );
+      expect(
+        msg('map_prize', data: const {'map_id': 42}).summaryParam(),
+        '',
+        reason: '查不到作品名就退化成只显示行动作',
+      );
+      // 模板：名称就在 data.name，不用查表
+      expect(
+        msg('template_like', data: const {'name': '大乱斗模板'}).summaryParam(),
+        '"大乱斗模板"',
+      );
+      // 动态互动：参数是被互动正文
+      expect(msg('commented').summaryParam(), '动态正文');
     });
 
     test('hasDetail：pid 缺失 / "0" → false', () {

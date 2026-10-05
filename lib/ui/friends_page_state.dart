@@ -532,11 +532,15 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
   }
 
+  /// 顶部工具条（对齐游戏 `main_NewFriendsMgr` / 参考截图）：
   /// 顶部工具条（对齐游戏 `main_NewFriendsMgr`）：
-  /// `在线好友 X/Y` + 刷新 + 批量管理 + 排序下拉 + 筛选 + 搜索。
+  /// `在线好友 X/Y` + 刷新 + 批量管理 + 排序 + 筛选 + 搜索。
   ///
-  /// 工具条位于列表上方的 Column 中，必须是不透明实心条：透明背景会让下方
-  /// 内容透出（"遮不住卡片"）。用页面底色铺底，保持与页面视觉无缝。
+  /// 工具条位于列表上方的 Column 中，不铺背景（与页面同底色，保持无缝、
+  /// 下拉 / 过滚时不会透出内容）：一排普通图标按钮（无底色、无描边），
+  /// 生效中（搜索词 / 筛选 / 非默认排序）的图标换成主色。搜索平时是图标，
+  /// 点开才展开成输入框；宽屏左侧计数、右侧排序 / 筛选 / 搜索（Spacer 顶到
+  /// 内容右缘），窄屏一行放同样 5 个图标。
   Widget _buildToolbar(ThemeData theme, int online, int total) {
     // 搜索框：高度随系统字号缩放，避免大字号下输入文字被裁切。
     Widget searchField({bool autofocus = false}) => SizedBox(
@@ -561,7 +565,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         ),
       ),
     );
-    // 窄屏：搜索平时是个图标按钮（有查询词时高亮）；点开才展开成输入框。
+
+    // 工具条图标按钮：无背景、无描边的普通图标按钮。
     //
     // 工具条一排 5 个图标按钮，默认 48dp 会把「在线好友 X/Y」挤到只剩
     // 「在线好友…」；统一收到 40dp（仍近 Material 推荐的 44dp 触控区）。
@@ -587,7 +592,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         color: _search.isEmpty ? null : theme.colorScheme.primary,
       ),
     );
-    // 刷新 / 批量管理（窄屏收成 40dp 图标，大屏同样用）
+    // 刷新 / 批量管理
     final refreshButton = toolbarIcon(
       tooltip: '刷新',
       onPressed: () => ref.read(chatServiceProvider).loadSessions(),
@@ -599,26 +604,18 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         _batchMode = !_batchMode;
         _selected.clear();
       }),
-      icon: Icon(
-        _batchMode ? Icons.checklist : Icons.checklist_outlined,
-        size: 18,
-      ),
+      icon: const Icon(Icons.checklist_rtl, size: 18),
     );
     // 游戏文案：`GetS(156004)` =「在线好友@1/@2」
     final countText = Text(
       '在线好友 $online/$total',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
-      style: theme.textTheme.labelMedium?.copyWith(
+      style: theme.textTheme.labelLarge?.copyWith(
         color: theme.colorScheme.onSurfaceVariant,
+        fontWeight: FontWeight.w600,
       ),
     );
-    final controls = <Widget>[
-      // 宽屏：与搜索框按 1:1 分剩余宽度。
-      Flexible(child: countText),
-      refreshButton,
-      batchButton,
-    ];
     // 筛选入口：有生效条件时高亮（游戏里漏斗的 selSt 控制器）。
     final filterButton = toolbarIcon(
       tooltip: '筛选',
@@ -633,28 +630,67 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         ),
       ),
     );
-    final sortButton = PopupMenuButton<_SortMode>(
-      tooltip: '排序方式',
+    // 排序：只有图标（带当前排序的 tooltip），生效中图标用主色。
+    Widget sortMenuButton(String tooltip) => PopupMenuButton<_SortMode>(
+      tooltip: tooltip,
       onSelected: (m) => setState(() => _sort = m),
       itemBuilder: _sortMenuItems,
-      child: Chip(
-        visualDensity: adaptiveDensity(context),
-        avatar: const Icon(Icons.sort, size: 16),
-        label: Text(_sort.label, style: const TextStyle(fontSize: 12)),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 11),
+        child: Icon(
+          Icons.sort,
+          size: 18,
+          color: _sort == _SortMode.defaultOrder
+              ? null
+              : theme.colorScheme.primary,
+        ),
       ),
     );
-
-    // 窄屏排序：纯图标（带当前排序的 tooltip），标签版留给宽屏 ——
-    // 否则“在线好友 X/Y + 刷新 + 批量 + 排序标签 + 筛选”在 360dp 下必然溢出。
-    final sortIconButton = PopupMenuButton<_SortMode>(
-      tooltip: '排序方式：${_sort.label}',
-      onSelected: (m) => setState(() => _sort = m),
-      itemBuilder: _sortMenuItems,
-      child: const Padding(
-        padding: EdgeInsets.symmetric(horizontal: 11, vertical: 11),
-        child: Icon(Icons.sort, size: 18),
-      ),
-    );
+    // 搜索展开态：整条工具条只剩输入框 + 关闭按钮（宽窄一致）。
+    final Widget bar;
+    if (_searchOpen) {
+      bar = Row(
+        children: [
+          Expanded(child: searchField(autofocus: true)),
+          toolbarIcon(
+            tooltip: '关闭搜索',
+            onPressed: () => setState(() {
+              _searchOpen = false;
+              _search = '';
+            }),
+            icon: const Icon(Icons.close, size: 18),
+          ),
+        ],
+      );
+    } else if (isCompactWidth(context)) {
+      // 手机：一行 5 个图标 + 计数；`Expanded` 让计数占满中间并把右侧图标
+      // 顶到行尾（与内容右缘对齐）。
+      bar = Row(
+        children: [
+          searchToggle,
+          Expanded(child: countText),
+          refreshButton,
+          batchButton,
+          sortMenuButton('排序方式：${_sort.label}'),
+          filterButton,
+        ],
+      );
+    } else {
+      // 宽屏：计数在左，排序 / 筛选 / 搜索靠右；`Spacer` 把右侧一组顶到
+      // 内容右缘。计数不做成 flex 子项，否则它会和 Spacer 平分弹性空间，
+      // 用不满的那一半变成中间空档，右侧一组就与内容右缘对不上了。
+      bar = Row(
+        children: [
+          countText,
+          refreshButton,
+          batchButton,
+          const Spacer(),
+          sortMenuButton('排序方式'),
+          filterButton,
+          searchToggle,
+        ],
+      );
+    }
 
     return ColoredBox(
       color: theme.scaffoldBackgroundColor,
@@ -665,46 +701,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           AppSpacing.md,
           AppSpacing.sm,
         ),
-        // 手机（紧凑宽度）：搜索平时只是一个按钮，点开才占整行并隐藏其它控件；
-        // 其余控件保持一行且保证不溢出（此前固定宽度控件相加超屏，实测溢出
-        // 32dp@360 / 72dp@320）。
-        child: isCompactWidth(context)
-            ? (_searchOpen
-                  ? Row(
-                      children: [
-                        Expanded(child: searchField(autofocus: true)),
-                        toolbarIcon(
-                          tooltip: '关闭搜索',
-                          onPressed: () => setState(() {
-                            _searchOpen = false;
-                            _search = '';
-                          }),
-                          icon: const Icon(Icons.close, size: 18),
-                        ),
-                      ],
-                    )
-                  : Row(
-                      children: [
-                        searchToggle,
-                        // `Expanded`（而不是 Flexible + Spacer）：计数占满
-                        // 中间并把右侧图标顶到行尾，不会和 Spacer 抢宽度。
-                        Expanded(child: countText),
-                        refreshButton,
-                        batchButton,
-                        sortIconButton,
-                        filterButton,
-                      ],
-                    ))
-            : Row(
-                children: [
-                  ...controls,
-                  const SizedBox(width: AppSpacing.sm),
-                  sortButton,
-                  filterButton,
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(child: searchField()),
-                ],
-              ),
+        child: bar,
       ),
     );
   }

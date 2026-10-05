@@ -16,7 +16,16 @@ class _MailPageState extends ConsumerState<MailPage> {
   final Map<int, ChannelSummary> _summaries = {};
   final Map<int, PlayerProfile> _profiles = {};
 
+  /// 作品互动卡片的作品名：owid → 名称（`/miniw/map` `get_map_list_info`）。
+  final Map<String, String> _mapNames = {};
+
   bool _started = false;
+
+  /// 互动入口的类型筛选（右栏「全部 ▾」）；切换入口 / 分类时重置为「全部」。
+  String _typeFilter = '全部';
+
+  /// 已在本页关注过的粉丝 uin（按钮置为「已关注」）。
+  final Set<int> _followed = <int>{};
 
   @override
   void initState() {
@@ -39,6 +48,7 @@ class _MailPageState extends ConsumerState<MailPage> {
 
   MessageCenterClient? get _center => ref.read(messageCenterClientProvider);
   MsgBoxClient? get _box => ref.read(msgBoxClientProvider);
+  MapInfoClient? get _mapInfoClient => ref.read(mapInfoClientProvider);
   DynamicsClient? get _dynamics => ref.read(dynamicsClientProvider);
   ProfileClient? get _profileClient => ref.read(profileClientProvider);
 
@@ -114,6 +124,9 @@ class _MailPageState extends ConsumerState<MailPage> {
       if (!mounted) return;
       setState(() => _boxItems[channel] = page.items);
       unawaited(_enrichProfiles(page.items.map((m) => m.uin)));
+      if (channel == MsgBoxChannel.mapInteract) {
+        unawaited(_enrichMapNames(page.items));
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() => _boxErrors[channel] = '加载失败: $e');
@@ -187,8 +200,29 @@ class _MailPageState extends ConsumerState<MailPage> {
     }
   }
 
-  Future<void> _refreshSelection() async {
-    final ch = _selected.channel;
+  /// 作品互动卡片的作品名补全（`data.map_id` → `/miniw/map` 查名）。
+  /// 失败/查不到就不显示作品名（卡片只留行动作），不阻断列表。
+  Future<void> _enrichMapNames(List<MsgBoxMessage> items) async {
+    final client = _mapInfoClient;
+    if (client == null) return;
+    final pending = <String>{
+      for (final m in items)
+        if (m.msgType.startsWith('map_'))
+          if ('${m.data['map_id'] ?? ''}'.isNotEmpty)
+            if (!_mapNames.containsKey('${m.data['map_id']}'))
+              '${m.data['map_id']}',
+    };
+    if (pending.isEmpty) return;
+    try {
+      final names = await client.fetchMapNames(pending.toList());
+      if (!mounted || names.isEmpty) return;
+      setState(() => _mapNames.addAll(names));
+    } catch (_) {
+      // 查名失败：卡片不影响列表展示
+    }
+  }
+
+  Future<void> _refreshSelection() async {    final ch = _selected.channel;
     if (ch != null && ch != MsgChannel.activityAssistant) {
       await _loadChannel(ch);
     } else if (ch == MsgChannel.activityAssistant) {
@@ -391,13 +425,30 @@ class _MailPageState extends ConsumerState<MailPage> {
     }
   }
 
+  /// 关注粉丝（`attention_friend`）；成功后按钮置为「已关注」。
+  Future<void> _follow(int uin) async {
+    try {
+      await ref.read(chatServiceProvider).followPlayer(uin, follow: true);
+    } catch (_) {
+      _toast('关注失败');
+      return;
+    }
+    if (!mounted) return;
+    setState(() => _followed.add(uin));
+    _toast('已关注');
+  }
+
   void _toast(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
   void _select(MailSelection sel) {
-    setState(() => _selected = sel);
+    setState(() {
+      _selected = sel;
+      // 类型筛选属于入口维度：切走一律回到「全部」。
+      _typeFilter = '全部';
+    });
     _ensureLoaded(sel);
   }
 
@@ -424,9 +475,21 @@ class _MailPageState extends ConsumerState<MailPage> {
     if (ch == MsgChannel.activityAssistant) {
       return _boxItems[MsgBoxChannel.sys] ?? const <MsgBoxMessage>[];
     }
-    if (sel.entry != null) return _entryItems(sel.entry!);
+    if (sel.entry != null) {
+      final all = _entryItems(sel.entry!);
+      if (_typeFilter == '全部') return all;
+      return [
+        for (final m in all)
+          if (m.filterLabel == _typeFilter) m,
+      ];
+    }
     return const <MsgBoxMessage>[];
   }
+
+  /// 互动入口的类型筛选项（词表在 [MsgBoxEntry.filters]，出处
+  /// `mainchatinteractivemsg.lua:64-79`）；非互动入口（邮件 / 系统频道）
+  /// 无类型维度 → null。
+  List<String>? _typeFilterOptions(MailSelection sel) => sel.entry?.filters;
 
   List<MsgItem> _paneMailItems(MailSelection sel) {
     final ch = sel.channel;
@@ -496,20 +559,21 @@ class _MailPageState extends ConsumerState<MailPage> {
     return n;
   }
 
-  /// 左列一行摘要（最新一条的正文/标题 + 时间）。
+  /// 左列一行摘要（最新一条的标题 + 时间）。
+  ///
+  /// 摘要取的是**标题**而非正文（对齐 `MainChatCtrl:SystemItemRenderer`，
+  /// mainchatctrl.lua:3204-3236：`tfContent` = GetMailDesc 的 strTitle）；
+  /// 动态助手（频道 0）的标题由活动类型决定（mainchatsystemmsg.lua:195-206）。
   ({String text, int time}) _channelLine(int channel) {
     if (channel == MsgChannel.activityAssistant) {
       final list = _boxItems[MsgBoxChannel.sys] ?? const <MsgBoxMessage>[];
       final m = _newestBox(list);
       if (m == null) return (text: '', time: 0);
-      return (text: m.headline, time: m.time);
+      return (text: m.actionLabel, time: m.time);
     }
     final item = _newestMail(_items[channel] ?? const <MsgItem>[]);
     if (item == null) return (text: '', time: 0);
-    return (
-      text: item.content.isNotEmpty ? item.content : item.title,
-      time: item.createTime,
-    );
+    return (text: item.title, time: item.createTime);
   }
 
   /// 最新一条（按时间取最大；flowlist 顺序不保证新旧）。
@@ -541,8 +605,25 @@ class _MailPageState extends ConsumerState<MailPage> {
         final wide = constraints.maxWidth >= kMailCentreWideWidth;
         // 窄屏下钻实例：仅详情 + 返回。
         if (widget.focus != null && !wide) {
+          final options = _typeFilterOptions(_selected);
           return Scaffold(
-            appBar: AppBar(title: Text(_selectionTitle(_selected))),
+            appBar: AppBar(
+              title: Text(_selectionTitle(_selected)),
+              // 窄屏下钻页没有栏头，把「全部 ▾」搬到 AppBar（宽屏在栏头里）。
+              actions: [
+                if (options != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: AppSpacing.md),
+                    child: Center(
+                      child: _TypeFilterPill(
+                        options: options,
+                        value: _typeFilter,
+                        onChanged: (v) => setState(() => _typeFilter = v),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
             body: _buildPane(_selected, wide: false),
           );
         }
@@ -557,37 +638,44 @@ class _MailPageState extends ConsumerState<MailPage> {
               ),
             ],
           ),
-          body: Column(
-            children: [
-              _buildTopEntries(),
-              const Divider(height: 1),
-              Expanded(
-                child: wide
-                    ? Row(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          SizedBox(
-                            width: 320,
-                            child: _buildCategoryList(pushOnTap: false),
-                          ),
-                          const VerticalDivider(width: 1),
-                          Expanded(child: _buildPane(_selected, wide: true)),
-                        ],
-                      )
-                    : _buildCategoryList(pushOnTap: true),
-              ),
-            ],
-          ),
+          // 宽屏：左栏 = 三个圆入口 + 分类列表；右栏 = 详情（卡片流）。
+          // 窄屏：只有左栏，点入口 / 分类 push 详情页。
+          body: wide
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    SizedBox(
+                      width: 340,
+                      child: _buildLeftColumn(pushOnTap: false),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: _buildPane(_selected, wide: true)),
+                  ],
+                )
+              : _buildLeftColumn(pushOnTap: true),
         );
       },
     );
   }
 
+  /// 左栏：顶部 3 圆入口 + 分类列表。
+  Widget _buildLeftColumn({required bool pushOnTap}) {
+    return Column(
+      children: [
+        _buildTopEntries(pushOnTap: pushOnTap),
+        const Divider(height: 1),
+        Expanded(child: _buildCategoryList(pushOnTap: pushOnTap)),
+      ],
+    );
+  }
+
   /// 顶部 3 圆入口（动态互动 / 新增粉丝 / 作品互动）。
-  Widget _buildTopEntries() {
+  ///
+  /// 窄屏没有右栏，点入口必须 push 详情页 —— 否则只更新选中态而看不到内容。
+  Widget _buildTopEntries({required bool pushOnTap}) {
     return Padding(
       padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
+        horizontal: AppSpacing.sm,
         vertical: AppSpacing.md,
       ),
       child: Row(
@@ -598,7 +686,14 @@ class _MailPageState extends ConsumerState<MailPage> {
                 entry: e,
                 unread: _entryUnread(e),
                 selected: _selected.entry == e,
-                onTap: () => _select(MailSelection.entry(e)),
+                onTap: () {
+                  final sel = MailSelection.entry(e);
+                  if (pushOnTap) {
+                    _pushDetail(sel);
+                  } else {
+                    _select(sel);
+                  }
+                },
               ),
             ),
         ],
@@ -606,13 +701,35 @@ class _MailPageState extends ConsumerState<MailPage> {
     );
   }
 
-  /// 左列 7 分类。
+  /// 左列 7 分类（彩色圆角图标 + 标题 / 时间 / 摘要 / 未读角标，卡片式行）。
+  /// 左列分类的显示顺序 —— 对齐 `MainChatSystemMsg:UpdateSystemInfos` 的
+  /// `table.sort`（mainchatsystemmsg.lua:226-244）：按该分类最新一条消息的
+  /// 时间倒序；都没有消息时按未读数倒序，最后一个也不动。
+  List<int> _orderedChannels() {
+    const order = MsgChannel.categoryOrder;
+    final times = {for (final c in order) c: _channelLine(c).time};
+    final unread = {for (final c in order) c: _channelUnread(c)};
+    final list = [...order];
+    list.sort((a, b) {
+      final ta = times[a] ?? 0;
+      final tb = times[b] ?? 0;
+      if (ta > 0 && tb > 0) return tb.compareTo(ta);
+      if (ta > 0) return -1;
+      if (tb > 0) return 1;
+      return (unread[b] ?? 0).compareTo(unread[a] ?? 0);
+    });
+    return list;
+  }
+
   Widget _buildCategoryList({required bool pushOnTap}) {
-    final channels = MsgChannel.categoryOrder;
+    final channels = _orderedChannels();
     return ListView.separated(
-      padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.sm,
+      ),
       itemCount: channels.length,
-      separatorBuilder: (_, _) => const Divider(height: 1, indent: 72),
+      separatorBuilder: (_, _) => const SizedBox(height: 2),
       itemBuilder: (context, i) => _buildCategoryRow(channels[i], pushOnTap),
     );
   }
@@ -623,53 +740,93 @@ class _MailPageState extends ConsumerState<MailPage> {
     final unread = _channelUnread(channel);
     final line = _channelLine(channel);
     final subtitle = line.text.isNotEmpty ? line.text : '暂无消息';
-    final time = line.time > 0 ? fmtMsgTime(line.time) : '';
-    return ListTile(
-      leading: CircleAvatar(
-        radius: 20,
-        backgroundColor: style.color.withValues(alpha: 0.14),
-        child: Icon(style.icon, size: 20, color: style.color),
-      ),
-      title: Text(
-        MsgChannel.name(channel),
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      subtitle: Text(
-        subtitle,
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (time.isNotEmpty)
-            Text(
-              time,
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
+    final time = line.time > 0 ? fmtMailTimeShort(line.time) : '';
+    final selected = _selected.channel == channel;
+    // M3 选中态：secondaryContainer 铺底 + onSecondaryContainer 前景，无描边。
+    final fg = theme.colorScheme.onSecondaryContainer;
+    return Material(
+      color: selected
+          ? theme.colorScheme.secondaryContainer
+          : Colors.transparent,
+      borderRadius: AppRadius.inputR,
+      child: InkWell(
+        borderRadius: AppRadius.inputR,
+        onTap: () {
+          final sel = MailSelection.channel(channel);
+          if (pushOnTap) {
+            _pushDetail(sel);
+          } else {
+            _select(sel);
+          }
+        },
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.sm,
+          ),
+          child: Row(
+            children: [
+              _CategoryIcon(style: style),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            MsgChannel.name(channel),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w600,
+                              color: selected ? fg : null,
+                            ),
+                          ),
+                        ),
+                        if (time.isNotEmpty)
+                          Text(
+                            time,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: selected
+                                  ? fg
+                                  : theme.colorScheme.outline,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: selected
+                                  ? fg
+                                  : theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                        if (unread > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              left: AppSpacing.sm,
+                            ),
+                            child: _UnreadBadge(count: unread),
+                          ),
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
-          if (unread > 0)
-            Padding(
-              padding: const EdgeInsets.only(top: AppSpacing.xs),
-              child: _UnreadBadge(count: unread),
-            ),
-        ],
+            ],
+          ),
+        ),
       ),
-      selected: _selected.channel == channel,
-      selectedTileColor: theme.colorScheme.primaryContainer.withValues(
-        alpha: 0.35,
-      ),
-      onTap: () {
-        final sel = MailSelection.channel(channel);
-        if (pushOnTap) {
-          _pushDetail(sel);
-        } else {
-          _select(sel);
-        }
-      },
     );
   }
 
@@ -707,13 +864,14 @@ class _MailPageState extends ConsumerState<MailPage> {
       body = RefreshIndicator(
         onRefresh: _refreshSelection,
         child: ListView.separated(
+          padding: const EdgeInsets.all(AppSpacing.md),
           itemCount: count,
-          separatorBuilder: (_, _) => const Divider(height: 1),
+          separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
           itemBuilder: (context, i) {
             if (i < mailItems.length) {
-              return _buildMailItem(sel.channel!, mailItems[i]);
+              return _buildMailCard(sel.channel!, mailItems[i]);
             }
-            return _buildBoxItem(boxItems[i - mailItems.length]);
+            return _buildBoxCard(boxItems[i - mailItems.length]);
           },
         ),
       );
@@ -731,21 +889,32 @@ class _MailPageState extends ConsumerState<MailPage> {
 
   Widget _buildPaneHeader(MailSelection sel) {
     final theme = Theme.of(context);
+    final options = _typeFilterOptions(sel);
     return Padding(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.lg,
-        vertical: AppSpacing.md,
+      padding: const EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.md,
+        AppSpacing.md,
+        AppSpacing.sm,
       ),
       child: Row(
         children: [
           Expanded(
             child: Text(
               _selectionTitle(sel),
-              style: theme.textTheme.titleMedium,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
           ),
+          if (options != null)
+            _TypeFilterPill(
+              options: options,
+              value: _typeFilter,
+              onChanged: (v) => setState(() => _typeFilter = v),
+            ),
         ],
       ),
     );
@@ -778,45 +947,163 @@ class _MailPageState extends ConsumerState<MailPage> {
     );
   }
 
-  /// 邮件/系统消息行：标题 / 正文 / 详情 / 时间。
-  Widget _buildMailItem(int channel, MsgItem item) {
+  /// 卡片外壳：圆角 + 细描边 + 点击水波（右栏列表项统一外观）。
+  Widget _card({required Widget child, VoidCallback? onTap}) {
     final theme = Theme.of(context);
-    final unread = item.unread;
-    return ListTile(
-      leading: Icon(
-        unread ? Icons.mark_email_unread_outlined : Icons.drafts_outlined,
-        color: unread ? theme.colorScheme.primary : theme.colorScheme.outline,
-      ),
-      title: Text(
-        item.title.isNotEmpty ? item.title : '（无标题）',
-        maxLines: 1,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(fontWeight: unread ? FontWeight.w600 : FontWeight.w400),
-      ),
-      subtitle: Text(
-        item.content,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-      ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          Text(
-            fmtMsgTime(item.createTime),
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.outline,
-            ),
+    return Material(
+      color: theme.colorScheme.surfaceContainerLow,
+      borderRadius: AppRadius.cardR,
+      child: InkWell(
+        borderRadius: AppRadius.cardR,
+        onTap: onTap,
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            borderRadius: AppRadius.cardR,
+            border: Border.all(color: theme.colorScheme.outlineVariant),
           ),
-          _DetailButton(onPressed: () => _openMailDetail(channel, item)),
-        ],
+          child: child,
+        ),
       ),
-      onTap: () => _openMailDetail(channel, item),
     );
   }
 
-  /// 互动通知行：头像 / 行动作+正文 / 缩略图 / `N小时前 IP 省` / 详情。
-  Widget _buildBoxItem(MsgBoxMessage m) {
+  /// 邮件 / 系统消息卡片：标题 + 时间 / 正文（+ 图片）/ 附件 /
+  /// `来自迷你官方` + 详情（对齐截图）。
+  Widget _buildMailCard(int channel, MsgItem item) {
+    final theme = Theme.of(context);
+    final unread = item.unread;
+    final image = item.images.isNotEmpty ? item.images.first : null;
+    return _card(
+      onTap: () => _openMailDetail(channel, item),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (unread)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.error,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              Expanded(
+                child: Text(
+                  item.title.isNotEmpty ? item.title : '（无标题）',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Text(
+                fmtMailTime(item.createTime),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+            ],
+          ),
+          if (item.content.isNotEmpty || image != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                if (item.content.isNotEmpty)
+                  Expanded(
+                    child: Text(
+                      item.content,
+                      maxLines: 3,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.5),
+                    ),
+                  ),
+                if (image != null) ...[
+                  if (item.content.isNotEmpty)
+                    const SizedBox(width: AppSpacing.sm),
+                  ClipRRect(
+                    borderRadius: AppRadius.chipR,
+                    child: Image(
+                      image: CachedNetworkImageProvider(image),
+                      width: 84,
+                      height: 84,
+                      fit: BoxFit.cover,
+                      errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ],
+          if (item.attach.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Icon(
+                  Icons.card_giftcard,
+                  size: 16,
+                  color: item.attachmentTaken
+                      ? theme.colorScheme.outline
+                      : theme.colorScheme.primary,
+                ),
+                const SizedBox(width: AppSpacing.xs),
+                Expanded(
+                  child: Text(
+                    [
+                      for (final a in item.attach)
+                        '${a.name.isNotEmpty ? a.name : '物品 ${a.id}'}'
+                            '${a.count > 0 ? ' ×${a.count}' : ''}',
+                    ].join('、'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+                Text(
+                  item.attachmentTaken ? '已领取' : '待领取',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: item.attachmentTaken
+                        ? theme.colorScheme.outline
+                        : theme.colorScheme.primary,
+                  ),
+                ),
+              ],
+            ),
+          ],
+          const SizedBox(height: AppSpacing.sm),
+          const Divider(height: 1),
+          const SizedBox(height: AppSpacing.xs),
+          Row(
+            children: [
+              Text(
+                item.senderName.isNotEmpty
+                    ? '来自${item.senderName}'
+                    : '来自迷你官方',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                ),
+              ),
+              const Spacer(),
+              _DetailButton(onPressed: () => _openMailDetail(channel, item)),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// 互动通知卡片：头像 / 昵称 + 时间 IP / 行动作 + 正文 / 缩略图 /
+  /// 粉丝「关注」按钮（对齐截图）。
+  Widget _buildBoxCard(MsgBoxMessage m) {
     final theme = Theme.of(context);
     final profile = _profiles[m.uin];
     final head = PlayerProfile.resolveRoleHeadFallback(
@@ -828,77 +1115,127 @@ class _MailPageState extends ConsumerState<MailPage> {
     final name = profile?.nickname.isNotEmpty == true
         ? profile!.nickname
         : (m.nickname.isNotEmpty ? m.nickname : '${m.uin}');
-    final body = _boxBody(m);
-    return ListTile(
-      visualDensity: kAvatarListTileDensity,
-      minTileHeight: headFrameSlotSize(18),
-      leading: AvatarView(
-        name: name,
-        avatarUrl: profile?.avatarUrl,
-        frameId: profile?.headFrameId,
-        headType: head?.type,
-        headId: head?.id,
-        radius: 18,
-      ),
-      title: Text(
-        m.title.isNotEmpty ? m.title : m.headline,
-        maxLines: 2,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          fontWeight: m.unread ? FontWeight.w600 : FontWeight.w400,
-        ),
-      ),
-      subtitle: (body.isEmpty && m.picUrl.isEmpty)
-          ? null
-          : Row(
+    final isFan = m.channel == MsgBoxChannel.fans;
+    // 摘要行 = 行动作（+ 作品名 / 被互动内容预览）；正文行 = 评论 / 回复正文。
+    final preview = m.summaryParam(mapNames: _mapNames);
+    final actionText = preview.isEmpty
+        ? m.actionLabel
+        : '${m.actionLabel}：$preview';
+    // 正文：优先评论内容；动态助手（post_sys）没有评论时用标题兑底。
+    final content = m.content.isNotEmpty ? m.content : m.title;
+    final bodyText = content.isNotEmpty && content != preview ? content : '';
+    final timeText = (m.time > 0 || m.location.isNotEmpty)
+        ? fmtMsgTimeIp(m.time, m.location)
+        : '';
+    return _card(
+      onTap: m.hasDetail ? () => _openDynamics(m.pid) : null,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          AvatarView(
+            name: name,
+            avatarUrl: profile?.avatarUrl,
+            frameId: profile?.headFrameId,
+            headType: head?.type,
+            headId: head?.id,
+            radius: 18,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (m.picUrl.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(right: AppSpacing.sm),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(AppRadius.chip),
-                      child: Image(image: CachedNetworkImageProvider(m.picUrl),
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.cover,
-                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                     ),
+                    if (timeText.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: AppSpacing.sm),
+                        child: Text(
+                          timeText,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                if (actionText.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 游戏卡片上「赞」是模板图标（控制器 c1），文案本身只是
+                      // 半句（「了这条动态：…」）；这里用图标把那个动作补上。
+                      if (m.isLikeStyle) ...[
+                        Padding(
+                          padding: const EdgeInsets.only(top: 1, right: 4),
+                          child: Icon(
+                            Icons.thumb_up,
+                            size: 13,
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                      Expanded(
+                        child: Text(
+                          actionText,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                if (body.isNotEmpty)
-                  Expanded(
-                    child: Text(
-                      body,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                ],
+                if (bodyText.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.xs + 2),
+                  Text(
+                    bodyText,
+                    maxLines: 3,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      height: 1.4,
                     ),
                   ),
+                ],
               ],
             ),
-      trailing: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          if (m.time > 0 || m.location.isNotEmpty)
-            Text(
-              fmtMsgTimeIp(m.time, m.location),
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: theme.colorScheme.outline,
+          ),
+          if (m.picUrl.isNotEmpty) ...[
+            const SizedBox(width: AppSpacing.sm),
+            ClipRRect(
+              borderRadius: AppRadius.chipR,
+              child: Image(
+                image: CachedNetworkImageProvider(m.picUrl),
+                width: 64,
+                height: 64,
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),
             ),
-          if (m.hasDetail)
-            _DetailButton(onPressed: () => _openDynamics(m.pid)),
+          ],
+          if (isFan && m.uin > 0) ...[
+            const SizedBox(width: AppSpacing.sm),
+            _FollowButton(
+              followed: _followed.contains(m.uin),
+              onPressed: () => _follow(m.uin),
+            ),
+          ],
         ],
       ),
-      onTap: m.hasDetail ? () => _openDynamics(m.pid) : null,
     );
-  }
-
-  /// 互动通知副行正文（评论正文等；与被互动动态正文不同才显示）。
-  static String _boxBody(MsgBoxMessage m) {
-    if (m.question.isNotEmpty && m.content.isNotEmpty) return m.content;
-    if (m.pidContent.isNotEmpty && m.content.isNotEmpty) return m.content;
-    return '';
   }
 }

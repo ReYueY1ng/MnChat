@@ -3,7 +3,7 @@
 /// 版面（自上而下）：
 ///   1. 资料头卡：头像（含头像框）/ 昵称 / 等级与大会员徽标 / `迷你号`（可复制）
 ///      / `关注`·`粉丝`·`人气值`·`信用分` 统计行 / `最近访客`·`编辑布局`·
-///      `修改昵称`·`家园` 入口；
+///      `修改昵称` 入口；
 ///   2. 横幅：`交友宣言` 气泡 + `编辑`（→ 交友标签页）；
 ///   3. `个性装扮`：已拥有皮肤与立绘，点选即更换头像本体；
 ///   4. `头像框`：已拥有头像框，点选即更换（含默认框 1）；
@@ -186,7 +186,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 stats: stats,
                 familyName: _familyName,
                 onCopyUin: () => _copyUin(uin),
-                onHomeland: _isSelf ? () => _openHomeland(uin) : null,
                 onVisitors: _isSelf ? () => _openVisitors(uin) : null,
                 onEditLayout: _isSelf ? _openLayoutEditor : null,
                 onRename: _isSelf ? _editNickname : null,

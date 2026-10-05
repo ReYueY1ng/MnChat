@@ -53,7 +53,6 @@ void main() {
       '最近访客',
       '编辑布局',
       '修改昵称',
-      '家园',
       '关注',
       '粉丝',
       '人气值',
@@ -61,6 +60,8 @@ void main() {
     ]) {
       expect(find.text(label), findsWidgets, reason: '缺少文案：$label');
     }
+    // 「家园」入口已移除：它只是再打开一次个人主页，而主页本身已有入口。
+    expect(find.text('家园'), findsNothing);
     expect(find.textContaining('迷你号'), findsWidgets);
 
     // 版块顺序（参考图自上而下）

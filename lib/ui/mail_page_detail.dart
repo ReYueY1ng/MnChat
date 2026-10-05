@@ -80,7 +80,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                   Icons.card_giftcard,
                   color: _item.attachmentTaken
                       ? theme.colorScheme.outline
-                      : AppSemanticColors.of(context).warning,
+                      : theme.colorScheme.primary,
                 ),
                 title: Text(a.name.isNotEmpty ? a.name : '物品 ${a.id}'),
                 trailing: a.count > 0 ? Text('×${a.count}') : null,

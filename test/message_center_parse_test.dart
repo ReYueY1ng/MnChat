@@ -89,6 +89,37 @@ void main() {
     });
   });
 
+  group('MsgItem 发送者（卡片来源行）', () {
+    MsgItem item(String sender) =>
+        MsgItem(id: '1', channel: MsgChannel.friendMail, sender: sender);
+
+    test('昵称(迷你号) → 昵称；纯数字 / 空 → 空串（卡片回退「来自迷你官方」）', () {
+      expect(item('小明(12345)').senderName, '小明');
+      expect(item('小明(12345)').sender, '小明(12345)', reason: '原始串保留');
+      expect(item('12345').senderName, '', reason: '只有迷你号不当昵称用');
+      expect(item('').senderName, '');
+      expect(item('迷你官方').senderName, '迷你官方');
+    });
+
+    test('fromDetail：顶层 sender 优先，其次 ctx.sendname', () {
+      final a = MsgItem.fromDetail(2, const {'id': 'x', 'sender': '小明(1)'});
+      expect(a.senderName, '小明');
+
+      final b = MsgItem.fromDetail(2, const {
+        'id': 'y',
+        'extra': {'ctx': '{"sendname":"小红"}'},
+      });
+      expect(b.senderName, '小红');
+
+      final c = MsgItem.fromDetail(2, const {
+        'id': 'z',
+        'sender': '小明(1)',
+        'extra': {'ctx': '{"sendname":"小红"}'},
+      });
+      expect(c.senderName, '小明', reason: '顶层 sender 优先');
+    });
+  });
+
   group('MsgItem.fromDetail status 位兜底', () {
     test('status=1（已读）→ readState=1，未领取', () {
       final item = MsgItem.fromDetail(1, const {

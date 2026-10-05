@@ -20,7 +20,8 @@ mixin _ProfilePageStateActions
     await _loadHomeModules();
   }
 
-  /// 打开家园（个人主页）：外部客户端无 3D 家园，降级为本人玩家主页。
+  /// 打开某个玩家的个人主页（最佳拍档条目用）。
+  /// 外部客户端无 3D 家园，统一降级为玩家主页。
   void _openHomeland(int uin) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(builder: (_) => PlayerHomePage(targetUin: uin)),

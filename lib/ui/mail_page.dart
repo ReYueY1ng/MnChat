@@ -19,6 +19,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/dynamics.dart' show DynamicsClient;
+import '../core/services/map_info.dart' show MapInfoClient;
 import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
 import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
@@ -26,7 +27,6 @@ import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
-import 'widgets/head_frame.dart' show headFrameSlotSize, kAvatarListTileDensity;
 import '../core/services/image_disk_cache.dart';
 
 part 'mail_page_state.dart';
@@ -95,6 +95,28 @@ String fmtMsgTimeIp(int ts, String location) {
   final t = fmtMsgTime(ts);
   if (location.isEmpty) return t;
   return t.isEmpty ? 'IP $location' : '$t IP $location';
+}
+
+/// 邮件卡片时间（对齐 `messagecenterdatamgr.lua:2929-2951` 的
+/// `convertTime2(t, 2)`）：固定 `YYYY-MM-DD HH:MM`。
+String fmtMailTime(int ts) {
+  if (ts <= 0) return '';
+  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  String p(int n) => n.toString().padLeft(2, '0');
+  return '${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
+}
+
+/// 左列分类行时间（对齐 `convertTime2(t)`，foramtType 默认 1）：
+/// 半年内 `MM-DD HH:MM`，更早 `YYYY-MM-DD`。
+String fmtMailTimeShort(int ts) {
+  if (ts <= 0) return '';
+  final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+  String p(int n) => n.toString().padLeft(2, '0');
+  if (now - ts <= 15768000) {
+    return '${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
+  }
+  return '${d.year}-${p(d.month)}-${p(d.day)}';
 }
 
 /// 邮件详情页。

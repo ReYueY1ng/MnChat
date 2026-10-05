@@ -25,9 +25,6 @@ class _ProfileHeaderCard extends StatelessWidget {
 
   final VoidCallback onCopyUin;
 
-  /// 进自己的家园；为空则不显示（看别人主页时）。
-  final VoidCallback? onHomeland;
-
   /// 以下入口只在自己主页出现：为空即不渲染（看别人主页时传 null）。
   final VoidCallback? onVisitors;
   final VoidCallback? onEditLayout;
@@ -48,7 +45,6 @@ class _ProfileHeaderCard extends StatelessWidget {
     required this.stats,
     required this.familyName,
     required this.onCopyUin,
-    this.onHomeland,
     this.onVisitors,
     this.onEditLayout,
     this.onRename,
@@ -233,12 +229,6 @@ class _ProfileHeaderCard extends StatelessWidget {
                   onPressed: onRename,
                   icon: const Icon(Icons.drive_file_rename_outline, size: 16),
                   label: const Text('修改昵称'),
-                ),
-              if (onHomeland != null)
-                OutlinedButton.icon(
-                  onPressed: onHomeland,
-                  icon: const Icon(Icons.home_outlined, size: 16),
-                  label: const Text('家园'),
                 ),
             ],
           ),
