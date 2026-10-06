@@ -39,13 +39,22 @@ class _FakePostingAdapter implements HttpClientAdapter {
     String text;
     if (path.endsWith('/miniw/profile')) {
       // upload_pre_photo：`ok:<直传地址>`。
-      text = 'ok:https://upload.test/post';
-    } else if (options.method == 'POST') {
-      // 直传字节：`ok:<sub_token>`。
-      text = 'ok:time=1&auth=2&s2t=3';
+      text =
+          'ok:https://upload.test/miniw/upload/?type=photo&node=1&dir=1&token=t&uin=1';
+    } else if (path.endsWith('/miniw/upload/')) {
+      // 分片直传（真实线格式）：info → `ok,size=-1`；begin/step → `ok`；
+      // end → `ok:token=..`（去前缀即 sub_token）。
+      if (act == 'info') {
+        text = 'ok,size=-1';
+      } else if (act == 'upload_end') {
+        text = 'ok:token=tok-1&node=1&dir=20260101';
+      } else {
+        text = 'ok';
+      }
     } else if (act == 'add_posting_pic') {
       final seq = options.uri.queryParameters['seq'];
-      text = '{"ret":0,"data":{"url":"https://img.test/$seq"}}';
+      // 真实回包是**平铺**的：url 不在 data 下（实测）。
+      text = '{"seq":$seq,"url":"https://img.test/$seq","ret":0,"msg":"ok"}';
     } else if (act == 'create_vote') {
       text = '{"ret":0,"data":{"vote_info":{"vote_id":"vote-1"}}}';
     } else {

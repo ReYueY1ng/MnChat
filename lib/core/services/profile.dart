@@ -9,8 +9,10 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart' show httpGetS1Map;
-import '../net/config.dart' show kDefaultBase, kDefaultUrls;
+import '../net/config.dart'
+    show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
+import '../net/photo_upload.dart' show uploadPresignedFile;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import 'gateway.dart' show buildMiniwParamMd5Url;
 import 'request_errors.dart' show reportIfFailed;
@@ -632,15 +634,20 @@ class ProfileClient {
   /// 预上传 DIY 头像：GET `miniw/profile?act=upload_pre_photo`。
   ///
   /// 对齐 `http.lua:1771-1783` `upload_md5_file_pre`：URL = `act=upload_pre_photo`
-  /// + `http_getS1Map()`（`time/auth/s2t`）。响应为字符串 `ok:<上传目标 URL>`，
-  /// 返回去掉 `ok:` 前缀的上传 URL；失败 / 非 `ok:` → null。
+  /// + `http_getS1Map()`。响应为字符串 `ok:<上传目标 URL>`，返回去掉 `ok:`
+  /// 前缀的上传 URL；失败 / 非 `ok:` → null。
+  ///
+  /// 注意：游戏走 `ns_http.func.rpc_string`，它会再过一遍 `url_addParams`
+  /// （`http.lua:891`）—— 所以真实请求必须带 `uin/apiid/ver/country/lang`。
+  /// 实测缺这些参数时服务端回 **空 body**（http 200），补上才回 `ok:<url>`。
   Future<String?> uploadPrePhoto() async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final base = baseUrl.endsWith('/')
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
-    final url = '$base/miniw/profile?act=upload_pre_photo&$sign';
+    final url = '$base/miniw/profile?act=upload_pre_photo&uin=$uin'
+        '&apiid=$kApiId&ver=$kClientVersionStr&country=CN&lang=0&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : '${resp.data}';
@@ -652,33 +659,32 @@ class ProfileClient {
 
   /// 上传 DIY 头像图片字节到 [uploadUrl]（[uploadPrePhoto] 的返回值）。
   ///
-  /// 对齐 `http.lua:1784-1818` `upload_md5_file`（内部 `MiniHttp.CustomUpload`）。
-  ///
-  /// ⚠️ 已知缺口：`MiniHttp.CustomUpload` 为原生实现，其请求体线格式
-  /// （multipart 字段名 / 是否裸字节）无法从 Lua 反编译确定；此处按
-  /// `application/octet-stream` 裸字节 POST 尽力实现。成功时响应体为
-  /// `ok:<确认 token>`，返回去前缀 token；否则 null。
-  Future<String?> uploadDiyPhoto(String uploadUrl, List<int> bytes) async {
-    final resp = await _dio.post<String>(
-      uploadUrl,
-      data: bytes,
-      options: Options(
-        headers: {'Content-Type': 'application/octet-stream'},
-        responseType: ResponseType.plain,
-      ),
-    );
-    final text = resp.data is String ? resp.data as String : '${resp.data}';
-    final t = text.trim();
-    if (!t.startsWith('ok:')) return null;
-    final token = t.substring(3).trim();
-    return token.isEmpty ? null : token;
-  }
+  /// 对齐 `http.lua:1784-1818` `upload_md5_file`（内部 `MiniHttp.CustomUpload`）——
+  /// 线格式按真实抓包（2026-10-06）复刻，见 [uploadPresignedFile]：分片
+  /// multipart，`act=info` → `upload_begin` → `upload_step`×N → `upload_end`。
+  /// 成功时 `upload_end` 回 `ok:<确认 token>`，返回去前缀 token；否则 null。
+  Future<String?> uploadDiyPhoto(
+    String uploadUrl,
+    List<int> bytes, {
+    required String fileMd5,
+    required String ext,
+  }) =>
+      uploadPresignedFile(
+        _dio,
+        uploadUrl,
+        bytes,
+        fileMd5: fileMd5,
+        ext: ext,
+      );
 
   /// 确认 DIY 头像：GET `miniw/profile?act=set_usr_header3`。
   ///
-  /// 对齐 `http.lua:1919-1936` `set_user_profile_head3`：
+  /// 对齐 `http.lua:1972-1989` `set_user_profile_head3`：
   /// `act=set_usr_header3&<token>&md5=<文件 md5>&ext=<扩展名>&http_getS1Map()`；
   /// 响应 `{ret:0}` 表示成功。
+  ///
+  /// 同 [uploadPrePhoto]：游戏走 `rpc_string` → `url_addParams`，真实请求必须带
+  /// `uin/apiid/ver/country/lang`（缺了服务端回空 body）。
   Future<bool> confirmDiyHeader({
     required String token,
     required String fileMd5,
@@ -690,8 +696,9 @@ class ProfileClient {
         : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
     final url =
-        '$base/miniw/profile?act=set_usr_header3&$token'
-        '&md5=$fileMd5&ext=$ext&$sign';
+        '$base/miniw/profile?act=set_usr_header3&uin=$uin'
+        '&apiid=$kApiId&ver=$kClientVersionStr&country=CN&lang=0'
+        '&$token&md5=$fileMd5&ext=$ext&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
@@ -713,11 +720,16 @@ class ProfileClient {
   }) async {
     final uploadUrl = await uploadPrePhoto();
     if (uploadUrl == null) return false;
-    final token = await uploadDiyPhoto(uploadUrl, bytes);
-    if (token == null) return false;
     final dot = fileName.lastIndexOf('.');
     final ext = dot >= 0 ? fileName.substring(dot + 1) : 'png';
     final md5 = crypto.md5.convert(bytes).toString();
+    final token = await uploadDiyPhoto(
+      uploadUrl,
+      bytes,
+      fileMd5: md5,
+      ext: ext,
+    );
+    if (token == null) return false;
     return confirmDiyHeader(token: token, fileMd5: md5, ext: ext);
   }
 

@@ -13,6 +13,7 @@ import '../crypto/md5_sign.dart'
     show httpGetParamKey, httpGetParamMd5, httpGetS1Map, httpGetS2Act;
 import '../net/config.dart' show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
+import '../net/photo_upload.dart' show uploadPresignedFile;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
 import 'request_errors.dart' show reportIfFailed;
@@ -1574,23 +1575,23 @@ class DynamicsClient {
 
   /// 直传图片字节到 [uploadUrl]，返回去掉 `ok:` 前缀的 sub_token。
   ///
-  /// 对齐 `dynamicsdatamanager.lua:7630-7665` UploadPicFile：成功时响应体
-  /// `ok:<sub_token>`，其中 sub_token 是 `time=..&auth=..&s2t=..` 形式的
-  /// 查询串，随后原样拼进 `add_posting_pic`。
-  Future<String?> uploadPhotoBytes(String uploadUrl, List<int> bytes) async {
-    final resp = await _dio.post<String>(
-      uploadUrl,
-      data: bytes,
-      options: Options(
-        headers: {'Content-Type': 'application/octet-stream'},
-        responseType: ResponseType.plain,
-      ),
-    );
-    final t = '${resp.data}'.trim();
-    if (!t.startsWith('ok:') && !t.startsWith('ok,')) return null;
-    final token = t.substring(3).trim();
-    return token.isEmpty ? null : token;
-  }
+  /// 线格式按真实抓包（2026-10-06）复刻，见 [uploadPresignedFile]：
+  /// `act=info` → `upload_begin` → `upload_step`×N（每片 128 KiB 的 multipart，
+  /// 字段名 `fileUpload`、filename = 文件 md5）→ `upload_end`，回包
+  /// `ok:token=..&node=..&dir=..` 去掉前缀即 sub_token。
+  Future<String?> uploadPhotoBytes(
+    String uploadUrl,
+    List<int> bytes, {
+    required String fileMd5,
+    required String ext,
+  }) =>
+      uploadPresignedFile(
+        _dio,
+        uploadUrl,
+        bytes,
+        fileMd5: fileMd5,
+        ext: ext,
+      );
 
   /// 登记一张已直传的图片：`act=add_posting_pic`。
   ///
@@ -1609,6 +1610,13 @@ class DynamicsClient {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final parts = <String>[
       'act=add_posting_pic',
+      // 游戏走 ns_http.func.rpc，内部 url_addParams 会补这些通用参数；
+      // 缺了服务端会回空表 `{}`（实测：补上即回 url+ret:0）。
+      'uin=$uin',
+      'apiid=$kApiId',
+      'ver=$kClientVersionStr',
+      'country=$kCountry',
+      'lang=$kLang',
       'seq=$seq',
       'md5=$fileMd5',
       'ext=$ext',
@@ -1626,7 +1634,11 @@ class DynamicsClient {
     final m = decoded.cast<String, Object?>();
     final ret = m['ret'] ?? m['code'];
     if (ret is num && ret != 0) return null;
+    // 实测回包是**平铺**的：{"seq":1,"url":"http://.../xxx.png","ret":0,"msg":"ok"}
+    // （url 不在 data 下），两种形态都兼容。
     final data = m['data'];
+    final flat = _nonEmpty(m['url'] ?? m['pic_url']);
+    if (flat != null) return flat;
     if (data is Map) {
       final u = _nonEmpty(data['url'] ?? data['pic_url']);
       if (u != null) return u;
@@ -1650,7 +1662,8 @@ class DynamicsClient {
   }) async {
     final uploadUrl = await preUploadPhoto();
     if (uploadUrl == null) return null;
-    final subToken = await uploadPhotoBytes(uploadUrl, bytes);
+    final subToken =
+        await uploadPhotoBytes(uploadUrl, bytes, fileMd5: fileMd5, ext: ext);
     if (subToken == null) return null;
     return addPostingPic(
       seq: seq,
