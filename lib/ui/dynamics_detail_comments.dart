@@ -19,6 +19,29 @@ class _CommentPanel extends StatelessWidget {
   final Set<int> expandedReplies;
   final void Function(int) onToggleReplies;
 
+  /// 评论条目键（定位参数组合）、我已点赞的评论、评论点赞增量、置顶评论键。
+  final String Function(DynamicsComment) commentKey;
+  final Set<String> likedCommentKeys;
+  final Map<String, int> commentLikeDelta;
+  final String? topCommentKey;
+
+  /// 评论菜单：条目构造 / 选中回调 / 长按弹菜单。
+  final List<PopupMenuEntry<_CommentAction>> Function(DynamicsComment)
+  commentMenuItems;
+  final void Function(int index, _CommentAction action) onCommentAction;
+  final void Function(int index, Offset globalPosition) onCommentMenu;
+
+  /// 回复菜单：条目构造 / 选中回调 / 长按弹菜单。
+  final List<PopupMenuEntry<_ReplyAction>> Function(DynamicsComment)
+  replyMenuItems;
+  final void Function(DynamicsComment reply, _ReplyAction action) onReplyAction;
+  final void Function(DynamicsComment reply, Offset globalPosition) onReplyMenu;
+
+  /// 本人 uin（回复菜单按作者判定显示）。
+  final int myUin;
+  final Set<String> likedReplyIds;
+  final Map<String, int> replyLikeDelta;
+
   /// 点头像 → 玩家卡片（透传给每条评论）。
   final PlayerCardTap? onAvatarTap;
 
@@ -36,6 +59,19 @@ class _CommentPanel extends StatelessWidget {
     required this.replyLoading,
     required this.expandedReplies,
     required this.onToggleReplies,
+    required this.commentKey,
+    required this.likedCommentKeys,
+    required this.commentLikeDelta,
+    required this.topCommentKey,
+    required this.commentMenuItems,
+    required this.onCommentAction,
+    required this.onCommentMenu,
+    required this.replyMenuItems,
+    required this.onReplyAction,
+    required this.onReplyMenu,
+    required this.myUin,
+    required this.likedReplyIds,
+    required this.replyLikeDelta,
     this.onAvatarTap,
   });
 
@@ -83,6 +119,19 @@ class _CommentPanel extends StatelessWidget {
                 expanded: expandedReplies.contains(i),
                 replyLoading: replyLoading.contains(i),
                 onToggleReplies: () => onToggleReplies(i),
+                liked: likedCommentKeys.contains(commentKey(comments[i])),
+                likeDelta: commentLikeDelta[commentKey(comments[i])] ?? 0,
+                pinned: topCommentKey != null &&
+                    topCommentKey == commentKey(comments[i]),
+                menuItems: () => commentMenuItems(comments[i]),
+                onAction: (a) => onCommentAction(i, a),
+                onLongPressMenu: (pos) => onCommentMenu(i, pos),
+                replyMenuItems: replyMenuItems,
+                onReplyAction: onReplyAction,
+                onReplyMenu: onReplyMenu,
+                myUin: myUin,
+                likedReplyIds: likedReplyIds,
+                replyLikeDelta: replyLikeDelta,
                 onAvatarTap: onAvatarTap,
               );
             },
@@ -164,6 +213,23 @@ class _CommentTile extends StatelessWidget {
   final bool replyLoading;
   final VoidCallback onToggleReplies;
 
+  /// 本人点赞态 / 点赞增量 / 是否置顶。
+  final bool liked;
+  final int likeDelta;
+  final bool pinned;
+
+  final List<PopupMenuEntry<_CommentAction>> Function() menuItems;
+  final void Function(_CommentAction) onAction;
+  final void Function(Offset globalPosition) onLongPressMenu;
+
+  final List<PopupMenuEntry<_ReplyAction>> Function(DynamicsComment)
+  replyMenuItems;
+  final void Function(DynamicsComment reply, _ReplyAction action) onReplyAction;
+  final void Function(DynamicsComment reply, Offset globalPosition) onReplyMenu;
+  final int myUin;
+  final Set<String> likedReplyIds;
+  final Map<String, int> replyLikeDelta;
+
   /// 点头像 → 玩家卡片。
   final PlayerCardTap? onAvatarTap;
 
@@ -173,6 +239,18 @@ class _CommentTile extends StatelessWidget {
     required this.expanded,
     required this.replyLoading,
     required this.onToggleReplies,
+    required this.liked,
+    required this.likeDelta,
+    required this.pinned,
+    required this.menuItems,
+    required this.onAction,
+    required this.onLongPressMenu,
+    required this.replyMenuItems,
+    required this.onReplyAction,
+    required this.onReplyMenu,
+    required this.myUin,
+    required this.likedReplyIds,
+    required this.replyLikeDelta,
     this.onAvatarTap,
   });
 
@@ -186,6 +264,7 @@ class _CommentTile extends StatelessWidget {
       if (comment.createTime > 0) _relative(comment.createTime),
       'IP ${comment.location.isNotEmpty ? comment.location : comment.uin}',
     ].join('  ');
+    final likeCount = comment.likeCount + likeDelta;
     return Padding(
       padding: const EdgeInsets.all(10),
       child: Row(
@@ -210,112 +289,197 @@ class _CommentTile extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.sm),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Flexible(
-                      child: RichTextView(
-                        name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+            // 长按评论 → 与 overflow 同一个菜单
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onLongPressStart: (d) => onLongPressMenu(d.globalPosition),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: RichTextView(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      if (pinned) ...[
+                        const SizedBox(width: AppSpacing.xs),
+                        Icon(
+                          Icons.push_pin,
+                          size: 12,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    meta,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.outline,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text.rich(
+                    TextSpan(
+                      children: buildRichSpans(comment.content, context: context),
+                    ),
+                    style: const TextStyle(fontSize: 13, height: 1.3),
+                  ),
+                  if (comment.replyCount > 0)
+                    InkWell(
+                      onTap: onToggleReplies,
+                      child: Padding(
+                        padding: const EdgeInsets.only(top: 2),
+                        child: Text(
+                          expanded ? '收起回复' : '共${comment.replyCount}条回复',
+                          style: theme.textTheme.labelSmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
                         ),
                       ),
                     ),
-                  ],
-                ),
-                Text(
-                  meta,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text.rich(
-                  TextSpan(
-                    children: buildRichSpans(comment.content, context: context),
-                  ),
-                  style: const TextStyle(fontSize: 13, height: 1.3),
-                ),
-                if (comment.replyCount > 0)
-                  InkWell(
-                    onTap: onToggleReplies,
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 2),
-                      child: Text(
-                        expanded ? '收起回复' : '共${comment.replyCount}条回复',
+                  if (replyLoading)
+                    const Padding(
+                      padding: EdgeInsets.only(top: 6),
+                      child: SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    )
+                  else if (expanded && replies != null) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    if (replies!.isEmpty)
+                      Text(
+                        '暂无回复',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.outline,
                         ),
-                      ),
-                    ),
-                  ),
-                if (replyLoading)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 6),
-                    child: SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
-                  )
-                else if (expanded && replies != null) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  if (replies!.isEmpty)
-                    Text(
-                      '暂无回复',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: theme.colorScheme.outline,
-                      ),
-                    )
-                  else
-                    ...replies!.map(
-                      (r) => Padding(
-                        padding: const EdgeInsets.only(left: AppSpacing.sm, top: AppSpacing.xs),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(Icons.reply, size: 12),
-                            const SizedBox(width: AppSpacing.xs),
-                            Expanded(
-                              child: Text.rich(
-                                TextSpan(
-                                  children: buildRichSpans(
-                                    '${r.nickname ?? r.uin}: ${r.content}',
-                                    context: context,
-                                  ),
-                                ),
-                                style: const TextStyle(
-                                  fontSize: 12,
-                                  height: 1.3,
-                                ),
-                              ),
-                            ),
-                          ],
+                      )
+                    else
+                      ...replies!.map(
+                        (r) => _ReplyRow(
+                          reply: r,
+                          liked: likedReplyIds.contains(r.repId),
+                          likeDelta: replyLikeDelta[r.repId] ?? 0,
+                          menuItems: () => replyMenuItems(r),
+                          onAction: (a) => onReplyAction(r, a),
+                          onLongPressMenu: (pos) => onReplyMenu(r, pos),
                         ),
                       ),
-                    ),
+                  ],
                 ],
-              ],
+              ),
             ),
           ),
-          const SizedBox(width: AppSpacing.sm),
+          const SizedBox(width: AppSpacing.xs),
+          // 点赞数（只读展示）+ 更多操作菜单
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
+                    size: 14,
+                    color: liked
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
+                  ),
+                  if (likeCount > 0) ...[
+                    const SizedBox(width: 3),
+                    Text('$likeCount', style: theme.textTheme.labelSmall),
+                  ],
+                ],
+              ),
+              PopupMenuButton<_CommentAction>(
+                tooltip: dynamicsCommentMenuTooltip,
+                icon: const Icon(Icons.more_horiz, size: 18),
+                padding: EdgeInsets.zero,
+                onSelected: onAction,
+                itemBuilder: (_) => menuItems(),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 一条二级回复：长按 / overflow 菜单（点赞、删除）。
+class _ReplyRow extends StatelessWidget {
+  final DynamicsComment reply;
+  final bool liked;
+  final int likeDelta;
+  final List<PopupMenuEntry<_ReplyAction>> Function() menuItems;
+  final void Function(_ReplyAction action) onAction;
+  final void Function(Offset globalPosition) onLongPressMenu;
+
+  const _ReplyRow({
+    required this.reply,
+    required this.liked,
+    required this.likeDelta,
+    required this.menuItems,
+    required this.onAction,
+    required this.onLongPressMenu,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final likeCount = reply.likeCount + likeDelta;
+    return Padding(
+      padding: const EdgeInsets.only(left: AppSpacing.sm, top: AppSpacing.xs),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Icon(Icons.reply, size: 12),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: GestureDetector(
+              behavior: HitTestBehavior.translucent,
+              onLongPressStart: (d) => onLongPressMenu(d.globalPosition),
+              child: Text.rich(
+                TextSpan(
+                  children: buildRichSpans(
+                    '${reply.nickname ?? reply.uin}: ${reply.content}',
+                    context: context,
+                  ),
+                ),
+                style: const TextStyle(fontSize: 12, height: 1.3),
+              ),
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xs),
           Row(
             children: [
               Icon(
-                Icons.thumb_up_alt_outlined,
-                size: 14,
-                color: theme.colorScheme.outline,
+                liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
+                size: 12,
+                color: liked
+                    ? theme.colorScheme.primary
+                    : theme.colorScheme.outline,
               ),
-              if (comment.likeCount > 0) ...[
-                const SizedBox(width: 3),
-                Text('${comment.likeCount}', style: theme.textTheme.labelSmall),
+              if (likeCount > 0) ...[
+                const SizedBox(width: 2),
+                Text('$likeCount', style: theme.textTheme.labelSmall),
               ],
             ],
+          ),
+          PopupMenuButton<_ReplyAction>(
+            tooltip: dynamicsReplyMenuTooltip,
+            icon: const Icon(Icons.more_horiz, size: 16),
+            padding: EdgeInsets.zero,
+            onSelected: onAction,
+            itemBuilder: (_) => menuItems(),
           ),
         ],
       ),

@@ -7,7 +7,10 @@ class _PostPanel extends StatelessWidget {
   /// 点头像 → 玩家卡片。
   final PlayerCardTap? onAvatarTap;
 
-  const _PostPanel({required this.post, this.onAvatarTap});
+  /// 动态服务客户端；投票卡用它拉取投票信息 / 提交投票。
+  final DynamicsClient? client;
+
+  const _PostPanel({required this.post, this.onAvatarTap, this.client});
 
   @override
   Widget build(BuildContext context) {
@@ -136,7 +139,271 @@ class _PostPanel extends StatelessWidget {
               ),
             ),
           ],
+          // 投票卡（vote_id 非空即投票动态）
+          if (post.voteId != null && post.voteId!.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            _VoteCard(post: post, client: client),
+          ],
           if (post.isLottery) ...[const SizedBox(height: AppSpacing.sm), _LotteryInfo()],
+        ],
+      ),
+    );
+  }
+}
+
+/// 动态投票卡 —— 拉 `get_vote_info` 渲染标题 + 选项，选好后 `vote` 提交再刷新。
+///
+/// 对齐反编译 `dynamicsviewmanager.lua:221-380 UpdateVoteView`：
+/// `mode`=0 单选 / 1 多选（`multi_mode`=1 才允许多选），选项来自
+/// `vote_info.opt_static`，票数来自 `vote_info.opts[].vote_cnt`；提交走
+/// `dynamicsdatamanager.lua:4617-4655 ReqGetVoteInfo` 同族接口 `vote`。
+class _VoteCard extends StatefulWidget {
+  final DynamicsPost post;
+  final DynamicsClient? client;
+
+  const _VoteCard({required this.post, this.client});
+
+  @override
+  State<_VoteCard> createState() => _VoteCardState();
+}
+
+class _VoteCardState extends State<_VoteCard> {
+  DynamicsVoteInfo? _info;
+  bool _loading = true;
+  bool _failed = false;
+  bool _submitting = false;
+  final Set<int> _picked = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  /// 是否多选（mode=1 且 multi_mode=1；其余按单选）。
+  bool get _multi =>
+      (_info?.mode ?? 0) == 1 && (_info?.multiMode ?? 0) == 1;
+
+  Future<void> _load() async {
+    final client = widget.client;
+    final voteId = widget.post.voteId;
+    if (client == null || voteId == null || voteId.isEmpty) {
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _failed = client != null;
+        });
+      }
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _failed = false;
+      });
+    }
+    try {
+      final info = await client.getVoteInfo(voteId);
+      if (!mounted) return;
+      setState(() {
+        _info = info;
+        _loading = false;
+        _failed = info == null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _loading = false;
+        _failed = true;
+      });
+    }
+  }
+
+  /// 点选项：单选替换、多选增删；不可选时不动。
+  void _pickOption(int index) {
+    setState(() {
+      if (_multi) {
+        if (!_picked.remove(index)) _picked.add(index);
+      } else {
+        _picked
+          ..clear()
+          ..add(index);
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    final client = widget.client;
+    final info = _info;
+    if (client == null || info == null || _picked.isEmpty || _submitting) {
+      return;
+    }
+    final opts = (_picked.toList()..sort()).join(',');
+    setState(() => _submitting = true);
+    try {
+      final ack = await client.vote(
+        voteId: info.voteId.isNotEmpty
+            ? info.voteId
+            : (widget.post.voteId ?? ''),
+        opts: opts,
+        pid: widget.post.pid,
+      );
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      if (ack.ok) {
+        _picked.clear();
+        await _load(); // 刷新票数
+      } else {
+        _showTip(ack.message.isNotEmpty ? ack.message : '投票失败');
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _submitting = false);
+      _showTip('投票失败: $e');
+    }
+  }
+
+  void _showTip(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final info = _info;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.secondaryContainer,
+        borderRadius: AppRadius.cardR,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.how_to_vote_outlined,
+                size: 18,
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  info == null || info.title.isEmpty ? '投票' : info.title,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: theme.colorScheme.onSecondaryContainer,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (_loading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+              child: Center(
+                child: SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            )
+          else if (widget.client == null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              '登录后可参与投票',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+          ] else if (_failed || info == null || info.options.isEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '投票信息加载失败',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+                TextButton(onPressed: _load, child: const Text('重试')),
+              ],
+            ),
+          ] else ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _multi ? '可多选，选好后提交' : '单选，点选后提交',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: theme.colorScheme.onSecondaryContainer,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            ...info.options.map((o) {
+              final selected = _picked.contains(o.index);
+              return Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: InkWell(
+                  borderRadius: AppRadius.chipR,
+                  onTap: () => _pickOption(o.index),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? theme.colorScheme.surfaceContainerHighest
+                          : theme.colorScheme.surface,
+                      borderRadius: AppRadius.chipR,
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          selected
+                              ? Icons.check_circle
+                              : (_multi
+                                    ? Icons.check_box_outline_blank
+                                    : Icons.radio_button_unchecked),
+                          size: 18,
+                          color: selected
+                              ? theme.colorScheme.primary
+                              : theme.colorScheme.outline,
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: Text(
+                            o.text.isEmpty ? '选项 ${o.index}' : o.text,
+                          ),
+                        ),
+                        if (o.count > 0)
+                          Text(
+                            '${o.count}票',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: theme.colorScheme.outline,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+            Align(
+              alignment: Alignment.centerRight,
+              child: FilledButton(
+                onPressed:
+                    (_picked.isEmpty || _submitting) ? null : _submit,
+                child: Text(_submitting ? '提交中…' : '投票'),
+              ),
+            ),
+          ],
         ],
       ),
     );
