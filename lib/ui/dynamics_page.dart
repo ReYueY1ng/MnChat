@@ -5,12 +5,13 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../core/services/dynamics.dart';
 import '../core/services/msg_box.dart' show MsgBoxEntry;
 import '../state/providers.dart';
+import 'dynamics_notice_page.dart' show DynamicsNoticePage;
 import 'mail_page.dart' show MailPage, MailSelection;
 import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
 import 'theme/app_tokens.dart';
 
-/// 动态页 —— 瀑布流信息流（热门/关注/官方/我的）。
+/// 动态页 —— 瀑布流信息流（热门/关注/同城/官方/我的）。
 ///
 /// 每个分类独立缓存：切换分类不清空其它分类已加载内容，
 /// 返回时直接显示缓存并后台静默刷新。
@@ -41,7 +42,7 @@ class _TabCache {
 class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   DynamicsClient? _client;
 
-  /// 当前 tab：0 热门 / 1 关注 / 2 官方 / 3 我的。默认热门（最左）。
+  /// 当前 tab：0 热门 / 1 关注 / 2 同城 / 3 官方 / 4 我的。默认热门（最左）。
   int _tab = 0;
   final List<_TabCache> _caches =
       List.generate(_feedTypes.length, (_) => _TabCache());
@@ -50,10 +51,20 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   int _reqSeq = 0;
   final ScrollController _scroll = ScrollController();
 
-  static const _feedTypes = [DynamicsFeedType.hot, DynamicsFeedType.recommend, DynamicsFeedType.official, DynamicsFeedType.mine];
+  // 同城（city / get_city_posting2）插在「关注」与「官方」之间，
+  // 对齐游戏动态大厅的 tab（dynamicsinfocard.lua tab_type：official=4,
+  // city=3），客户端已为 city 发出 from/ct 参数。
+  static const _feedTypes = [
+    DynamicsFeedType.hot,
+    DynamicsFeedType.recommend,
+    DynamicsFeedType.city,
+    DynamicsFeedType.official,
+    DynamicsFeedType.mine,
+  ];
   static const _feedLabels = [
     '热门',
     '关注',
+    '同城',
     '官方',
     '我的',
   ];
@@ -207,6 +218,27 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                   ),
                 ),
               ),
+            ),
+            // 溢出菜单：动态通知页（get_channel_msg_list 频道通知列表）。
+            // 与上面的铃铛不同 —— 铃铛进消息中心的「动态互动」，这里进独立页。
+            PopupMenuButton<String>(
+              tooltip: '更多',
+              icon: const Icon(Icons.more_vert),
+              onSelected: (value) {
+                if (value == 'notice') {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const DynamicsNoticePage(),
+                    ),
+                  );
+                }
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem<String>(
+                  value: 'notice',
+                  child: Text('动态通知页'),
+                ),
+              ],
             ),
             if (!_singleAuthor)
               IconButton(

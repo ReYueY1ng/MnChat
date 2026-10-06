@@ -1,21 +1,26 @@
+import 'package:drift/native.dart';
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/dynamics.dart';
+import 'package:mnchat/core/storage/app_database.dart';
 import 'package:mnchat/state/providers.dart';
+import 'package:mnchat/ui/dynamics_detail_page.dart';
+import 'package:mnchat/ui/dynamics_topic_page.dart';
 import 'package:mnchat/ui/theme/app_theme.dart';
 import 'package:mnchat/ui/widgets/avatar_view.dart';
 import 'package:mnchat/ui/widgets/dynamics_card.dart';
 import 'package:mnchat/ui/widgets/rich_text_view.dart';
 
-/// 动态卡片头部回归测试。
+/// 动态卡片回归测试。
 ///
 /// - 昵称 / 时间文字块与头像垂直居中对齐（行仍为 center）；
 /// - 「关注」按钮钉在行右上角（顶边与行顶边对齐、右缘贴行右缘）；
-/// - 作者已是好友（bit3=8）或已被我关注（bit4=16）时不再显示「关注」按钮。
+/// - 作者已是好友（bit3=8）或已被我关注（bit4=16）时不再显示「关注」按钮；
+/// - 内容类型：话题 chips / 投票标记 / 视频标记。
 void main() {
-  const post = DynamicsPost(
+  const basePost = DynamicsPost(
     pid: '273640665_1787757890',
     uin: 273640665,
     content: '测试动态正文',
@@ -24,19 +29,23 @@ void main() {
   );
 
   /// pump 动态卡片；[contacts] 注入联系人流（默认空 = 未加载）。
+  /// [db] 传入时额外覆写 databaseProvider（点击进话题页需要）。
   Future<void> pumpCard(
     WidgetTester tester, {
     List<Contact> contacts = const <Contact>[],
     bool isMine = false,
+    DynamicsPost? post,
+    AppDatabase? db,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
           contactsProvider.overrideWith((_) => Stream.value(contacts)),
+          if (db != null) databaseProvider.overrideWithValue(db),
         ],
         child: MaterialApp(
           theme: buildAppTheme(Brightness.light),
-          home: Scaffold(body: DynamicsCard(post: post, isMine: isMine)),
+          home: Scaffold(body: DynamicsCard(post: post ?? basePost, isMine: isMine)),
         ),
       ),
     );
@@ -124,5 +133,98 @@ void main() {
   testWidgets('我的动态：不显示关注按钮', (tester) async {
     await pumpCard(tester, isMine: true);
     expect(find.text('关注'), findsNothing);
+  });
+
+  testWidgets('话题：带 topics 的动态显示 #标题 chips', (tester) async {
+    const withTopics = DynamicsPost(
+      pid: '273640665_1787757891',
+      uin: 273640665,
+      content: '带话题的动态',
+      nickname: '测试昵称',
+      location: '广东',
+      topics: [
+        DynamicsTopic(topicId: 'o:21', title: '迷你世界'),
+        DynamicsTopic(topicId: 'o:22', title: '创造'),
+      ],
+    );
+    await pumpCard(tester, post: withTopics);
+    expect(tester.takeException(), isNull);
+    expect(find.text('#迷你世界'), findsOneWidget);
+    expect(find.text('#创造'), findsOneWidget);
+
+    // 无话题的动态不渲染任何 chip。
+    await pumpCard(tester);
+    expect(find.text('#迷你世界'), findsNothing);
+  });
+
+  testWidgets('话题：无标题的字符串数组 topic_list 用 topicId 兜底', (tester) async {
+    const keyOnly = DynamicsPost(
+      pid: '273640665_1787757895',
+      uin: 273640665,
+      content: '纯话题 key 动态',
+      nickname: '测试昵称',
+      location: '广东',
+      // 真实服务器形态：topic_list 为纯字符串 key 数组，无 title。
+      topics: [DynamicsTopic(topicId: 'u:1813749331:1704717010')],
+    );
+    await pumpCard(tester, post: keyOnly);
+    expect(tester.takeException(), isNull);
+    expect(find.text('#u:1813749331:1704717010'), findsOneWidget);
+  });
+
+  testWidgets('话题 chip 可点击：进话题页而不是动态详情页', (tester) async {
+    const withTopics = DynamicsPost(
+      pid: '273640665_1787757892',
+      uin: 273640665,
+      content: '带话题的动态',
+      nickname: '测试昵称',
+      location: '广东',
+      topics: [DynamicsTopic(topicId: 'o:21', title: '迷你世界')],
+    );
+    final db = AppDatabase(NativeDatabase.memory());
+    addTearDown(db.close);
+    await pumpCard(tester, post: withTopics, db: db);
+
+    await tester.tap(find.text('#迷你世界'));
+    await tester.pumpAndSettle();
+
+    final page = tester.widget<DynamicsTopicPage>(
+      find.byType(DynamicsTopicPage),
+    );
+    expect(page.topicId, 'o:21');
+    expect(page.topicTitle, '迷你世界');
+    expect(find.byType(DynamicsDetailPage), findsNothing);
+  });
+
+  testWidgets('投票：voteId 非空显示「投票」标记', (tester) async {
+    const withVote = DynamicsPost(
+      pid: '273640665_1787757893',
+      uin: 273640665,
+      content: '投票动态',
+      nickname: '测试昵称',
+      location: '广东',
+      voteId: 'v_123',
+    );
+    await pumpCard(tester, post: withVote);
+    expect(find.text('投票'), findsOneWidget);
+
+    await pumpCard(tester);
+    expect(find.text('投票'), findsNothing);
+  });
+
+  testWidgets('视频：videoResId 非空显示「视频」标记', (tester) async {
+    const withVideo = DynamicsPost(
+      pid: '273640665_1787757894',
+      uin: 273640665,
+      content: '视频动态',
+      nickname: '测试昵称',
+      location: '广东',
+      videoResId: 'res_9',
+    );
+    await pumpCard(tester, post: withVideo);
+    expect(find.text('视频'), findsOneWidget);
+
+    await pumpCard(tester);
+    expect(find.text('视频'), findsNothing);
   });
 }

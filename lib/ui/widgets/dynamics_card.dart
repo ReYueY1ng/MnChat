@@ -7,6 +7,7 @@ import '../../core/models/messages.dart';
 import '../../core/services/dynamics.dart';
 import '../../state/providers.dart';
 import '../dynamics_detail_page.dart';
+import '../dynamics_topic_page.dart';
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'session_player_info_popup.dart';
@@ -15,7 +16,8 @@ import 'image_viewer.dart';
 import 'rich_text_view.dart';
 import '../../core/services/image_disk_cache.dart';
 
-/// 动态卡片 —— 左上头像+徽标+昵称 / 相对时间·IP属地 / 内容(查看全文) / 图片 / 附加信息 / 右下操作区。
+/// 动态卡片 —— 左上头像+徽标+昵称 / 相对时间·IP属地 / 内容(查看全文) / 话题 chips /
+/// 图片 / 视频·投票·抽奖标记 / 附加信息 / 右下操作区。
 class DynamicsCard extends ConsumerWidget {
   final DynamicsPost post;
 
@@ -126,8 +128,23 @@ class DynamicsCard extends ConsumerWidget {
                 style: const TextStyle(fontSize: 14, height: 1.4),
                 onViewFull: () => _openDetail(context),
               ),
+              // 话题 chips（post.topics → 可点击 `#标题`）
+              if (post.topics.isNotEmpty) _TopicChips(topics: post.topics),
               // 图片（按宽高比）
               if (post.pics.isNotEmpty) _Images(pics: post.pics),
+              // 视频动态标记（`video_res_id` 非空即视频）。游戏 contentType.video=4，
+              // 见 dynamicsinfocard.lua:33-48 类型枚举 / :671-725 卡片布局。
+              if (post.videoResId != null)
+                const _ChipLabel(
+                  icon: Icons.play_circle_outline,
+                  text: '视频',
+                ),
+              // 投票动态标记（`vote_id` 非空即投票）。游戏 contentType.vote=5。
+              if (post.voteId != null)
+                const _ChipLabel(
+                  icon: Icons.how_to_vote_outlined,
+                  text: '投票',
+                ),
               // 附加信息：链接/作品卡
               if (post.linkName != null && post.linkName!.isNotEmpty)
                 _LinkCard(post: post),
@@ -428,6 +445,71 @@ class _LinkCard extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 话题 chips —— `post.topics` 每项渲染为可点击的 `#标题`（无标题时用 `#topicId`）。
+///
+/// 对齐 dynamicsinfocard.lua 的 content 区话题展示；点击进入话题页
+/// [DynamicsTopicPage]。chip 内层 InkWell 自带手势，卡片外层的「进详情」
+/// InkWell 不会抢走点击（内层手势优先赢得竞技场）。
+class _TopicChips extends StatelessWidget {
+  final List<DynamicsTopic> topics;
+
+  const _TopicChips({required this.topics});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    // 宽松：标题与 id 皆空才跳过。`topic_list` 常是无标题的字符串数组
+    // （如 ["u:1813749331:1704717010"]），此时用 topicId 原文兜底，不给空白 chip。
+    final shown = [
+      for (final t in topics)
+        if (t.title.isNotEmpty || t.topicId.isNotEmpty) t,
+    ];
+    if (shown.isEmpty) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.only(top: AppSpacing.xs),
+      child: Wrap(
+        spacing: AppSpacing.xs,
+        runSpacing: AppSpacing.xs,
+        children: [
+          for (final t in shown)
+            Material(
+              color: theme.colorScheme.secondaryContainer,
+              borderRadius: AppRadius.chipR,
+              child: InkWell(
+                borderRadius: AppRadius.chipR,
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => DynamicsTopicPage(
+                      topicId: t.topicId,
+                      topicTitle: t.title,
+                    ),
+                  ),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm,
+                    vertical: 3,
+                  ),
+                  child: Text(
+                    _label(t),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: theme.colorScheme.onSecondaryContainer,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// chip 文案：有标题用 `#标题`；否则退回话题 id（服务端 key，点击仍可进话题流）。
+  String _label(DynamicsTopic t) =>
+      t.title.isNotEmpty ? '#${t.title}' : '#${t.topicId}';
 }
 
 class _ChipLabel extends StatelessWidget {
