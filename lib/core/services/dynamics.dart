@@ -9,7 +9,8 @@ import 'dart:convert' show jsonDecode, jsonEncode;
 
 import 'package:dio/dio.dart';
 
-import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
+import '../crypto/md5_sign.dart'
+    show httpGetParamKey, httpGetParamMd5, httpGetS1Map, httpGetS2Act;
 import '../net/config.dart' show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart' show createDio;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
@@ -54,6 +55,7 @@ class FeedResult {
 enum DynamicsFeedType {
   recommend('推荐', 'get_friend_posting'),
   hot('热门', 'get_hot_posting2'),
+  city('同城', 'get_city_posting2'),
   official('官方', 'get_official_posting'),
   mine('我的', 'get_posting_list');
 
@@ -122,6 +124,21 @@ class DynamicsPost {
   /// 是否抽奖/投票。
   final bool isLottery;
 
+  /// 可见范围（对齐反编译 `DynamicConstant.AUTH`，dynamicsdatamanager.lua:94）。
+  final int authSee;
+
+  /// 视频资源 id（`video_res_id`）；非空即视频动态。
+  final String? videoResId;
+
+  /// 关联话题列表（`topic_list`）。
+  final List<DynamicsTopic> topics;
+
+  /// 抽奖 id（`lottery_id`）；非空即抽奖动态。
+  final String? lotteryId;
+
+  /// 投票 id（`vote_id` / 转发投票 `share_vote`）；非空即投票动态。
+  final String? voteId;
+
   const DynamicsPost({
     required this.pid,
     required this.uin,
@@ -140,6 +157,11 @@ class DynamicsPost {
     this.linkName,
     this.linkAuthor,
     this.isLottery = false,
+    this.authSee = 0,
+    this.videoResId,
+    this.topics = const [],
+    this.lotteryId,
+    this.voteId,
   });
 
   static int _int(Map<String, Object?> m, List<String> keys) {
@@ -219,6 +241,11 @@ class DynamicsPost {
       linkName: linkName,
       linkAuthor: linkAuthor,
       isLottery: m['com_lottery'] == 1 || m['lottery_id'] != null,
+      authSee: _pickInt(m, ['auth_see', 'authSee']),
+      videoResId: _nonEmpty(m['video_res_id'] ?? m['videoResId']),
+      topics: _parseTopicList(m['topic_list']),
+      lotteryId: _nonEmpty(m['lottery_id'] ?? m['lotteryId']),
+      voteId: _nonEmpty(m['vote_id'] ?? m['share_vote'] ?? m['voteId']),
     );
   }
 
@@ -245,7 +272,57 @@ class DynamicsPost {
         linkName: linkName,
         linkAuthor: linkAuthor,
         isLottery: isLottery,
+        authSee: authSee,
+        videoResId: videoResId,
+        topics: topics,
+        lotteryId: lotteryId,
+        voteId: voteId,
       );
+}
+
+/// 宽松 URL 解码：脏/不完整百分号转义（实测服务端会下发）保持原样，绝不抛。
+String _lenientDecode(String s) {
+  try {
+    return Uri.decodeComponent(s);
+  } catch (_) {
+    return s;
+  }
+}
+
+/// 非空字符串；缺省 / 空白 / 字面 `"null"` → null。
+String? _nonEmpty(Object? v) {
+  final s = v?.toString().trim();
+  if (s == null || s.isEmpty || s == 'null') return null;
+  return s;
+}
+
+/// 解析 `topic_list` → 话题列表；脏数据只跳过。
+///
+/// 动态条目上的 `topic_list` 实测是**字符串数组**（如 `["u:1813749331:1704717010"]`），
+/// 而 `get_topic_list` 返回的是对象数组（`{topic_id, title}`）；两种都支持。
+List<DynamicsTopic> _parseTopicList(Object? raw) {
+  if (raw is List) {
+    final out = <DynamicsTopic>[];
+    for (final e in raw) {
+      if (e is Map) {
+        final t = DynamicsTopic.fromItem(e.cast<String, Object?>());
+        if (t != null) out.add(t);
+      } else if (e is String && e.trim().isNotEmpty) {
+        out.add(DynamicsTopic(topicId: e.trim()));
+      }
+    }
+    return out;
+  }
+  if (raw is Map) {
+    final out = <DynamicsTopic>[];
+    for (final e in raw.entries) {
+      if (e.value is! Map) continue;
+      final t = DynamicsTopic.fromItem((e.value as Map).cast<String, Object?>());
+      if (t != null) out.add(t);
+    }
+    return out;
+  }
+  return const [];
 }
 
 /// 一条评论。
@@ -275,6 +352,17 @@ class DynamicsComment {
   /// 评论 last_time（回复/分页游标用）。
   final int lastTime;
 
+  /// 回复条目 id（`rep_id`）；一级评论为 0/空。
+  ///
+  /// 回复的点赞/删除接口（prize_comment_rep / delete_*_comment_rep）用它定位。
+  final String repId;
+
+  /// 「回复给谁」的目标 uin：有被回复者（`op_uin`）时为它，否则为评论作者。
+  ///
+  /// 注意与线上的 [opUin] 区分：`com_op_uin` 定位参数要用 [opUin] 原值，
+  /// 而 `add_comment_rep` 的 `op_uin` 参数要用本值。
+  int get replyTargetUin => opUin != 0 ? opUin : uin;
+
   const DynamicsComment({
     required this.uin,
     required this.content,
@@ -289,6 +377,7 @@ class DynamicsComment {
     this.pidCt = 0,
     this.opUin = 0,
     this.lastTime = 0,
+    this.repId = '',
   });
 
   /// 从多个候选 key 取首个数值。
@@ -313,8 +402,8 @@ class DynamicsComment {
         ? rawRep.toInt()
         : int.tryParse('$rawRep') ?? 0;
     final authorUin = repUin != 0 ? repUin : uin;
-    // content 是 URL 编码（UTF-8），需解码。
-    final content = Uri.decodeComponent(m['content']?.toString() ?? '');
+    // content 是 URL 编码（UTF-8），需解码（脏转义必须降级为原文，不能抛）。
+    final content = _lenientDecode(m['content']?.toString() ?? '');
     if (content.isEmpty) return null;
     int time = 0;
     // 评论/回复时间：评论用 last_time；回复用 rep_time。
@@ -354,9 +443,11 @@ class DynamicsComment {
       location: m['location']?.toString() ?? '',
       pidUin: pidUin,
       pidCt: pidCt,
-      // 回复/评论接口的 com_op_uin 通常=评论作者；缺省用作者 uin 兜底
-      opUin: opUin != 0 ? opUin : authorUin,
+      // 保持服务端原值：一级评论实测下发 op_uin=0（不能拿作者 uin 兜底，
+      // 否则 get_comment_rep / prize_comment 的定位参数就对不上了 —— live 探针实测）。
+      opUin: opUin,
       lastTime: _int(m, ['last_time', 'com_last_time']),
+      repId: m['rep_id']?.toString() ?? '',
     );
   }
 
@@ -379,6 +470,7 @@ class DynamicsComment {
         pidCt: pidCt,
         opUin: opUin,
         lastTime: lastTime,
+        repId: repId,
       );
 }
 
@@ -464,13 +556,7 @@ class DynamicsNotice {
     );
   }
 
-  static String _safeDecode(String s) {
-    try {
-      return Uri.decodeComponent(s);
-    } catch (_) {
-      return s;
-    }
-  }
+  static String _safeDecode(String s) => _lenientDecode(s);
 }
 
 /// 写操作统一确认（like_posting / add_posting / delete_posting / set_top /
@@ -492,20 +578,45 @@ class DynamicsAck {
   /// 原始 data 载荷（非 Map 或缺失时为空 map）。
   final Map<String, Object?> _data;
 
+  /// 响应 `data` 的**原值**（可能是 List / Map / 标量）。
+  ///
+  /// 实测：`get_topic_list` / `get_post` 类接口的 `data` 直接就是数组，
+  /// 只靠 [_data]（仅保留 Map）会把整个载荷丢掉。
+  final Object? _rawData;
+
   /// 完整响应 map（供红点等顶层字段兜底）；不外泄。
   final Map<String, Object?> _raw;
 
   const DynamicsAck({this.code = 0, this.message = ''})
       : _data = const {},
+        _rawData = null,
         _raw = const {};
 
-  const DynamicsAck._full(this.code, this.message, this._data, this._raw);
+  const DynamicsAck._full(
+    this.code,
+    this.message,
+    this._data,
+    this._rawData,
+    this._raw,
+  );
 
   /// 业务码为 0（或缺失/非数值）即视为成功。
   bool get ok => code == 0;
 
   /// create_vote 返回的投票信息（`data.vote_info`）；其它写接口为 null。
   DynamicsVoteInfo? get voteInfo => DynamicsVoteInfo.fromMap(_data);
+
+  /// share_posting 返回的新转发数（`data.share`）；其它写接口为 null。
+  int? get shareCount {
+    final n = _pickInt(_data, ['share', 'share_count']);
+    return n == 0 ? null : n;
+  }
+
+  /// 响应 `data` 载荷（非 Map 或缺失时为空 map）；供投票 / 红点等 Map 型响应取用。
+  Map<String, Object?> get data => _data;
+
+  /// 响应 `data` 原值（保持 List / Map 形态）；供话题等列表型响应取用。
+  Object? get rawData => _rawData;
 
   /// 从响应解码结果构造；脏/缺省数据降级，绝不抛。
   static DynamicsAck fromMap(Map<String, Object?> m) {
@@ -516,40 +627,62 @@ class DynamicsAck {
       raw is num ? raw.toInt() : 0,
       msg?.toString() ?? '',
       data is Map ? data.cast<String, Object?>() : const {},
+      data,
       m,
     );
   }
 }
 
-/// 话题条目（search_topic 响应 data.topic_list / data.list 的一项）。
+/// 话题条目（search_topic / get_topic_list / get_hot_topic2 响应的一项）。
+///
+/// [topicId] 是**字符串**（真实服务端形态：官方话题 `"o:21"`、玩家话题
+/// `"u:<uin>:<ct>"`）—— 实测 `get_topic_list` 返回的就是字符串，不是数字。
 class DynamicsTopic {
-  /// 话题 id（topic_id/topicId/id）。
-  final int topicId;
+  /// 话题 id（`topic_id` / `topicId` / `id`）。
+  final String topicId;
 
   /// 话题标题。
   final String title;
 
-  const DynamicsTopic({this.topicId = 0, this.title = ''});
+  const DynamicsTopic({this.topicId = '', this.title = ''});
 
-  /// 解析 data 中的话题列表；候选键 topic_list/list；脏条目跳过。
-  static List<DynamicsTopic> parseList(Map<String, Object?> data) {
-    final raw = data['topic_list'] ?? data['list'];
-    if (raw is! List) return const [];
+  /// 解析 data 中的话题列表；候选形态三种：
+  ///   - 直接就是数组（实测 `get_topic_list` 的 `data` 即 `[{topic_id,title}]`）；
+  ///   - `{topic_list: [...]}` / `{list: [...]}`；
+  ///   - `{<id>: {...}}` 映射。
+  /// 脏条目跳过。
+  static List<DynamicsTopic> parseList(Object? data) {
+    final raw = data is Map ? (data['topic_list'] ?? data['list']) : data;
     final out = <DynamicsTopic>[];
-    for (final e in raw) {
-      if (e is! Map) continue;
-      final t = fromItem(e.cast<String, Object?>());
-      if (t != null) out.add(t);
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is Map) {
+          final t = fromItem(e.cast<String, Object?>());
+          if (t != null) out.add(t);
+        } else if (e is String && e.trim().isNotEmpty) {
+          out.add(DynamicsTopic(topicId: e.trim()));
+        }
+      }
+    } else if (raw is Map) {
+      for (final e in raw.entries) {
+        if (e.value is! Map) continue;
+        final t = fromItem((e.value as Map).cast<String, Object?>());
+        if (t != null) out.add(t);
+      }
     }
     return out;
   }
 
   /// 单条话题；id 与标题皆空视为脏数据 → null。
   static DynamicsTopic? fromItem(Map<String, Object?> m) {
-    final id = _pickInt(m, ['topic_id', 'topicId', 'id']);
+    final raw = m['topic_id'] ?? m['topicId'] ?? m['id'];
+    final id = raw?.toString().trim() ?? '';
     final title = m['title']?.toString() ?? m['topic_name']?.toString() ?? '';
-    if (id == 0 && title.isEmpty) return null;
-    return DynamicsTopic(topicId: id, title: title);
+    if ((id.isEmpty || id == 'null' || id == '0') && title.isEmpty) return null;
+    return DynamicsTopic(
+      topicId: id == 'null' ? '' : id,
+      title: title,
+    );
   }
 }
 
@@ -649,6 +782,138 @@ class DynamicsVoteInfo {
   }
 }
 
+/// 动态可见范围（对齐反编译 `DynamicConstant.AUTH`，dynamicsdatamanager.lua:94-100）。
+class DynamicsAuth {
+  /// 公开。
+  static const int all = 0;
+
+  /// 仅粉丝。
+  static const int onlyFans = 1;
+
+  /// 主页隐藏。
+  static const int homeHide = 2;
+
+  /// 仅自己。
+  static const int onlySelf = 3;
+
+  /// 仅家族。
+  static const int onlyFamily = 4;
+
+  /// 可见范围 id → 中文名（与发布页 / 详情页菜单一致）。
+  static const Map<int, String> labels = {
+    all: '公开',
+    onlyFans: '仅粉丝',
+    homeHide: '主页隐藏',
+    onlySelf: '仅自己',
+    onlyFamily: '仅家族',
+  };
+
+  /// `setPostingAuth` 的 `ptype`：可见范围 / 评论权限 / 主页展示。
+  static const String ptypeSee = 'see';
+  static const String ptypeRep = 'rep';
+  static const String ptypeHome = 'home';
+
+  /// 未知 id 回退「公开」（与游戏 `auth_see` 缺省 0 一致）。
+  static String label(int v) => labels[v] ?? labels[all]!;
+}
+
+/// 动态权限（`get_redpoint_notice_info` 的 `posting_edit_info` 之外，评论
+/// 权限 / 主页展示开关）；宽松解析，缺省 0。
+class DynamicsLottery {
+  /// 抽奖 id（`lottery_id`）。
+  final String lotteryId;
+
+  /// 奖品 id / 数量 / 类型（`item_id` / `item_num` / `item_type`）。
+  final int itemId;
+  final int itemNum;
+  final int itemType;
+
+  /// 开奖人数（`select_num`）与参与消耗（`cost_num`）。
+  final int selectNum;
+  final int costNum;
+
+  /// 开奖时间（秒）。
+  final int lotteryTime;
+
+  /// 任务 id 串（`task`，逗号分隔）。
+  final String task;
+
+  /// 状态（`status`）：2/3 为可展示（进行中 / 已结束，见
+  /// `dynamicsinfocardlottery.lua:34`）。
+  final int status;
+
+  /// 参与人数（`join_count` / `join_num`）。
+  final int joinCount;
+
+  /// 发起人 uin（`uin` / `author_uin`）。
+  final int uin;
+
+  /// 是否本人发起（`is_author`）。
+  final bool isAuthor;
+
+  const DynamicsLottery({
+    this.lotteryId = '',
+    this.itemId = 0,
+    this.itemNum = 0,
+    this.itemType = 0,
+    this.selectNum = 0,
+    this.costNum = 0,
+    this.lotteryTime = 0,
+    this.task = '',
+    this.status = 0,
+    this.joinCount = 0,
+    this.uin = 0,
+    this.isAuthor = false,
+  });
+
+  /// 进行中 / 已结束（可展示）。
+  bool get displayable => status == 2 || status == 3;
+
+  /// 解析 `posting_lottery_query_lottery` 的 `data.list` / 单条对象。
+  ///
+  /// 载荷可能是 `{lottery_id: {...}}` 映射、`[{...}]` 数组、或
+  /// `{list: [...]}`；三种都接受，脏条目跳过。
+  static List<DynamicsLottery> parseList(Object? data) {
+    final raw = data is Map ? (data['list'] ?? data['lottery_list'] ?? data) : data;
+    final out = <DynamicsLottery>[];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is! Map) continue;
+        final l = fromItem(e.cast<String, Object?>());
+        if (l != null) out.add(l);
+      }
+    } else if (raw is Map) {
+      for (final e in raw.entries) {
+        if (e.value is! Map) continue;
+        final l = fromItem((e.value as Map).cast<String, Object?>());
+        if (l != null) out.add(l);
+      }
+    }
+    return out;
+  }
+
+  /// 单条抽奖；无 lottery_id → null。
+  static DynamicsLottery? fromItem(Map<String, Object?> m) {
+    final id = _nonEmpty(m['lottery_id'] ?? m['lotteryId'] ?? m['id']);
+    if (id == null) return null;
+    final isAuthor = m['is_author'];
+    return DynamicsLottery(
+      lotteryId: id,
+      itemId: _pickInt(m, ['item_id', 'itemId']),
+      itemNum: _pickInt(m, ['item_num', 'itemNum']),
+      itemType: _pickInt(m, ['item_type', 'itemType']),
+      selectNum: _pickInt(m, ['select_num', 'selectNum']),
+      costNum: _pickInt(m, ['cost_num', 'costNum']),
+      lotteryTime: _pickInt(m, ['lottery_time', 'lotteryTime']),
+      task: m['task']?.toString() ?? '',
+      status: _pickInt(m, ['status', 'state']),
+      joinCount: _pickInt(m, ['join_count', 'join_num', 'joinCount']),
+      uin: _pickInt(m, ['uin', 'author_uin']),
+      isAuthor: isAuthor == true || isAuthor == 1 || isAuthor == '1',
+    );
+  }
+}
+
 /// 动态红点（get_redpoint_notice_info）。
 ///
 /// 字段可直接在响应顶层，也可包在 `data` 下；缺省 → 0。
@@ -740,7 +1005,8 @@ class DynamicsClient {
       's2t=$s2t',
       'encrypt_ver=3',
     ];
-    final p = path.endsWith('/') ? path : path;
+    final tag = path.startsWith('miniw/') ? path : 'miniw/$path';
+    final p = tag.endsWith('/') ? tag : tag;
     return '$base/$p?${parts.join('&')}&md5=$md5';
   }
 
@@ -764,7 +1030,8 @@ class DynamicsClient {
       's2t=$s2t',
       'encrypt_ver=3',
     ];
-    final p = path.endsWith('/') ? path : '$path/';
+    final tagged = path.startsWith('miniw/') ? path : 'miniw/$path';
+    final p = tagged.endsWith('/') ? tagged : '$tagged/';
     return '$base/$p?${parts.join('&')}&md5=$md5';
   }
 
@@ -792,19 +1059,19 @@ class DynamicsClient {
   }
 
   /// 拉动态列表。响应 `{ret:0, data:{list:[...], role_info_list:[...], ct:[游标]}}`。
-  /// [tag] 非空时走分类标签接口 `get_posting_by_tag`（子分类 tab 用）。
+  /// [tag] 非空时走分类标签接口 `get_posting_by_tag`（子分类 / 话题 tab 用）。
   Future<FeedResult> pullPostings(
     DynamicsFeedType type, {
     String from = 'null',
     int ct = 0,
-    int? tag,
+    String? tag,
     int? opUin,
   }) async {
     final act = tag != null ? 'get_posting_by_tag' : type.act;
     final params = <String, String>{};
     if (tag != null) {
-      // get_posting_by_tag: act, tag, from, ct（反编译 dynamicsdatamanager.lua:1830）
-      params['tag'] = '$tag';
+      // get_posting_by_tag: act, tag, from, ct（反编译 dynamicsdatamanager.lua:2129）。
+      params['tag'] = tag;
       params['from'] = from;
       if (ct > 0) params['ct'] = '$ct';
     } else {
@@ -816,6 +1083,10 @@ class DynamicsClient {
           params['op_uin'] = '${opUin ?? uin}';
           if (ct > 0) params['ct'] = '$ct';
         case DynamicsFeedType.hot:
+          if (ct > 0) params['ct'] = '$ct';
+        case DynamicsFeedType.city:
+          // 同城流：get_city_posting2 + from/ct（dynamicsdatamanager.lua:2051）。
+          params['from'] = from;
           if (ct > 0) params['ct'] = '$ct';
         case DynamicsFeedType.official:
           params['from'] = from;
@@ -998,9 +1269,15 @@ class DynamicsClient {
     return out;
   }
 
-  /// 点赞（act=like_posting）。返回统一写操作确认。
-  Future<DynamicsAck> likePosting(String pid) =>
-      _getAck(_url('like_posting', {'pid': pid}));
+  /// 点赞 / 取消点赞（act=like_posting；取消时带 `unprize=1`）。
+  ///
+  /// 对齐 `dynamicsdatamanager.lua:1531-1557` ReqPrise。
+  Future<DynamicsAck> likePosting(String pid, {bool unpraise = false}) =>
+      _getAck(_url('like_posting', {
+        'pid': pid,
+        'from': '0',
+        if (unpraise) 'unprize': '1',
+      }));
 
   /// 按 pid 拉单条动态（act=get_posting）。返回 null 表示失败/不存在。
   /// 对齐反编译 dynamicsdatamanager.lua ReqPostingInfo (act="get_posting")。
@@ -1017,7 +1294,12 @@ class DynamicsClient {
     if (ret is num && ret != 0) return null;
     Object? data = m['data'] ?? m['posting'] ?? m;
     if (data is Map) {
-      return DynamicsPost.fromItem(data.cast<String, Object?>());
+      final dm = data.cast<String, Object?>();
+      // 实测 get_posting 的载荷是 {ret:0, data:{posting:{...}}} —— 多包了一层
+      // `posting`（raw 实测：data.posting.pid/content/...）。
+      final inner = dm['posting'] ?? dm['posting_data'];
+      final item = inner is Map ? inner.cast<String, Object?>() : dm;
+      return DynamicsPost.fromItem(item);
     }
     return null;
   }
@@ -1029,6 +1311,10 @@ class DynamicsClient {
   /// [content] 正文；[topicId]/[topicName] 选填话题；[question]=true 发布为
   /// 问答动态。对齐 AddPosting：content url_encode 参与签名（content 在
   /// md5 exclude list 中，实际不参与），from 默认 0。
+  /// 发表文字动态（act=add_posting）。
+  ///
+  /// [content] 传**原文**：`_url` 会统一做一次查询串编码（对齐游戏
+  /// `AddPosting` 中 `reqParams.content = url_encode(content)` 的单次编码）。
   Future<DynamicsAck> addPosting(
     String content, {
     int? topicId,
@@ -1037,7 +1323,7 @@ class DynamicsClient {
     int from = 0,
   }) {
     final params = <String, String>{
-      'content': Uri.encodeQueryComponent(content),
+      'content': content,
       'from': '$from',
       'homepage_hide': '0',
     };
@@ -1068,16 +1354,16 @@ class DynamicsClient {
   /// 搜索话题（act=search_topic，路径 /miniw/posting_topic）。失败/空载荷 → 空列表。
   Future<List<DynamicsTopic>> searchTopic(String title, {int offset = 0}) async {
     final ack = await _getAck(_url2('posting_topic', 'search_topic', {
-      'title': Uri.encodeQueryComponent(title),
+      'title': title,
       'offset': '$offset',
     }));
-    return DynamicsTopic.parseList(ack._data);
+    return DynamicsTopic.parseList(ack.rawData);
   }
 
   /// 创建话题（act=create_topic，路径 /miniw/posting_topic）。
   Future<DynamicsAck> createTopic(String title) =>
       _getAck(_url2('posting_topic', 'create_topic', {
-        'title': Uri.encodeQueryComponent(title),
+        'title': title,
       }));
 
   // ── 投票（对齐 /miniw/customize_vote）──────────────────────────────────
@@ -1098,11 +1384,11 @@ class DynamicsClient {
       'opt_num': '${opts.length}',
       'multi_mode': '$multiMode',
       'mode': '$voteMode',
-      'name': Uri.encodeQueryComponent(''),
+      'name': '',
       'from': '0',
     };
     for (var i = 0; i < opts.length; i++) {
-      params['op${i + 1}'] = Uri.encodeQueryComponent(opts[i]);
+      params['op${i + 1}'] = opts[i];
     }
     return _getAck(_url3('customize_vote/', 'create_vote', params));
   }
@@ -1260,6 +1546,418 @@ class DynamicsClient {
       }
     }
     return out;
+  }
+
+  // ── 图片（对齐 posting add_posting_pic / delete_posting_pic）──────────────
+
+  /// 预上传动态图片：GET `miniw/profile?act=upload_pre_photo`。
+  ///
+  /// 与 DIY 头像同一预上传口（`http.lua:1771-1783` `upload_md5_file_pre`，
+  /// 返回字符串 `ok:<直传地址>`）。
+  ///
+  /// 注意：游戏走的是 `ns_http.func.rpc_string`，它会把 URL 再过一遍
+  /// `url_addParams`（`http.lua:891`）——所以真实请求里**必须带**
+  /// `uin/apiid/ver/country/lang`。实测缺这些参数时服务端回 **空 body**（http 200），
+  /// 补上后才回 `ok:<url>`。
+  Future<String?> preUploadPhoto() async {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final sign = httpGetS1Map(now, s2, uin, s2t);
+    final url = '$base/miniw/profile?act=upload_pre_photo&uin=$uin'
+        '&apiid=$kApiId&ver=$kClientVersionStr&country=$kCountry&lang=$kLang&$sign';
+    final resp = await _dio.get(url);
+    final t = '${resp.data}'.trim();
+    if (!t.startsWith('ok:')) return null;
+    final u = t.substring(3).trim();
+    return u.isEmpty ? null : u;
+  }
+
+  /// 直传图片字节到 [uploadUrl]，返回去掉 `ok:` 前缀的 sub_token。
+  ///
+  /// 对齐 `dynamicsdatamanager.lua:7630-7665` UploadPicFile：成功时响应体
+  /// `ok:<sub_token>`，其中 sub_token 是 `time=..&auth=..&s2t=..` 形式的
+  /// 查询串，随后原样拼进 `add_posting_pic`。
+  Future<String?> uploadPhotoBytes(String uploadUrl, List<int> bytes) async {
+    final resp = await _dio.post<String>(
+      uploadUrl,
+      data: bytes,
+      options: Options(
+        headers: {'Content-Type': 'application/octet-stream'},
+        responseType: ResponseType.plain,
+      ),
+    );
+    final t = '${resp.data}'.trim();
+    if (!t.startsWith('ok:') && !t.startsWith('ok,')) return null;
+    final token = t.substring(3).trim();
+    return token.isEmpty ? null : token;
+  }
+
+  /// 登记一张已直传的图片：`act=add_posting_pic`。
+  ///
+  /// 对齐 `dynamicsdatamanager.lua:7727-7778` AddPostPic：URL 形如
+  /// `?act=add_posting_pic&seq=N&md5=文件md5&ext=ext[&show_idx=N]&sub_token&s2act`，
+  /// 其中 sub_token 来自上传响应、s2act 来自 `http_getS2Act('posting')`；
+  /// **不是** http_getParamMD5 签名。成功返回 `data.url`；失败 → null。
+  Future<String?> addPostingPic({
+    required int seq,
+    required String fileMd5,
+    required String ext,
+    required String subToken,
+    int? showIdx,
+  }) async {
+    final base = baseUrl.replaceAll(RegExp(r'/$'), '');
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    final parts = <String>[
+      'act=add_posting_pic',
+      'seq=$seq',
+      'md5=$fileMd5',
+      'ext=$ext',
+      if (showIdx != null) 'show_idx=$showIdx',
+      subToken,
+      httpGetS2Act('posting', now, s2, uin, s2t),
+    ];
+    final url = '$base/$kPostingPath?${parts.join('&')}';
+    log.debug('add_posting_pic url（已脱敏）: ${redactUrl(url)}', tag: _logTag);
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    reportIfFailed(url, decoded);
+    if (decoded is! Map) return null;
+    final m = decoded.cast<String, Object?>();
+    final ret = m['ret'] ?? m['code'];
+    if (ret is num && ret != 0) return null;
+    final data = m['data'];
+    if (data is Map) {
+      final u = _nonEmpty(data['url'] ?? data['pic_url']);
+      if (u != null) return u;
+    }
+    return null;
+  }
+
+  /// 删除已登记的图片（act=delete_posting_pic&seq=N）。
+  Future<DynamicsAck> deletePostingPic(int seq) =>
+      _getAck(_url('delete_posting_pic', {'seq': '$seq'}));
+
+  /// 一步直传图片：预上传 → 上传字节 → 登记，返回图片 url。
+  ///
+  /// 任一步失败 → null。文件 md5 由调用方传入（与直传的 md5 必须一致）。
+  Future<String?> uploadPostingPic({
+    required int seq,
+    required List<int> bytes,
+    required String fileMd5,
+    required String ext,
+    int? showIdx,
+  }) async {
+    final uploadUrl = await preUploadPhoto();
+    if (uploadUrl == null) return null;
+    final subToken = await uploadPhotoBytes(uploadUrl, bytes);
+    if (subToken == null) return null;
+    return addPostingPic(
+      seq: seq,
+      fileMd5: fileMd5,
+      ext: ext,
+      subToken: subToken,
+      showIdx: showIdx,
+    );
+  }
+
+  // ── 可见范围 / 权限（act=setPostingAuth）────────────────────────────────
+
+  /// 修改动态权限：`act=setPostingAuth&pid=&ptype=&pauth=`。
+  ///
+  /// [ptype] 取 [DynamicsAuth.ptypeSee] / [DynamicsAuth.ptypeRep] /
+  /// [DynamicsAuth.ptypeHome]（对齐玩家中心 `dynamics_frame_playercenterctrl.lua:536/573/617`）。
+  Future<DynamicsAck> setPostingAuth(
+    String pid, {
+    required String ptype,
+    required int pauth,
+  }) =>
+      _getAck(_url('setPostingAuth', {
+        'pid': pid,
+        'ptype': ptype,
+        'pauth': '$pauth',
+      }));
+
+  // ── 转发计数（act=share_posting）───────────────────────────────────────
+
+  /// 上报一次动态分享给 [target]（act=share_posting&pid=&target=）。
+  /// 返回服务端回传的新转发数；无则 null。对齐 `dynamicsdatamanager.lua:3724`。
+  Future<int?> sharePosting(String pid, {required int target}) async {
+    final ack = await _getAck(
+      _url('share_posting', {'pid': pid, 'target': '$target'}),
+    );
+    return ack.shareCount;
+  }
+
+  // ── 评论操作（赞 / 置顶 / 删除）─────────────────────────────────────────
+
+  /// 评论点赞 / 取消（act=prize_comment；`op_type=prize|cai`）。
+  /// 对齐 `dynamicsdatamanager.lua:3453-3476`。
+  Future<DynamicsAck> prizeComment(DynamicsComment c, {bool prize = true}) =>
+      _getAck(_url('prize_comment', {
+        'op_type': prize ? 'prize' : 'cai',
+        'com_pid_uin': '${c.pidUin}',
+        'com_pid_ct': '${c.pidCt}',
+        'com_uin': '${c.uin}',
+        'com_op_uin': '${c.opUin}',
+        'com_last_time': '${c.lastTime}',
+        'from': '0',
+      }));
+
+  /// 置顶评论（act=set_top_comment）。对齐 `dynamicsdatamanager.lua:3477-3497`。
+  Future<DynamicsAck> setTopComment(DynamicsComment c) =>
+      _getAck(_url('set_top_comment', {
+        'com_pid_ct': '${c.pidCt}',
+        'com_uin': '${c.uin}',
+        'com_op_uin': '${c.opUin}',
+        'com_last_time': '${c.lastTime}',
+      }));
+
+  /// 取消评论置顶（act=delete_top_comment&pid=）。
+  Future<DynamicsAck> deleteTopComment(String pid) =>
+      _getAck(_url('delete_top_comment', {'pid': pid}));
+
+  /// 删除评论。
+  ///
+  /// [authorOnly]=false → `delete_single_comment`，pid 拼成
+  /// `<动态 pid>_<评论作者 uin>_<last_time>` 并带 `op_uin`；
+  /// [authorOnly]=true → `delete_player_comment`，pid 拼成
+  /// `<动态 pid>_<评论作者 uin>`，删该作者在该动态下的全部评论。
+  /// 对齐 `dynamicsdatamanager.lua:1335-1362` DeleteComment。
+  Future<DynamicsAck> deleteComment(
+    String pid,
+    DynamicsComment c, {
+    bool authorOnly = false,
+  }) =>
+      _getAck(_url(
+        authorOnly ? 'delete_player_comment' : 'delete_single_comment',
+        authorOnly
+            ? {'pid': '${pid}_${c.uin}'}
+            : {
+                'pid': '${pid}_${c.uin}_${c.lastTime}',
+                'op_uin': '${c.opUin}',
+              },
+      ));
+
+  // ── 回复（二级评论）读写 ────────────────────────────────────────────────
+
+  /// 发表回复（act=add_comment_rep）。[opUin] 为被回复者；对齐
+  /// `dynamicsdatamanager.lua:4935-4985` AddCommentReply。
+  Future<DynamicsAck> addCommentReply(
+    DynamicsComment parent, {
+    required int opUin,
+    required String content,
+  }) =>
+      _getAck(_url('add_comment_rep', {
+        'com_pid_uin': '${parent.pidUin}',
+        'com_pid_ct': '${parent.pidCt}',
+        'com_uin': '${parent.uin}',
+        'com_op_uin': '${parent.opUin}',
+        'com_last_time': '${parent.lastTime}',
+        'op_uin': '$opUin',
+        'content': content,
+        'from': '0',
+      }));
+
+  /// 回复点赞 / 取消（act=prize_comment_rep&rep_id=&op_type=）。
+  Future<DynamicsAck> prizeCommentReply(
+    String repId, {
+    bool prize = true,
+  }) =>
+      _getAck(_url('prize_comment_rep', {
+        'rep_id': repId,
+        'op_type': prize ? 'prize' : 'cai',
+      }));
+
+  /// 删除自己发出的回复（act=delete_player_comment_rep&rep_id=）。
+  Future<DynamicsAck> deletePlayerCommentReply(String repId) =>
+      _getAck(_url('delete_player_comment_rep', {'rep_id': repId}));
+
+  /// 删除动态作者可见的回复（act=delete_comment_rep&rep_id=）。
+  Future<DynamicsAck> deleteCommentReply(String repId) =>
+      _getAck(_url('delete_comment_rep', {'rep_id': repId}));
+
+  /// 按父评论定位拉单条评论（act=get_single_comment）。
+  Future<DynamicsComment?> fetchSingleComment(DynamicsComment parent) async {
+    final ack = await _getAck(_url('get_single_comment', {
+      'com_pid_uin': '${parent.pidUin}',
+      'com_pid_ct': '${parent.pidCt}',
+      'com_uin': '${parent.uin}',
+      'com_op_uin': '${parent.opUin}',
+      'com_last_time': '${parent.lastTime}',
+    }));
+    final data = ack.data;
+    final list = data['list'];
+    if (list is List && list.isNotEmpty) {
+      final first = list.first;
+      if (first is Map) {
+        return DynamicsComment.fromItem(first.cast<String, Object?>());
+      }
+    }
+    return null;
+  }
+
+  // ── 话题（/miniw/posting_topic）─────────────────────────────────────────
+
+  /// 话题列表（act=get_topic_list&sort_type=&offset=）。
+  /// [sortType] 对齐 `dynamicsdatamanager.lua:3750` PullTopicList。
+  Future<List<DynamicsTopic>> fetchTopicList({
+    int sortType = 0,
+    int offset = 0,
+  }) async {
+    final ack = await _getAck(_url2('posting_topic', 'get_topic_list', {
+      'sort_type': '$sortType',
+      'offset': '$offset',
+    }));
+    return DynamicsTopic.parseList(ack.rawData);
+  }
+
+  /// 官方话题列表（act=get_official_topic_list）。
+  Future<List<DynamicsTopic>> fetchOfficialTopicList({
+    int sortType = 0,
+    int offset = 0,
+  }) async {
+    final ack = await _getAck(_url2('posting_topic', 'get_official_topic_list', {
+      'sort_type': '$sortType',
+      'offset': '$offset',
+    }));
+    return DynamicsTopic.parseList(ack.rawData);
+  }
+
+  /// 我关注的话题（act=get_follow_topic_list）。
+  Future<List<DynamicsTopic>> fetchFollowTopicList({int offset = 0}) async {
+    final ack = await _getAck(_url2('posting_topic', 'get_follow_topic_list', {
+      'offset': '$offset',
+    }));
+    return DynamicsTopic.parseList(ack.rawData);
+  }
+
+  /// 热门话题（act=get_hot_topic2；路径带尾随 `/`，对齐
+  /// `dynamicsdatamanager.lua:4781` ReqGetHotTopic）。
+  Future<List<DynamicsTopic>> fetchHotTopics({int offset = 0, int limit = 10}) async {
+    final ack = await _getAck(_url3('posting_topic', 'get_hot_topic2', {
+      'offset': '$offset',
+      'limit': '$limit',
+    }));
+    return DynamicsTopic.parseList(ack.rawData);
+  }
+
+  // ── 我收到的评论 / 回复（act=get_reps_list）─────────────────────────────
+
+  /// 拉取某玩家最近的评论/回复（act=get_reps_list&op_uin=）。
+  /// 对齐 `dynamicsdatamanager.lua:1152` GetRepsList（用于动态消息「评论我的」）。
+  Future<List<DynamicsComment>> fetchRepsList({int? opUin}) async {
+    final ack = await _getAck(_url('get_reps_list', {
+      'op_uin': '${opUin ?? uin}',
+    }));
+    final data = ack.data;
+    final list = data['list'];
+    if (list is! List) return const [];
+    final out = <DynamicsComment>[];
+    for (final e in list) {
+      if (e is! Map) continue;
+      final c = DynamicsComment.fromItem(e.cast<String, Object?>());
+      if (c != null) out.add(c);
+    }
+    return out;
+  }
+
+  // ── 抽奖（/miniw/red_packet）──────────────────────────────────────────
+
+  /// 创建抽奖种子（act=post_lottery_gen_seed）。
+  ///
+  /// 对齐 `dynamicsdatamanager.lua:5720` LotteryCreateSeed；成功返回服务端
+  /// 生成的 `lottery_id`（`data.lottery_id` / `data` 直接是 id 串），失败 → null。
+  Future<String?> createLotterySeed({
+    required int itemId,
+    required int itemNum,
+    required int itemType,
+    required int selectNum,
+    required int costNum,
+    required int lotteryTime,
+    String task = '',
+    int isAuthor = 1,
+  }) async {
+    final ack = await _getAck(_url2('red_packet', 'post_lottery_gen_seed', {
+      'item_id': '$itemId',
+      'item_num': '$itemNum',
+      'item_type': '$itemType',
+      'select_num': '$selectNum',
+      'cost_num': '$costNum',
+      'lottery_time': '$lotteryTime',
+      'task': task,
+      'is_author': '$isAuthor',
+    }));
+    final data = ack.data;
+    return _nonEmpty(data['lottery_id'] ?? data['id']);
+  }
+
+  /// 查询抽奖信息（act=posting_lottery_query_lottery&lottery_ids=a,b）。
+  /// 对齐 `dynamicsdatamanager.lua:5741` LotteryQueryCfg。
+  Future<List<DynamicsLottery>> queryLotteries(List<String> lotteryIds) async {
+    if (lotteryIds.isEmpty) return const [];
+    final ack = await _getAck(_url2('red_packet', 'posting_lottery_query_lottery', {
+      'lottery_ids': lotteryIds.join(','),
+    }));
+    return DynamicsLottery.parseList(ack.rawData);
+  }
+
+  /// 批量补齐动态里的抽奖信息（按 `lottery_id` 去重）。
+  Future<Map<String, DynamicsLottery>> fetchLotteriesFor(
+    List<DynamicsPost> posts,
+  ) async {
+    final ids = <String>{ for (final p in posts) if (p.lotteryId != null) p.lotteryId! };
+    if (ids.isEmpty) return const {};
+    final list = await queryLotteries(ids.toList());
+    return { for (final l in list) l.lotteryId: l };
+  }
+
+  // ── 作品动态（/miniw/map_posting）──────────────────────────────────────
+
+  /// 作品动态列表（act=get_list_by_hot / get_list_by_time / get_list_by_tag）。
+  ///
+  /// 对齐 `dynamicsdatamanager.lua:5256-5340` GetMapDynamicByHot/ByTime/ByTag。
+  /// [act] 取 `get_list_by_hot` / `get_list_by_time` / `get_list_by_tag`。
+  Future<FeedResult> pullMapPostings({
+    required String act,
+    required int mapId,
+    int mapCtype = 0,
+    int offset = 0,
+    int ct = 0,
+    int? uinOfMap,
+    int tag = 1000,
+    int sortType = 1,
+    int orderType = 1,
+    String from = 'null',
+  }) async {
+    final params = <String, String>{
+      'uin': '${uinOfMap ?? uin}',
+      'map_id': '$mapId',
+      'map_ctype': '$mapCtype',
+    };
+    if (act == 'get_list_by_tag') {
+      params['offset'] = '$offset';
+      if (ct > 0) params['ct'] = '$ct';
+      params['tag'] = '$tag';
+      params['sort_type'] = '$sortType';
+      params['order_type'] = '$orderType';
+    } else {
+      params['offset'] = '$offset';
+      if (ct > 0) params['ct'] = '$ct';
+      if (act == 'get_list_by_hot') params['from'] = from;
+    }
+    final ack = await _getAck(_url2('map_posting', act, params));
+    final data = ack.data;
+    final list = data['list'];
+    final out = <DynamicsPost>[];
+    if (list is List) {
+      for (final e in list) {
+        if (e is! Map) continue;
+        final p = DynamicsPost.fromItem(e.cast<String, Object?>());
+        if (p != null) out.add(p);
+      }
+    }
+    return FeedResult(out, _pickInt(data, ['ct', 'next_ct']));
   }
 
   // ── 内部 ──────────────────────────────────────────────────────────────
