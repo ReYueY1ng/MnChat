@@ -5,7 +5,6 @@ import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
 import '../core/services/dynamics.dart';
 import '../core/services/msg_box.dart' show MsgBoxEntry;
 import '../state/providers.dart';
-import 'dynamics_notice_page.dart' show DynamicsNoticePage;
 import 'mail_page.dart' show MailPage, MailSelection;
 import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
@@ -218,27 +217,6 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                   ),
                 ),
               ),
-            ),
-            // 溢出菜单：动态通知页（get_channel_msg_list 频道通知列表）。
-            // 与上面的铃铛不同 —— 铃铛进消息中心的「动态互动」，这里进独立页。
-            PopupMenuButton<String>(
-              tooltip: '更多',
-              icon: const Icon(Icons.more_vert),
-              onSelected: (value) {
-                if (value == 'notice') {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(
-                      builder: (_) => const DynamicsNoticePage(),
-                    ),
-                  );
-                }
-              },
-              itemBuilder: (_) => const [
-                PopupMenuItem<String>(
-                  value: 'notice',
-                  child: Text('动态通知页'),
-                ),
-              ],
             ),
             if (!_singleAuthor)
               IconButton(
