@@ -1,7 +1,7 @@
 part of 'friends_page.dart';
 
-/// 左侧分类。
-enum _FriendCat { friend, follow, group }
+/// 左侧分类。关注分类已按用户要求移除（游戏里关注/粉丝在社交发现页，不在好友列表）。
+enum _FriendCat { friend, group }
 
 /// 排序方式 —— 文案对齐游戏 `friendSortText`（stringdef 156007-156010）。
 enum _SortMode {
@@ -45,11 +45,6 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         return [
           for (final s in all)
             if (s.type == ChatSessionType.friend && (s.relation & 8) != 0) s,
-        ];
-      case _FriendCat.follow:
-        return [
-          for (final s in all)
-            if (s.type == ChatSessionType.friend && (s.relation & 16) != 0) s,
         ];
       case _FriendCat.group:
         return [
@@ -772,11 +767,6 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             ).push(MaterialPageRoute(builder: (_) => const PartnerPage())),
           ),
           chip(
-            '关注',
-            active: _cat == _FriendCat.follow,
-            onTap: () => setState(() => _cat = _FriendCat.follow),
-          ),
-          chip(
             '群组',
             active: _cat == _FriendCat.group,
             onTap: () => setState(() => _cat = _FriendCat.group),
@@ -841,11 +831,6 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             '最佳拍档',
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const PartnerPage())),
-          ),
-          item(
-            '关注',
-            active: _cat == _FriendCat.follow,
-            onTap: () => setState(() => _cat = _FriendCat.follow),
           ),
           item(
             '群组',
