@@ -188,13 +188,10 @@ class _MailPageState extends ConsumerState<MailPage> {
     };
     if (pending.isEmpty) return;
     try {
-      final list = await client.getProfileBatch3(pending.toList());
-      if (!mounted || list.isEmpty) return;
-      setState(() {
-        for (final p in list) {
-          _profiles[p.uin] = p;
-        }
-      });
+      // 头像本体 / DIY 自定义头像要连资料一起取（`header*` 不是头像）。
+      final map = await client.fetchAvatarProfiles(pending.toList());
+      if (!mounted || map.isEmpty) return;
+      setState(() => _profiles.addAll(map));
     } catch (_) {
       // 资料拉取失败：头像退回迷你号 + 首字占位
     }

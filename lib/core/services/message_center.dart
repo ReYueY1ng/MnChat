@@ -271,6 +271,12 @@ class MailAttachment {
 
 /// 一条邮件/系统消息详情。
 class MsgItem {
+  /// 邮件有效期截止时间（`end_time`，epoch 秒；0/缺失 = 永久）。
+  ///
+  /// 游戏邮件详情显示的是有效期文案（`GetCurMailTimeStr`，
+  /// `mainchatsystemmsg.lua:1025-1059`），不是创建时间。
+  final int endTime;
+
   final String id;
   final int channel;
   final int type; // email_comm_type (0=normal, 25=sendFriendGift, 26=sendRedPocket ...)
@@ -306,6 +312,7 @@ class MsgItem {
     this.jumpName = '',
     this.sender = '',
     this.attachmentTaken = false,
+    this.endTime = 0,
   });
 
   bool get unread => readState == 0;
@@ -329,6 +336,7 @@ class MsgItem {
         jumpName: jumpName,
         sender: sender,
         attachmentTaken: attachmentTaken ?? this.attachmentTaken,
+        endTime: endTime,
       );
 
   /// 发送者昵称：`发送者(12345)` → `发送者`（对齐 `GetMailDesc` 的
@@ -443,8 +451,33 @@ class MsgItem {
       jumpName: jumpName,
       sender: sender,
       attachmentTaken: (status & 2) != 0,
+      endTime: _mailEndTime(m),
     );
   }
+
+  /// 邮件有效期截止时间：`end_time` / `endTime`，数字或数字串；拿不到当 0。
+  static int _mailEndTime(Map<String, Object?> m) {
+    final v = m['end_time'] ?? m['endTime'];
+    if (v is num) return v.toInt();
+    return int.tryParse('$v') ?? 0;
+  }
+}
+
+/// 邮件有效期文案（对齐 `MainChatSystemMsg:GetCurMailTimeStr`，
+/// `mainchatsystemmsg.lua:1025-1059`）。
+///
+/// 规则：`end_time <= 0` → 「有效期：永久」（GetS 4086+611）；剩余 ≤ 0 →
+/// 「有效期：已过期」（4086+1057）；剩余 > 30000 天也当永久（GetS 30170）；
+/// 否则「有效期：N天N小时」（4086 + N + 4087 + N + 4088）。
+String mailValidityText(int endTime, {int? now}) {
+  if (endTime <= 0) return '有效期：永久';
+  final t = now ?? DateTime.now().millisecondsSinceEpoch ~/ 1000;
+  final remainingHours = (endTime - t) / 3600;
+  if (remainingHours <= 0) return '有效期：已过期';
+  final days = remainingHours ~/ 24;
+  if (days > 30000) return '有效期：永久';
+  final hours = (remainingHours - days * 24).floor();
+  return '有效期：$days天$hours小时';
 }
 
 /// 消息中心客户端。

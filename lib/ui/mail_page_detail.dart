@@ -35,8 +35,9 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.sm),
+          // 游戏邮件详情显示的是**有效期**文案（GetCurMailTimeStr），不是创建时间。
           Text(
-            '时间：${fmtMsgTime(_item.createTime)}',
+            mailValidityText(_item.endTime),
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.outline,
             ),
