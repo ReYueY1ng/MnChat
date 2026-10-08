@@ -29,7 +29,7 @@
 /// 缺失（或结构不符），`0` 表示模块存在但计数确为 0，二者在 UI 上区分展示。
 library;
 
-import 'dart:convert' show jsonDecode;
+import 'dart:convert' show jsonDecode, jsonEncode;
 
 import '../services/social_sign.dart' show SocialDeclaration;
 
@@ -449,35 +449,79 @@ const Map<int, String> kHomeModuleNames = {
   19: '迷你印迹',
 };
 
-/// 解析 `get_homepage_layout` 响应 → 布局条目列表。
+/// 主页布局（`get_homepage_layout` 的 `data.layout`）。
 ///
-/// 官方取 `ret.data.layout`（**JSON 字符串**）后 `json2table`，存入
-/// `layoutTable`（`playercenterv2homepageservice.lua:87`）；条目形如
-/// `{moduleId, sizeType}`（`playercenterv2config.lua:144+` 的 `defaultLayout`）。
-///
-/// [ret] 为完整响应；失败 / `code != 0` / 非数组 → 空列表。
-/// 条目**原样保留**（不改字段），以便保存时 round-trip 回服务端。
-List<Map<String, Object?>> homeLayoutEntries(Object? ret) {
-  if (ret is! Map) return const <Map<String, Object?>>[];
-  final m = ret.cast<String, Object?>();
-  final code = m['code'] ?? m['ret'];
-  if (code is num && code != 0) return const <Map<String, Object?>>[];
-  final data = m['data'];
-  if (data is! Map) return const <Map<String, Object?>>[];
-  final raw = data.cast<String, Object?>()['layout'];
-  final decoded = raw is String ? _tryJsonArray(raw) : raw;
-  if (decoded is! List) return const <Map<String, Object?>>[];
-  return [
-    for (final e in decoded)
-      if (e is Map) e.cast<String, Object?>(),
-  ];
+/// 实测 2026-10-08（账号 279630451）：`data.layout` 是 **JSON 对象字符串**，形如
+/// `{"1":{"moduleId":2,"sizeType":"roleShowComponent"},…,
+/// "checkDataVersion":79872,"privacySet":{…}}`。数字键是模块条目（游戏
+/// `json2table` 后存 `layoutTable`，`playercenterv2homepageservice.lua:87`），
+/// 非数字键是必须**原样回传**的元数据。客户端此前只认 JSON 数组，所以永远
+/// 解析成空 → 个人主页弹「未取到主页布局」。
+class HomeLayout {
+  /// 模块条目（按服务端数字键升序）。
+  final List<Map<String, Object?>> entries;
+
+  /// 非模块键（`checkDataVersion` / `privacySet` 等），保存时原样带回。
+  final Map<String, Object?> meta;
+
+  const HomeLayout({this.entries = const [], this.meta = const {}});
+
+  bool get isEmpty => entries.isEmpty;
 }
 
-List<Object?>? _tryJsonArray(String s) {
+/// 解析 `get_homepage_layout` 响应（[ret] 为完整响应）。
+///
+/// 失败 / `code != 0` / 缺 `data.layout` → 空布局。条目与元数据都**原样保留**，
+/// 保存时 round-trip 回服务端。数组形态也兼容（早期抓包）。
+HomeLayout homeLayout(Object? ret) {
+  if (ret is! Map) return const HomeLayout();
+  final m = ret.cast<String, Object?>();
+  final code = m['code'] ?? m['ret'];
+  if (code is num && code != 0) return const HomeLayout();
+  final data = m['data'];
+  if (data is! Map) return const HomeLayout();
+  final raw = data.cast<String, Object?>()['layout'];
+  final decoded = raw is String ? _tryJsonAny(raw) : raw;
+  final ordered = <(int, Map<String, Object?>)>[];
+  final meta = <String, Object?>{};
+  if (decoded is List) {
+    for (final e in decoded) {
+      if (e is Map) {
+        ordered.add((ordered.length + 1, e.cast<String, Object?>()));
+      }
+    }
+  } else if (decoded is Map) {
+    for (final e in decoded.entries) {
+      final idx = int.tryParse('${e.key}');
+      final v = e.value;
+      if (idx != null && v is Map) {
+        ordered.add((idx, v.cast<String, Object?>()));
+      } else {
+        meta['${e.key}'] = v;
+      }
+    }
+    ordered.sort((a, b) => a.$1.compareTo(b.$1));
+  }
+  return HomeLayout(
+    entries: [for (final e in ordered) e.$2],
+    meta: meta,
+  );
+}
+
+/// 宽松 JSON 解码：解析失败返回 null（脏数据不抛）。
+Object? _tryJsonAny(String s) {
   try {
-    final v = jsonDecode(s);
-    return v is List ? v : null;
+    return jsonDecode(s);
   } catch (_) {
     return null;
   }
 }
+
+/// 发回服务端的布局 JSON：数字键 `"1".."N"` 按当前顺序重编 + 元数据原样带回。
+String encodeHomeLayout(
+  List<Map<String, Object?>> entries, {
+  Map<String, Object?> meta = const {},
+}) => jsonEncode(<String, Object?>{
+  for (var i = 0; i < entries.length; i++) '${i + 1}': entries[i],
+  ...meta,
+});

@@ -77,9 +77,17 @@ class PartnerPage extends ConsumerWidget {
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
                   error: (e, _) => Center(child: Text('加载失败: $e')),
-                  data: (list) => list.isEmpty
+                  data: (list) =>
+                      (list.isEmpty && (slot?.total ?? 0) == 0)
                       ? const Center(child: Text('暂无最佳拍档'))
-                      : _buildList(theme, list, levels, profiles, levelCfg),
+                      : _buildList(
+                          theme,
+                          list,
+                          levels,
+                          profiles,
+                          levelCfg,
+                          slot?.total ?? 0,
+                        ),
                 ),
               ),
             ],
@@ -122,22 +130,59 @@ class PartnerPage extends ConsumerWidget {
     Map<int, int> levels,
     Map<int, PlayerProfile> profiles,
     List<(int level, int intimacyValue)> levelCfg,
+    int total,
   ) {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    // 槽位满不上的部分当空位（游戏 `BestPartnerDataMgr:GetTypeRenderCfg()[0]`
+    // 用 `noText = GetS(9312030)`「最佳拍档剩余空位 x %s」渲染 lab==0 的条目）。
+    final remaining = (total - partners.length).clamp(0, 999);
     return ListView.separated(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
         vertical: AppSpacing.sm,
       ),
-      itemCount: partners.length,
+      itemCount: partners.length + (remaining > 0 ? 1 : 0),
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-      itemBuilder: (context, i) => _partnerCard(
-        theme,
-        partners[i],
-        levels[partners[i].bestUin] ?? 0,
-        profiles[partners[i].bestUin],
-        levelCfg,
-        now,
+      itemBuilder: (context, i) {
+        if (i >= partners.length) return _emptySlotCard(theme, remaining);
+        return _partnerCard(
+          theme,
+          partners[i],
+          levels[partners[i].bestUin] ?? 0,
+          profiles[partners[i].bestUin],
+          levelCfg,
+          now,
+        );
+      },
+    );
+  }
+
+  /// 空槽位卡片（对齐游戏 cfg[0]：`icon_add_upload` + `GetS(9312030)`）。
+  Widget _emptySlotCard(ThemeData theme, int remaining) {
+    return Container(
+      padding: AppSpacing.cardPadding,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerLow,
+        borderRadius: AppRadius.cardR,
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.add_circle_outline,
+            size: 28,
+            color: theme.colorScheme.outline,
+          ),
+          const SizedBox(width: AppSpacing.md),
+          Expanded(
+            child: Text(
+              '最佳拍档剩余空位 x $remaining',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -161,6 +206,9 @@ class PartnerPage extends ConsumerWidget {
             skinId: profile.headSkinId,
             model: profile.headModel,
           );
+    // 与好友列表同一条展示规则（官方 `GetPlayerHeadPath`）：资料里的 `header*`
+    // 不是游戏的头像来源，角色头像有本地图标时就压过它。
+    final roleHeadWins = PlayerProfile.roleHeadHasLocalIcon(fallback);
     // 关系等级进度：阈值来自 FriendSystem 配置；缺失时 next 为 null，仅展示数值。
     final (_, nextScore) = partnerLevelFor(partner.tacitnum, levelCfg);
     final progress = RelationProgress(
@@ -179,7 +227,7 @@ class PartnerPage extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           AvatarView(
-            avatarUrl: profile?.avatarUrl,
+            avatarUrl: roleHeadWins ? null : profile?.avatarUrl,
             name: name,
             radius: 26,
             headType: fallback?.type,

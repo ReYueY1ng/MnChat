@@ -243,13 +243,17 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     final target = _target;
     final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 
+    String? diyUrl;
     String? avatarUrl;
     int? frameId;
+    // 角色头像回退的皮肤/型号来源（官方 `GetPlayerHeadPath`）。
+    PlayerProfile? refProfile;
 
     try {
       // DIY 自定义头像优先（游戏主界面同源）
       final diy = await client.getPersonCenterHeadInfo([target]);
-      avatarUrl = diy[target];
+      diyUrl = diy[target];
+      avatarUrl = diyUrl;
     } catch (_) {
       // 忽略：DIY 头像拉取失败时回退到批量资料头像
     }
@@ -263,6 +267,7 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
       try {
         final profile = await client.getMyProfile();
         if (profile != null) {
+          refProfile = profile;
           avatarUrl ??= profile.avatarUrl;
           frameId = profile.headFrameId;
           ownedFrames = {...profile.ownedHeadFrameIds};
@@ -301,6 +306,7 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
       try {
         final list = await client.getProfileBatch3([target]);
         if (list.isNotEmpty) {
+          refProfile = list.first;
           avatarUrl ??= list.first.avatarUrl;
           frameId = list.first.headFrameId;
           _nickname = list.first.nickname;
@@ -318,6 +324,23 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
       } catch (_) {
         // 忽略：拿不到就用首字占位
       }
+    }
+
+    // 展示规则对齐官方 `headinfosysmgr.lua:321-383` `GetPlayerHeadPath`：
+    // DIY 自定义头像（use_diy=1）优先，否则用角色头像本体；资料里的 `header*`
+    // **从不参与头像展示**（`header3` 只由 `set_usr_header3` 写入），所以没有 DIY
+    // 的人要显示角色头像，而不是 `header*`。只有在角色头像确实有本地图标时才
+    // 压过网络头像，免得退成首字占位。
+    final fallback = PlayerProfile.resolveRoleHeadFallback(
+      headType: headType,
+      headId: headId,
+      skinId: refProfile?.headSkinId,
+      model: refProfile?.headModel,
+    );
+    if (diyUrl == null && PlayerProfile.roleHeadHasLocalIcon(fallback)) {
+      avatarUrl = null;
+      headType = fallback?.type;
+      headId = fallback?.id;
     }
 
     List<PortraitItem> portraits = [];
@@ -441,7 +464,7 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
 
   /// 已拥有且有本地图标的皮肤（skinId → 图标 headId），按图标 id 排序。
   Map<int, int> get _ownedSkins {
-    final owned = ref.watch(authProvider).auth?.ownedSkinIds ?? const <int>{};
+    final owned = ref.watch(ownedSkinIdsProvider).asData?.value ?? const <int>{};
     final list = <int, int>{};
     for (final id in owned) {
       final head = kSkinHeadIcon[id];
@@ -500,8 +523,11 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     final client = PlayerHomeClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 
     List<Map<String, Object?>> layout;
+    Map<String, Object?> layoutMeta = const {};
     try {
-      layout = await client.getHomepageLayout(_target);
+      final fetched = await client.getHomepageLayout(_target);
+      layout = fetched.entries;
+      layoutMeta = fetched.meta;
     } catch (e) {
       log.warn('主页布局拉取失败: $e', tag: _logTag);
       layout = const <Map<String, Object?>>[];
@@ -519,7 +545,8 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
       layout: layout,
       save: (next) async {
         try {
-          return await client.changeHomepageLayout(next);
+          // 元数据（checkDataVersion / privacySet 等）原样带回，只改条目顺序。
+          return await client.changeHomepageLayout(next, meta: layoutMeta);
         } catch (e) {
           log.warn('主页布局保存失败: $e', tag: _logTag);
           return false;

@@ -2,8 +2,9 @@
 ///
 /// 版面（自上而下）：
 ///   1. 资料头卡：头像（含头像框）/ 昵称 / 等级与大会员徽标 / `迷你号`（可复制）
-///      / `关注`·`粉丝`·`人气值`·`信用分` 统计行 / `最近访客`·`编辑布局`·
-///      `修改昵称` 入口；
+///      / `关注`·`粉丝`·`人气值`·`信用分` 统计行 / `最近访客`·`编辑布局` 入口
+///      （改名只在「头像编辑 → 昵称」页签：游戏里 `个人主页` 只展示改名审核
+///      标记，改名控件在 `playercenterv2headeditorctrl.lua:15-27` 的 nick 页签）；
 ///   2. 横幅：`交友宣言` 气泡 + `编辑`（→ 交友标签页）；
 ///   3. `个性装扮`：已拥有皮肤与立绘，点选即更换头像本体；
 ///   4. `头像框`：已拥有头像框，点选即更换（含默认框 1）；
@@ -49,8 +50,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/models/homepage_modules.dart';
 import '../core/models/nickname.dart' show plainNickname;
 import '../core/models/skin_head_catalog.dart';
-import '../core/services/name_rules.dart'
-    show renameErrorText, validateNickname;
 import '../core/services/partner.dart' show PartnerDirectory, PartnerInfo;
 import '../core/services/player_home.dart'
     show PlayerHomeClient, PlayerHomeModule, SetTopFlagResult;
@@ -188,7 +187,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                 onCopyUin: () => _copyUin(uin),
                 onVisitors: _isSelf ? () => _openVisitors(uin) : null,
                 onEditLayout: _isSelf ? _openLayoutEditor : null,
-                onRename: _isSelf ? _editNickname : null,
                 onEditAvatar: _isSelf ? _openAvatarEdit : null,
               ),
               if (!_isSelf) ...[

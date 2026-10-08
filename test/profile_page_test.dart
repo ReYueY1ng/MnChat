@@ -52,7 +52,6 @@ void main() {
       '个人主页',
       '最近访客',
       '编辑布局',
-      '修改昵称',
       '关注',
       '粉丝',
       '人气值',
@@ -60,6 +59,9 @@ void main() {
     ]) {
       expect(find.text(label), findsWidgets, reason: '缺少文案：$label');
     }
+    // 改名只保留在「头像编辑 → 昵称」页签（游戏 `playercenterv2headeditorctrl.lua:15-27`
+    // 的 nick 页签；个人主页只展示改名审核标记），个人主页不再重复提供入口。
+    expect(find.text('修改昵称'), findsNothing);
     // 「家园」入口已移除：它只是再打开一次个人主页，而主页本身已有入口。
     expect(find.text('家园'), findsNothing);
     expect(find.textContaining('迷你号'), findsWidgets);
@@ -99,7 +101,7 @@ void main() {
     expect(find.text('迷你号 12345'), findsOneWidget);
 
     // 编辑类入口全部收起
-    for (final label in <String>['最近访客', '编辑布局', '修改昵称', '家园']) {
+    for (final label in <String>['最近访客', '编辑布局', '家园']) {
       expect(find.text(label), findsNothing, reason: '他人主页不该有：$label');
     }
     // 换成关注 / 拉黑（"关注"也是统计项标签，所以用 findsWidgets）

@@ -8,15 +8,15 @@
 /// 签名用 http_getParamMD5（与 dynamics 相同）。
 library;
 
-import 'dart:convert' show jsonEncode;
-
 import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart' show httpGetParamKey, httpGetParamMd5;
 import '../models/homepage_modules.dart'
     show
+        HomeLayout,
+        encodeHomeLayout,
         favoriteFolderCount,
-        homeLayoutEntries,
+        homeLayout,
         multimediaImprintCount,
         userAddrFromResponse;
 import '../net/config.dart'
@@ -253,12 +253,12 @@ class PlayerHomeClient {
   /// （`playercenterv2homepageservice.lua:26-43`）：参数 `target`；
   /// 响应 `data.layout` 为 JSON 串（同文件 `:87`）。条目原样返回，
   /// 供 UI 拖拽排序后 round-trip 保存（见 [changeHomepageLayout]）。
-  Future<List<Map<String, Object?>>> getHomepageLayout(int targetUin) async {
+  Future<HomeLayout> getHomepageLayout(int targetUin) async {
     final url = _url('miniw/personal_center', 'get_homepage_layout', {
       'target': '$targetUin',
     });
     final ret = await _get(url);
-    return homeLayoutEntries(ret);
+    return homeLayout(ret);
   }
 
   /// 保存主页布局（`act=change_homepage_layout`）。
@@ -267,10 +267,11 @@ class PlayerHomeClient {
   /// （`playercenterv2homepageservice.lua:45-66`）：参数 `data` = 布局 JSON，
   /// 成功后 `ret.code == 0`。**只改顺序、不改字段**，避免臆造布局 schema。
   Future<bool> changeHomepageLayout(
-    List<Map<String, Object?>> layout,
-  ) async {
+    List<Map<String, Object?>> layout, {
+    Map<String, Object?> meta = const {},
+  }) async {
     final url = _url('miniw/personal_center', 'change_homepage_layout', {
-      'data': jsonEncode(layout),
+      'data': encodeHomeLayout(layout, meta: meta),
     });
     final ret = await _get(url);
     final code = ret['code'] ?? ret['ret'];

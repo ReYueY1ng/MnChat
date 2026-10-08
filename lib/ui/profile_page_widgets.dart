@@ -28,7 +28,6 @@ class _ProfileHeaderCard extends StatelessWidget {
   /// 以下入口只在自己主页出现：为空即不渲染（看别人主页时传 null）。
   final VoidCallback? onVisitors;
   final VoidCallback? onEditLayout;
-  final VoidCallback? onRename;
 
   /// 打开「头像编辑」弹窗（点按头像或顶栏按钮均可）。
   final VoidCallback? onEditAvatar;
@@ -47,7 +46,6 @@ class _ProfileHeaderCard extends StatelessWidget {
     required this.onCopyUin,
     this.onVisitors,
     this.onEditLayout,
-    this.onRename,
     this.onEditAvatar,
   });
 
@@ -223,12 +221,6 @@ class _ProfileHeaderCard extends StatelessWidget {
                   onPressed: onEditLayout,
                   icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
                   label: const Text('编辑布局'),
-                ),
-              if (onRename != null)
-                OutlinedButton.icon(
-                  onPressed: onRename,
-                  icon: const Icon(Icons.drive_file_rename_outline, size: 16),
-                  label: const Text('修改昵称'),
                 ),
             ],
           ),
