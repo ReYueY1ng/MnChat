@@ -119,6 +119,16 @@ class _CommentPanel extends StatelessWidget {
                 expanded: expandedReplies.contains(i),
                 replyLoading: replyLoading.contains(i),
                 onToggleReplies: () => onToggleReplies(i),
+                // 行内点赞按钮与菜单项走同一个 action（本人已赞则取消）。
+                onToggleLike: () {
+                  final k = commentKey(comments[i]);
+                  onCommentAction(
+                    i,
+                    likedCommentKeys.contains(k)
+                        ? _CommentAction.unlike
+                        : _CommentAction.like,
+                  );
+                },
                 liked: likedCommentKeys.contains(commentKey(comments[i])),
                 likeDelta: commentLikeDelta[commentKey(comments[i])] ?? 0,
                 pinned: topCommentKey != null &&
@@ -218,6 +228,9 @@ class _CommentTile extends StatelessWidget {
   final int likeDelta;
   final bool pinned;
 
+  /// 直接点赞 / 取消点赞（对齐游戏评论行的 btn_like / btn_unlike）。
+  final VoidCallback onToggleLike;
+
   final List<PopupMenuEntry<_CommentAction>> Function() menuItems;
   final void Function(_CommentAction) onAction;
   final void Function(Offset globalPosition) onLongPressMenu;
@@ -242,6 +255,7 @@ class _CommentTile extends StatelessWidget {
     required this.liked,
     required this.likeDelta,
     required this.pinned,
+    required this.onToggleLike,
     required this.menuItems,
     required this.onAction,
     required this.onLongPressMenu,
@@ -380,23 +394,52 @@ class _CommentTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.xs),
-          // 点赞数（只读展示）+ 更多操作菜单
+          // 点赞（可点，对齐游戏评论行 btn_like=344 / btn_unlike=345）+ 更多操作菜单
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
-                    size: 14,
-                    color: liked
-                        ? theme.colorScheme.primary
-                        : theme.colorScheme.outline,
+                  InkWell(
+                    onTap: onToggleLike,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 2,
+                        vertical: 2,
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            liked
+                                ? Icons.thumb_up_alt
+                                : Icons.thumb_up_alt_outlined,
+                            size: 14,
+                            color: liked
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.outline,
+                          ),
+                          if (likeCount > 0) ...[
+                            const SizedBox(width: 3),
+                            Text(
+                              '$likeCount',
+                              style: theme.textTheme.labelSmall,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
                   ),
-                  if (likeCount > 0) ...[
-                    const SizedBox(width: 3),
-                    Text('$likeCount', style: theme.textTheme.labelSmall),
-                  ],
+                  // 行内「回复」（对齐游戏评论行 btn_reply=678），与菜单里的回复同一个 action。
+                  InkWell(
+                    onTap: () => onAction(_CommentAction.reply),
+                    borderRadius: BorderRadius.circular(4),
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+                      child: Icon(Icons.reply, size: 14),
+                    ),
+                  ),
                 ],
               ),
               PopupMenuButton<_CommentAction>(
@@ -459,20 +502,29 @@ class _ReplyRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: AppSpacing.xs),
-          Row(
-            children: [
-              Icon(
-                liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
-                size: 12,
-                color: liked
-                    ? theme.colorScheme.primary
-                    : theme.colorScheme.outline,
+          // 回复点赞（可点，对齐游戏回复行 btn_like / btn_unlike）。
+          InkWell(
+            onTap: () =>
+                onAction(liked ? _ReplyAction.unlike : _ReplyAction.like),
+            borderRadius: BorderRadius.circular(4),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 2),
+              child: Row(
+                children: [
+                  Icon(
+                    liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
+                    size: 12,
+                    color: liked
+                        ? theme.colorScheme.primary
+                        : theme.colorScheme.outline,
+                  ),
+                  if (likeCount > 0) ...[
+                    const SizedBox(width: 2),
+                    Text('$likeCount', style: theme.textTheme.labelSmall),
+                  ],
+                ],
               ),
-              if (likeCount > 0) ...[
-                const SizedBox(width: 2),
-                Text('$likeCount', style: theme.textTheme.labelSmall),
-              ],
-            ],
+            ),
           ),
           PopupMenuButton<_ReplyAction>(
             tooltip: dynamicsReplyMenuTooltip,

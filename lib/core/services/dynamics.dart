@@ -942,6 +942,53 @@ class DynamicsRedpointNotice {
   }
 }
 
+/// 动态大厅分类标签（`act=get_posting_tag_list`）。
+///
+/// 服务端下发 `tag_id` / `title`；`ParseTabCfgs` 另外用 `editable` 标记允许
+/// 用户自定义排序的分类（`dynamicsdatamanager.lua:6752-6800`）。内置的 1/2/3/4
+/// 即 推荐/关注/同城/官方（`DynamicHallTabType`），其余为服务端配置的分类
+/// （拉列表时走 `get_posting_by_tag`）。
+class DynamicsTag {
+  /// 分类 id（`tag_id`）。
+  final int tagId;
+
+  /// 分类标题（`title`）。
+  final String title;
+
+  const DynamicsTag({this.tagId = 0, this.title = ''});
+
+  /// 解析响应：支持 `[{tag_id,title}]` / `{list|tag_list|data:[...]}` /
+  /// `{<id>:{...}}` 三种形态；脏条目跳过，绝不抛。
+  static List<DynamicsTag> parseList(Object? data) {
+    Object? raw = data;
+    if (raw is Map) {
+      // 包裹形态取内层；都不是时把整个 Map 当 `{<id>: {...}}` 映射。
+      raw = raw['tag_list'] ?? raw['list'] ?? raw['data'] ?? raw;
+    }
+    final out = <DynamicsTag>[];
+    void add(int fallbackId, Object? e) {
+      if (e is! Map) return;
+      final m = e.cast<String, Object?>();
+      final id = _pickInt(m, ['tag_id', 'tagId', 'id']);
+      final tagId = id != 0 ? id : fallbackId;
+      if (tagId == 0) return;
+      final title = m['title']?.toString() ?? m['name']?.toString() ?? '';
+      out.add(DynamicsTag(tagId: tagId, title: title));
+    }
+
+    if (raw is List) {
+      for (final e in raw) {
+        add(0, e);
+      }
+    } else if (raw is Map) {
+      for (final e in raw.entries) {
+        add(int.tryParse('${e.key}') ?? 0, e.value);
+      }
+    }
+    return out;
+  }
+}
+
 /// 动态客户端。
 class DynamicsClient {
   final int uin;
@@ -1156,8 +1203,12 @@ class DynamicsClient {
           if (info != null) {
             final pch = info['PersonCenterHead'];
             if (pch is Map) {
-              final diy = (pch)['diy_header'];
-              if (diy is Map) avatar = (diy)['pass_url']?.toString();
+              // 对齐 `GetPlayerHeadPath`：只有 `use_diy == 1` 才用 DIY 头像
+              // （有 pass_url 但未启用时游戏显示的是角色头像）。
+              final diy = pch['diy_header'];
+              if (pch['use_diy'] == 1 && diy is Map) {
+                avatar = (diy)['pass_url']?.toString();
+              }
             }
             posts.add(post.withProfile(
               nickname: info['NickName']?.toString(),
@@ -1188,6 +1239,20 @@ class DynamicsClient {
       }
     }
     return FeedResult(posts, nextCt);
+  }
+
+  /// 动态大厅分类列表（`act=get_posting_tag_list`）。
+  ///
+  /// 路径是**带 act 的二级路径** `/miniw/posting_tag/act/get_posting_tag_list`
+  /// （`dynamicsdatamanager.lua:6906`）。实测 2026-10-08：该路径在缺 `uin` 时回
+  /// `{"code":1,"msg":"Unmarshal: field \"uin\" is not set"}`，补上后依次要求
+  /// `time` / `s2t`；而 `/miniw/posting_tag?act=…` 直接 404。所以二级路径才对，
+  /// 且 `uin/time/s2t` 正是 [_url2] 全局参数会补齐的字段。
+  Future<List<DynamicsTag>> fetchPostingTags() async {
+    final ack = await _getAck(
+      _url2('posting_tag/act/get_posting_tag_list', 'get_posting_tag_list'),
+    );
+    return DynamicsTag.parseList(ack.rawData);
   }
 
   /// 分页拉取动态评论。
@@ -1414,12 +1479,31 @@ class DynamicsClient {
   }
 
   /// 查询投票信息（act=get_vote_info）。无有效数据 → null。
-  Future<DynamicsVoteInfo?> getVoteInfo(String voteId) async {
-    final ack =
-        await _getAck(_url3('customize_vote/', 'get_vote_info', {
+  ///
+  /// 对齐游戏 `dynamicsdatamanager.lua:4639-4656`：`code != 0` 时**只在动态作者
+  /// 是本人时才提示 `ret.msg`**（`bolMine`），否则静默；两种情况都把 `ret.data`
+  /// 交给回调。所以这里**不走 `reportIfFailed`** —— 那会把服务端业务提示
+  /// （例如「审核中」）弹成全局错误条，而游戏里别人的投票照常显示。
+  Future<DynamicsVoteInfo?> getVoteInfo(
+    String voteId, {
+    void Function(String msg)? onMessage,
+  }) async {
+    final url = _url3('customize_vote/', 'get_vote_info', {
       'vote_id': voteId,
-    }));
-    return DynamicsVoteInfo.fromMap(ack._data);
+    });
+    final resp = await _dio.get(url);
+    final raw = resp.data;
+    final decoded = raw is String ? decodeHttpResponse(raw) : raw;
+    if (decoded is! Map) return null;
+    final m = decoded.cast<String, Object?>();
+    final code = m['code'] ?? m['ret'];
+    if (code is num && code != 0) {
+      final msg = m['msg']?.toString() ?? '';
+      if (msg.isNotEmpty) onMessage?.call(msg);
+    }
+    final data = m['data'];
+    if (data is Map) return DynamicsVoteInfo.fromMap(data.cast<String, Object?>());
+    return DynamicsVoteInfo.fromMap(m);
   }
 
   // ── 动态通知（对齐 /miniw/msg_box get_channel_msg_list）─────────────────

@@ -24,6 +24,8 @@ List<InlineSpan> buildRichSpans(
   required BuildContext context,
   double emojiSize = 16,
   bool emojiAnimate = true,
+  /// 话题 `#{名称&id}` 被点击时回传 `(话题 id, 展示名)`；为空时话题只当纯文本。
+  void Function(String topicId, String label)? onTopicTap,
 }) {
   final spans = <InlineSpan>[];
   if (content.isEmpty) return spans;
@@ -92,18 +94,33 @@ List<InlineSpan> buildRichSpans(
       // 游戏换行码 `#n`
       spans.add(const TextSpan(text: '\n'));
     } else if (tag.startsWith('#{')) {
-      final label = topicLabels(tag).firstOrNull;
-      if (label != null && label.isNotEmpty) {
-        spans.add(
-          TextSpan(
-            text: ' #$label ',
-            style: TextStyle(
-              color: scheme.onPrimaryContainer,
-              backgroundColor: scheme.primaryContainer,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+      final ref = topicRef(tag);
+      final label = ref?.label ?? '';
+      final id = ref?.id ?? '';
+      if (label.isNotEmpty || id.isNotEmpty) {
+        final topicStyle = TextStyle(
+          color: scheme.onPrimaryContainer,
+          backgroundColor: scheme.primaryContainer,
+          fontWeight: FontWeight.w600,
         );
+        final shown = label.isNotEmpty ? label : id;
+        final text = ' #$shown ';
+        // 带回调时做成可点（进该话题下的动态列表）；否则保持纯文本，
+        // 不影响昵称/名牌等只要纯文本的调用方。
+        if (onTopicTap == null || id.isEmpty) {
+          spans.add(TextSpan(text: text, style: topicStyle));
+        } else {
+          spans.add(
+            WidgetSpan(
+              alignment: PlaceholderAlignment.baseline,
+              baseline: TextBaseline.alphabetic,
+              child: GestureDetector(
+                onTap: () => onTopicTap(id, shown),
+                child: Text(text, style: topicStyle),
+              ),
+            ),
+          );
+        }
       }
     } else if (tag.startsWith('[mdemo]')) {
       // 动态/新表情包代码 → 图片（素材由表情仓库按需下载）。
@@ -191,6 +208,9 @@ class RichTextView extends ConsumerWidget {
   final TextAlign? textAlign;
   final double emojiSize;
 
+  /// 话题 `#名称` 点击回调（进该话题下的动态列表）；为空时话题只当纯文本。
+  final void Function(String topicId, String label)? onTopicTap;
+
   const RichTextView(
     this.text, {
     super.key,
@@ -199,6 +219,7 @@ class RichTextView extends ConsumerWidget {
     this.overflow,
     this.textAlign,
     this.emojiSize = 16,
+    this.onTopicTap,
   });
 
   @override
@@ -229,7 +250,12 @@ class RichTextView extends ConsumerWidget {
     return Text.rich(
       TextSpan(
         style: style,
-        children: buildRichSpans(raw, context: context, emojiSize: emojiSize),
+        children: buildRichSpans(
+          raw,
+          context: context,
+          emojiSize: emojiSize,
+          onTopicTap: onTopicTap,
+        ),
       ),
       maxLines: maxLines,
       overflow: overflow,

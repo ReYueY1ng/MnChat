@@ -5,12 +5,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/nickname.dart' show plainNickname;
 import '../core/services/dynamics.dart';
+import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart' show buildRichSpans, RichTextView;
 import 'widgets/image_viewer.dart' show openImageViewer;
 import 'widgets/session_player_info_popup.dart';
+import 'dynamics_topic_page.dart' show DynamicsTopicPage;
 import '../core/services/image_disk_cache.dart';
 
 part 'dynamics_detail_state.dart';

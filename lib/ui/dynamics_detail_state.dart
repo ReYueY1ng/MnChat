@@ -30,6 +30,8 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         avatarUrl: avatar,
         headFrameId: headFrameId,
         showActions: uin != ref.read(myUinProvider),
+        // 动态来源的按钮组（个人中心 / 加好友 / 赠送 / 关注）。
+        origin: PlayerCardOrigin.dynamics,
       ),
     );
   }
@@ -72,6 +74,10 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 本人动态是否已置顶（详情接口不下发该标志，先按本地态翻转）。
   bool _postTop = false;
 
+  /// 作者资料兜底（消息中心 / 通知页进来的动态往往只有 uin）。
+  String? _authorName;
+  String? _authorAvatar;
+
   @override
   void initState() {
     super.initState();
@@ -88,7 +94,47 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
     }
     _likeCount = widget.post.likeCount;
+    unawaited(_loadAuthorIfMissing());
     _loadComments(reset: true);
+  }
+
+  /// 按 uin 补齐作者昵称/头像（服务端对消息中心 / 通知页进入的动态常常只下发
+  /// uin，卡片就会只剩一串数字且没有头像）。失败保持原样，绝不抛。
+  Future<void> _loadAuthorIfMissing() async {
+    final post = widget.post;
+    final hasName = post.nickname?.isNotEmpty ?? false;
+    final hasAvatar = post.avatar?.isNotEmpty ?? false;
+    if (hasName && hasAvatar) return;
+    try {
+      final auth = ref.read(chatServiceProvider).auth;
+      if (auth == null) return;
+      final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+      final list = await profile.getProfileBatch3([post.uin]);
+      final heads = await profile.getPersonCenterHeadInfos([post.uin]);
+      if (!mounted) return;
+      final p = list.isNotEmpty ? list.first : null;
+      final head = heads[post.uin];
+      setState(() {
+        if (!hasName && (p?.nickname.isNotEmpty ?? false)) {
+          _authorName = p!.nickname;
+        }
+        if (!hasAvatar) {
+          // 与好友资料同规则：DIY 自定义头像优先，其次资料网络头像。
+          final fallback = PlayerProfile.resolveRoleHeadFallback(
+            headType: head?.type,
+            headId: head?.id,
+            skinId: p?.headSkinId,
+            model: p?.headModel,
+          );
+          _authorAvatar = head?.diyUrl ??
+              (PlayerProfile.roleHeadHasLocalIcon(fallback)
+                  ? null
+                  : p?.avatarUrl);
+        }
+      });
+    } catch (_) {
+      // 补齐失败：保持原样（昵称回退 uin、头像首字）
+    }
   }
 
   /// 本人 uin（评论置顶/删除与 AppBar 管理菜单按它判定）。
@@ -826,8 +872,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
                 Expanded(
                   child: _PostPanel(
                     post: widget.post,
+                    authorName: _authorName,
+                    authorAvatar: _authorAvatar,
                     onAvatarTap: _showPlayerCard,
                     client: _client,
+                    isMine: _isMinePost,
                   ),
                 ),
                 const VerticalDivider(width: 1),
@@ -872,8 +921,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
                     children: [
                       _PostPanel(
                         post: widget.post,
+                        authorName: _authorName,
+                        authorAvatar: _authorAvatar,
                         onAvatarTap: _showPlayerCard,
                         client: _client,
+                        isMine: _isMinePost,
                       ),
                       const Divider(),
                       _CommentPanel(

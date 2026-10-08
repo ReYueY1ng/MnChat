@@ -85,6 +85,25 @@ List<String> topicLabels(String? raw) {
   return out;
 }
 
+/// 话题标记（带 id 捕获组）：`#{标签&u:123:456}` → label / id。
+///
+/// 与 [_topicRe] 分开：那个第二个 `&...` 是非捕获组（它只关心标签），
+/// 这里要把 id 单独拿出来。
+final RegExp _topicRefRe = RegExp(r'#\{([^}&]*)(?:&([^}]*))?\}');
+
+/// 抽出一个话题标记的（标签, 话题 id）。非话题标记 / 全空 → null。
+///
+/// 形态 `#{名称&u:123:456}`：标签 = group(1)，id = group(2)（游戏 callBack1 的
+/// pattern1 / pattern2，`dynamicsdatamanager.lua:3197-3240`）。
+({String label, String id})? topicRef(String tag) {
+  final m = _topicRefRe.firstMatch(tag);
+  if (m == null) return null;
+  final label = m.group(1)?.trim() ?? '';
+  final id = m.group(2)?.trim() ?? '';
+  if (label.isEmpty && id.isEmpty) return null;
+  return (label: label, id: id);
+}
+
 /// 把话题标记替换成可读的 `#标签` 文本（无 UI 依赖的降级形态）。
 String plainContent(String? raw) {
   if (raw == null) return '';

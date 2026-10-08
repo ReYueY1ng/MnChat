@@ -10,14 +10,31 @@ class _PostPanel extends StatelessWidget {
   /// 动态服务客户端；投票卡用它拉取投票信息 / 提交投票。
   final DynamicsClient? client;
 
-  const _PostPanel({required this.post, this.onAvatarTap, this.client});
+  /// 作者资料兜底：消息中心 / 通知页进来的动态常常只有 uin（服务端不下发昵称/
+  /// 头像），由页面按 uin 补齐后传入。
+  final String? authorName;
+  final String? authorAvatar;
+
+  /// 动态作者是不是我（投票拉取失败时是否提示，对齐游戏 `bolMine`）。
+  final bool isMine;
+
+  const _PostPanel({required this.post, this.onAvatarTap, this.client,
+    this.authorName,
+    this.authorAvatar,
+    this.isMine = false,
+  });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final name = (post.nickname ?? '${post.uin}').isEmpty
-        ? '${post.uin}'
-        : (post.nickname ?? '${post.uin}');
+    // 服务端对消息中心 / 通知页进入的动态常常只下发 uin，用页面补齐的作者资料兜底。
+    final nickname = (post.nickname?.isNotEmpty ?? false)
+        ? post.nickname!
+        : ((authorName?.isNotEmpty ?? false) ? authorName! : '');
+    final name = nickname.isEmpty ? '${post.uin}' : nickname;
+    final avatar = (post.avatar?.isNotEmpty ?? false)
+        ? post.avatar
+        : authorAvatar;
     final meta = [
       if (post.createTime > 0) _relative(post.createTime),
       'IP ${post.location.isNotEmpty ? post.location : post.city}',
@@ -36,13 +53,13 @@ class _PostPanel extends StatelessWidget {
                     : (d) => onAvatarTap!(
                         post.uin,
                         name,
-                        post.avatar,
+                        avatar,
                         post.headFrameId,
                         d.globalPosition,
                       ),
                 child: AvatarView(
                   name: name,
-                  avatarUrl: post.avatar,
+                  avatarUrl: avatar,
                   radius: 22,
                   frameId: post.headFrameId,
                 ),
@@ -79,9 +96,20 @@ class _PostPanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: 14),
-          // 全文
+          // 全文（话题 `#名称` 可点，进该话题下的动态列表）
           Text.rich(
-            TextSpan(children: buildRichSpans(post.content, context: context)),
+            TextSpan(
+              children: buildRichSpans(
+                post.content,
+                context: context,
+                onTopicTap: (id, label) => Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) =>
+                        DynamicsTopicPage(topicId: id, topicTitle: label),
+                  ),
+                ),
+              ),
+            ),
             style: const TextStyle(fontSize: 15, height: 1.5),
           ),
           // 图片（整列自然比例）
@@ -142,7 +170,7 @@ class _PostPanel extends StatelessWidget {
           // 投票卡（vote_id 非空即投票动态）
           if (post.voteId != null && post.voteId!.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.md),
-            _VoteCard(post: post, client: client),
+            _VoteCard(post: post, client: client, isMine: isMine),
           ],
           if (post.isLottery) ...[const SizedBox(height: AppSpacing.sm), _LotteryInfo()],
         ],
@@ -161,7 +189,10 @@ class _VoteCard extends StatefulWidget {
   final DynamicsPost post;
   final DynamicsClient? client;
 
-  const _VoteCard({required this.post, this.client});
+  /// 动态作者是不是我（与游戏 `bolMine` 同义）。
+  final bool isMine;
+
+  const _VoteCard({required this.post, this.client, this.isMine = false});
 
   @override
   State<_VoteCard> createState() => _VoteCardState();
@@ -203,7 +234,14 @@ class _VoteCardState extends State<_VoteCard> {
       });
     }
     try {
-      final info = await client.getVoteInfo(voteId);
+      final info = await client.getVoteInfo(
+        voteId,
+        onMessage: widget.isMine && mounted
+            ? (msg) => ScaffoldMessenger.of(
+                context,
+              ).showSnackBar(SnackBar(content: Text(msg)))
+            : null,
+      );
       if (!mounted) return;
       setState(() {
         _info = info;

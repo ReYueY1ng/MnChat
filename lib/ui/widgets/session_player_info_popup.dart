@@ -3,8 +3,9 @@
 /// - [showSessionPlayerInfoPopup]：在头像附近弹出的浮动信息卡（等级 / 默契度 /
 ///   冒险家 / 称号 / 勋章 + 个人中心 / 置顶 / 赠送 / 更多），替代原先的全屏
 ///   底部弹窗；
-/// - [showFriendMenu]：长按 / 右键 / 信息卡「更多」共用的好友操作菜单（上线
-///   通知 / 拍一拍 / 置顶 / 备注 / 删除好友，会话列表另带免打扰）；
+/// - 「更多」接 `session_menu.dart` 的 [showSessionMenu]（新的会话浮动菜单，
+///   与长按 / 右键同一套：上线通知 / 拍一拍 / 置顶 / 免打扰 / 标签 / 备注 /
+///   删除好友），不再走已废弃的底部弹窗版本；
 /// - 内容片段与会话缓存复用 `player_info_common.dart`。[SessionPlayerInfo]
 ///   由此文件继续对外暴露。
 library;
@@ -15,7 +16,6 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/messages.dart';
-import '../../core/models/nickname.dart' show plainNickname;
 import '../../core/storage/settings_store.dart';
 import '../../state/providers.dart';
 import '../player_home_page.dart';
@@ -23,9 +23,27 @@ import '../profile_page.dart';
 import '../theme/app_tokens.dart';
 import 'gift_picker.dart' show showGiftPicker;
 import 'player_info_common.dart';
-import 'rich_text_view.dart';
+import 'session_menu.dart' show showSessionMenu;
 
 export 'player_info_common.dart' show SessionPlayerInfo;
+
+/// 玩家卡的入口来源 —— 决定底部按钮。
+///
+/// 游戏里这套按钮不是写死的：`PlayerInfoCardMgr:ShowByParamFguiObj(funcBtns: ...)`
+/// 由**每个调用点**自己传（`playerinfocardmgr.lua:19-35` 的 `def_funcBtn`）。
+/// 对得上的两处：
+///   - 动态信息流 / 动态详情的头像卡：`个人中心 / 加好友 / 赠送 / 关注`
+///     （`dynamicsinfocard.lua:2087-2105`）；
+///   - 好友列表的卡：只有 `个人中心`（`friendoldrely/friendmgr.lua:2746-2751`）。
+/// 本客户端在 friends 来源保留了会话类的置顶/更多（游戏把它们放在会话菜单里，
+/// 不在卡上）。
+enum PlayerCardOrigin {
+  /// 好友列表 / 会话列表 / 侧栏。
+  friends,
+
+  /// 动态信息流 / 动态详情。
+  dynamics,
+}
 
 /// 在 [anchor]（头像的屏幕矩形）附近弹出玩家信息浮窗。
 ///
@@ -43,6 +61,7 @@ Future<void> showSessionPlayerInfoPopup(
   int? headId,
   int? headFrameId,
   bool showActions = true,
+  PlayerCardOrigin origin = PlayerCardOrigin.friends,
 }) {
   return showDialog<void>(
     context: context,
@@ -58,6 +77,7 @@ Future<void> showSessionPlayerInfoPopup(
       headId: headId,
       headFrameId: headFrameId,
       showActions: showActions,
+      origin: origin,
     ),
   );
 }
@@ -80,6 +100,9 @@ class _SessionPlayerInfoPopup extends StatelessWidget {
   /// 是否展示底部操作行（本人信息卡只展示资料，不带好友操作）。
   final bool showActions;
 
+  /// 入口来源（决定底部按钮）。
+  final PlayerCardOrigin origin;
+
   const _SessionPlayerInfoPopup({
     required this.anchor,
     required this.hostContext,
@@ -91,6 +114,7 @@ class _SessionPlayerInfoPopup extends StatelessWidget {
     this.headId,
     this.headFrameId,
     this.showActions = true,
+    this.origin = PlayerCardOrigin.friends,
   });
 
   /// 浮窗最大宽度（与底部弹窗信息区相当的紧凑卡片）。
@@ -130,6 +154,7 @@ class _SessionPlayerInfoPopup extends StatelessWidget {
                 headId: headId,
                 headFrameId: headFrameId,
                 showActions: showActions,
+                origin: origin,
               ),
             ),
           ),
@@ -153,6 +178,9 @@ class _SessionPlayerInfoCard extends StatefulWidget {
   /// 是否展示底部操作行（本人信息卡为 false，只展示资料）。
   final bool showActions;
 
+  /// 入口来源（决定底部按钮）。
+  final PlayerCardOrigin origin;
+
   const _SessionPlayerInfoCard({
     required this.hostContext,
     required this.ref,
@@ -163,6 +191,7 @@ class _SessionPlayerInfoCard extends StatefulWidget {
     this.headId,
     this.headFrameId,
     this.showActions = true,
+    this.origin = PlayerCardOrigin.friends,
   });
 
   @override
@@ -209,6 +238,118 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
   /// 是不是「我自己」——决定动作行内容与「个人主页」的去向。
   bool get _isSelf => widget.uin == widget.ref.read(myUinProvider);
 
+  /// 本次卡内已经点过「关注」/「加好友」（点完就收起对应按钮）。
+  bool _followedLocal = false;
+  bool _friendRequestedLocal = false;
+
+  /// 关系位（与会话列表同源：bit3=8 好友、bit4=16 关注）。
+  int get _relation {
+    try {
+      final list = widget.ref.read(contactsProvider).value ?? const <Contact>[];
+      for (final c in list) {
+        if (c.uin == widget.uin) return c.relation;
+      }
+    } catch (_) {
+      // 联系人未加载 / 环境不可用（测试）时按 0 处理。
+    }
+    return 0;
+  }
+
+  bool get _alreadyFriend => (_relation & 8) != 0;
+  bool get _alreadyFollowing => (_relation & 16) != 0 || _followedLocal;
+
+  /// 加好友（`applyFriend`，对齐游戏卡片 `def_funcBtn.AddFriend`）。
+  Future<void> _addFriend() async {
+    try {
+      await widget.ref.read(chatServiceProvider).applyFriend(widget.uin);
+      if (!mounted) return;
+      setState(() => _friendRequestedLocal = true);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已发送好友申请')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('申请失败，请稍后重试')));
+    }
+  }
+
+  /// 关注（`followPlayer`，对齐游戏卡片 `def_funcBtn.Focus`）。
+  Future<void> _follow() async {
+    try {
+      await widget.ref
+          .read(chatServiceProvider)
+          .followPlayer(widget.uin, follow: true);
+      if (!mounted) return;
+      setState(() => _followedLocal = true);
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('已关注')));
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('关注失败')));
+    }
+  }
+
+  /// 他人的操作行 —— 按钮按入口来源取，对齐游戏
+  /// `PlayerInfoCardMgr:ShowByParamFguiObj(funcBtns: ...)`：
+  /// 动态来源 = 个人中心 / 加好友 / 赠送 / 关注（`dynamicsinfocard.lua:2087-2105`）；
+  /// 其余来源保留会话类的 置顶 / 更多（游戏放在会话菜单里，不在卡上）。
+  List<Widget> _otherActions(bool pinned) {
+    if (widget.origin == PlayerCardOrigin.dynamics) {
+      return [
+        PlayerCircleAction(
+          icon: Icons.person_outline,
+          label: '个人中心',
+          onTap: _openHomePage,
+        ),
+        if (!_alreadyFriend && !_friendRequestedLocal)
+          PlayerCircleAction(
+            icon: Icons.person_add_alt_1_outlined,
+            label: '加好友',
+            onTap: () => unawaited(_addFriend()),
+          ),
+        PlayerCircleAction(
+          icon: Icons.card_giftcard,
+          label: '赠送',
+          onTap: _gift,
+        ),
+        if (!_alreadyFollowing)
+          PlayerCircleAction(
+            icon: Icons.favorite_border,
+            label: '关注',
+            onTap: () => unawaited(_follow()),
+          ),
+      ];
+    }
+    return [
+      PlayerCircleAction(
+        icon: Icons.person_outline,
+        label: '个人中心',
+        onTap: _openHomePage,
+      ),
+      PlayerCircleAction(
+        icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
+        label: pinned ? '取消置顶' : '置顶',
+        highlighted: pinned,
+        onTap: () => unawaited(_togglePinned()),
+      ),
+      PlayerCircleAction(
+        icon: Icons.card_giftcard,
+        label: '赠送',
+        onTap: _gift,
+      ),
+      PlayerCircleAction(
+        icon: Icons.more_horiz,
+        label: '更多',
+        onTap: () => unawaited(_openMoreMenu()),
+      ),
+    ];
+  }
+
   /// 个人中心：先关浮窗，再推入主页。
   ///
   /// 自己 → 个人主页（[ProfilePage]，带编辑入口）；别人 → 他人主页
@@ -253,12 +394,24 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
     return box.localToGlobal(Offset.zero) & box.size;
   }
 
-  /// 更多：关浮窗后打开好友操作菜单（与长按 / 右键共用）。
+  /// 更多：关浮窗后打开**新版**会话浮动菜单（[showSessionMenu]，与长按 / 右键
+  /// 同一套；它已替代原先的底部弹窗版本）。
   Future<void> _openMoreMenu() async {
+    final anchor = _anchorRect(context);
     Navigator.of(context).pop();
     final host = widget.hostContext;
     if (!host.mounted) return;
-    await showFriendMenu(host, widget.ref, uin: widget.uin, name: widget.name);
+    await showSessionMenu(
+      host,
+      widget.ref,
+      session: ChatSession(
+        id: widget.uin,
+        type: ChatSessionType.friend,
+        name: widget.name,
+      ),
+      globalPosition:
+          anchor?.topLeft ?? const Offset(AppSpacing.lg, AppSpacing.lg),
+    );
   }
 
   @override
@@ -305,289 +458,12 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
                           onTap: _openHomePage,
                         ),
                       ]
-                    : [
-                        PlayerCircleAction(
-                          icon: Icons.person_outline,
-                          label: '个人中心',
-                          onTap: _openHomePage,
-                        ),
-                        PlayerCircleAction(
-                          icon: pinned
-                              ? Icons.push_pin
-                              : Icons.push_pin_outlined,
-                          label: pinned ? '取消置顶' : '置顶',
-                          highlighted: pinned,
-                          onTap: () => unawaited(_togglePinned()),
-                        ),
-                        PlayerCircleAction(
-                          icon: Icons.card_giftcard,
-                          label: '赠送',
-                          onTap: _gift,
-                        ),
-                        PlayerCircleAction(
-                          icon: Icons.more_horiz,
-                          label: '更多',
-                          onTap: () => unawaited(_openMoreMenu()),
-                        ),
-                      ],
+                    : _otherActions(pinned),
               ),
             ],
           ],
         ),
       ),
     );
-  }
-}
-
-/// 好友/会话操作菜单（长按 / 右键 / 信息卡「更多」共用）。
-///
-/// [type] 决定菜单项：好友会话额外提供上线通知 / 备注 / 删除好友，
-/// 群会话只保留置顶（[showMute] 为 true 时再带免打扰，供会话列表沿用旧入口）。
-Future<void> showFriendMenu(
-  BuildContext context,
-  WidgetRef ref, {
-  required int uin,
-  required String name,
-  ChatSessionType type = ChatSessionType.friend,
-  bool showMute = false,
-}) async {
-  final settings = ref.read(settingsProvider);
-  final key = SettingsKeys.sessionKey(type.name, uin);
-  final isFriend = type == ChatSessionType.friend;
-  final pinned = await settings.isPinned(key);
-  final muted = showMute ? await settings.isMuted(key) : false;
-  final notifyOn = isFriend ? await settings.friendOnlineNotify(uin) : false;
-  if (!context.mounted) return;
-
-  final action = await showModalBottomSheet<String>(
-    context: context,
-    builder: (ctx) {
-      final theme = Theme.of(ctx);
-      return SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(title: RichTextView(name), dense: true, enabled: false),
-            const Divider(height: 1),
-            // 上线通知（仅好友）
-            if (isFriend)
-              ListTile(
-                leading: Icon(
-                  notifyOn
-                      ? Icons.notifications_active
-                      : Icons.notifications_none,
-                  color: notifyOn ? theme.colorScheme.primary : null,
-                ),
-                title: Text(notifyOn ? '取消上线通知' : '上线通知'),
-                onTap: () => Navigator.pop(ctx, 'notify'),
-              ),
-            // 置顶
-            ListTile(
-              leading: Icon(
-                pinned ? Icons.push_pin : Icons.push_pin_outlined,
-                color: pinned ? theme.colorScheme.primary : null,
-              ),
-              title: Text(pinned ? '取消置顶' : '置顶'),
-              onTap: () => Navigator.pop(ctx, 'pin'),
-            ),
-            // 免打扰（会话列表原有入口，保留）
-            if (showMute)
-              ListTile(
-                leading: Icon(
-                  muted
-                      ? Icons.notifications_off
-                      : Icons.notifications_outlined,
-                  color: muted ? theme.colorScheme.error : null,
-                ),
-                title: Text(muted ? '取消免打扰' : '免打扰'),
-                onTap: () => Navigator.pop(ctx, 'mute'),
-              ),
-            // 以下仅好友会话
-            if (isFriend) ...[
-              ListTile(
-                leading: const Icon(Icons.touch_app_outlined),
-                title: const Text('拍一拍'),
-                onTap: () => Navigator.pop(ctx, 'pat'),
-              ),
-              ListTile(
-                leading: const Icon(Icons.edit_note),
-                title: const Text('备注'),
-                onTap: () => Navigator.pop(ctx, 'note'),
-              ),
-              ListTile(
-                leading: Icon(
-                  Icons.person_remove_outlined,
-                  color: theme.colorScheme.error,
-                ),
-                title: Text(
-                  '删除好友',
-                  style: TextStyle(color: theme.colorScheme.error),
-                ),
-                onTap: () => Navigator.pop(ctx, 'remove'),
-              ),
-            ],
-          ],
-        ),
-      );
-    },
-  );
-  if (action == null || !context.mounted) return;
-
-  switch (action) {
-    case 'notify':
-      final on = !notifyOn;
-      await settings.setFriendOnlineNotify(uin, on);
-      final synced = await _serverSync(
-        () => ref.read(chatServiceProvider).setFriendOnlineNotify(uin, on: on),
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              synced
-                  ? (on ? '已开启上线通知' : '已关闭上线通知')
-                  : '上线通知同步失败（已本地生效）',
-            ),
-          ),
-        );
-      }
-    case 'pat':
-      var ok = false;
-      try {
-        ok = await ref.read(chatServiceProvider).patFriend(uin);
-      } catch (_) {
-        ok = false;
-      }
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(ok ? '已拍一拍' : '拍一拍失败')),
-        );
-      }
-    case 'pin':
-      final top = !pinned;
-      await settings.setPinned(key, top);
-      final synced = await _serverSync(
-        () => ref.read(chatServiceProvider).setFriendTop(uin, top: top),
-      );
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              synced
-                  ? (top ? '已置顶' : '已取消置顶')
-                  : '置顶同步失败（已本地生效）',
-            ),
-          ),
-        );
-      }
-    case 'mute':
-      await settings.setMuted(key, !muted);
-      if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(muted ? '已取消免打扰' : '已开启免打扰')));
-      }
-    case 'note':
-      await _editFriendNote(context, ref, uin);
-    case 'remove':
-      await _confirmRemoveFriend(context, ref, uin: uin, name: name);
-  }
-}
-
-/// 执行一次服务端同步；成功返回 true，失败返回 false（不抛出）。
-/// 调用方负责在 await 后用 `context.mounted` 守卫再提示。
-Future<bool> _serverSync(Future<Object?> Function() call) async {
-  try {
-    await call();
-    return true;
-  } catch (_) {
-    return false;
-  }
-}
-
-/// 备注编辑对话框：预填当前备注，确认后写入本地设置。
-Future<void> _editFriendNote(
-  BuildContext context,
-  WidgetRef ref,
-  int uin,
-) async {
-  final settings = ref.read(settingsProvider);
-  final current = await settings.friendNote(uin);
-  if (!context.mounted) return;
-  final ctrl = TextEditingController(text: current ?? '');
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('备注'),
-      content: TextField(
-        controller: ctrl,
-        maxLength: 20,
-        autofocus: true,
-        decoration: const InputDecoration(
-          labelText: '备注名',
-          hintText: '输入备注名，留空则清除',
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('取消'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('确定'),
-        ),
-      ],
-    ),
-  );
-  if (ok == true) {
-    await settings.setFriendNote(uin, ctrl.text);
-    final synced = await _serverSync(
-      () => ref.read(chatServiceProvider).setFriendNote(uin, ctrl.text.trim()),
-    );
-    if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(synced ? '备注已保存' : '备注同步失败（已本地保存）')),
-      );
-    }
-  }
-  ctrl.dispose();
-}
-
-/// 删除好友确认框；确认后调用 `buddysvr.buddy_rm`。
-Future<void> _confirmRemoveFriend(
-  BuildContext context,
-  WidgetRef ref, {
-  required int uin,
-  required String name,
-}) async {
-  final ok = await showDialog<bool>(
-    context: context,
-    builder: (ctx) {
-      final theme = Theme.of(ctx);
-      return AlertDialog(
-        title: const Text('删除好友'),
-        content: Text('确定删除好友「${plainNickname(name)}」吗？'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
-          ),
-          FilledButton(
-            style: FilledButton.styleFrom(
-              backgroundColor: theme.colorScheme.error,
-              foregroundColor: theme.colorScheme.onError,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除'),
-          ),
-        ],
-      );
-    },
-  );
-  if (ok != true || !context.mounted) return;
-  final removed = await ref.read(chatServiceProvider).removeFriend(uin);
-  if (context.mounted) {
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(removed ? '已删除好友' : '删除失败')));
   }
 }

@@ -1,3 +1,5 @@
+import 'dart:async' show unawaited;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -38,44 +40,109 @@ class _TabCache {
   bool loadingMore = false;
 }
 
+/// 动态大厅的一个分类标签。
+class _HallTab {
+  final String label;
+
+  /// 内置分类的数据来源；服务端自定义分类为 null（拉列表时走 `get_posting_by_tag`）。
+  final DynamicsFeedType? type;
+
+  /// 服务端分类 id（自定义分类用）。
+  final String? tag;
+
+  const _HallTab(this.label, {this.type, this.tag});
+}
+
 class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   DynamicsClient? _client;
 
-  /// 当前 tab：0 热门 / 1 关注 / 2 同城 / 3 官方 / 4 我的。默认热门（最左）。
+  /// 当前 tab 下标（默认最左）。
   int _tab = 0;
-  final List<_TabCache> _caches =
-      List.generate(_feedTypes.length, (_) => _TabCache());
 
   /// 请求序号：切 tab 后旧的慢响应不应覆盖新列表。
   int _reqSeq = 0;
   final ScrollController _scroll = ScrollController();
 
-  // 同城（city / get_city_posting2）插在「关注」与「官方」之间，
-  // 对齐游戏动态大厅的 tab（dynamicsinfocard.lua tab_type：official=4,
-  // city=3），客户端已为 city 发出 from/ct 参数。
-  static const _feedTypes = [
-    DynamicsFeedType.hot,
-    DynamicsFeedType.recommend,
-    DynamicsFeedType.city,
-    DynamicsFeedType.official,
-    DynamicsFeedType.mine,
+  // 内置分类：同城插在「关注」与「官方」之间，对齐游戏动态大厅的 tab
+  // （dynamicsinfocard.lua tab_type：official=4, city=3）；「我的」是客户端自己的
+  // 入口（`get_posting_list`）。
+  static const List<_HallTab> _baseTabs = [
+    _HallTab('热门', type: DynamicsFeedType.hot),
+    _HallTab('关注', type: DynamicsFeedType.recommend),
+    _HallTab('同城', type: DynamicsFeedType.city),
+    _HallTab('官方', type: DynamicsFeedType.official),
   ];
-  static const _feedLabels = [
-    '热门',
-    '关注',
-    '同城',
-    '官方',
-    '我的',
+  static const _HallTab _mineTab = _HallTab('我的', type: DynamicsFeedType.mine);
+
+  /// 服务端下发的额外分类（`get_posting_tag_list`）。
+  ///
+  /// 服务器把 1/2/3/4（推荐/关注/同城/官方，`DynamicHallTabType`）也一起下发，
+  /// 这四个已经在内置列表里，只追加其余的（`editable` 的服务端分类）。
+  List<DynamicsTag> _extraTags = const [];
+
+  /// 当前分类列表（服务端分类插在「我的」之前）。
+  List<_HallTab> get _tabs => [
+    ..._baseTabs,
+    for (final t in _extraTags)
+      _HallTab(t.title.isEmpty ? '分类${t.tagId}' : t.title, tag: '${t.tagId}'),
+    _mineTab,
   ];
+
+  /// 各分类的独立缓存（下标与 [_tabs] 对齐，按需增长）。
+  final List<_TabCache> _caches = [];
+
+  _TabCache _cacheFor(int i) {
+    while (_caches.length <= i) {
+      _caches.add(_TabCache());
+    }
+    return _caches[i];
+  }
+
+  void _init() {
+    final auth = ref.read(chatServiceProvider).auth;
+    if (auth == null) {
+      setState(() {
+        _cacheFor(0).error = '未登录';
+        _cacheFor(0).loading = false;
+      });
+      return;
+    }
+    _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    unawaited(_loadTags());
+    _load();
+  }
+
+  /// 拉服务端分类（`get_posting_tag_list`）。失败/为空则只用内置分类。
+  Future<void> _loadTags() async {
+    final client = _client;
+    if (client == null) return;
+    try {
+      final tags = await client.fetchPostingTags();
+      if (!mounted || tags.isEmpty) return;
+      // 1..4 是内置的 推荐/关注/同城/官方，不重复添加。
+      final extra = [
+        for (final t in tags)
+          if (t.tagId < 1 || t.tagId > 4) t,
+      ];
+      if (extra.isEmpty) return;
+      setState(() => _extraTags = extra);
+    } catch (_) {
+      // 拉不到分类就用内置那几个（不阻断动态流）
+    }
+  }
 
   /// 只看某个玩家的动态时：固定用「我的」这个 act（`get_posting_list`），
   /// 只是把 `op_uin` 换成对方 —— 服务端同一个接口既能查自己也能查别人。
   bool get _singleAuthor => widget.authorUin != null;
 
-  DynamicsFeedType get _feedType =>
-      _singleAuthor ? DynamicsFeedType.mine : _feedTypes[_tab];
+  /// 当前分类（单作者模式固定用「我的」）。
+  _HallTab get _currentTab {
+    final tabs = _tabs;
+    if (_tab < 0 || _tab >= tabs.length) return _mineTab;
+    return _singleAuthor ? _mineTab : tabs[_tab];
+  }
 
-  _TabCache get _cache => _singleAuthor ? _caches.first : _caches[_tab];
+  _TabCache get _cache => _cacheFor(_singleAuthor ? 0 : _tab);
 
   @override
   void initState() {
@@ -104,23 +171,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     }
   }
 
-  void _init() {
-    final auth = ref.read(chatServiceProvider).auth;
-    if (auth == null) {
-      setState(() {
-        _cache.error = '未登录';
-        _cache.loading = false;
-      });
-      return;
-    }
-    _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
-    _load();
-  }
-
   /// 加载当前 tab（首次/下拉刷新）。
   Future<void> _load() async {
     final client = _client;
     if (client == null) return;
+    final tab = _currentTab;
     final cache = _cache;
     final seq = ++_reqSeq;
     setState(() {
@@ -129,7 +184,8 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     });
     try {
       final result = await client.pullPostings(
-        _feedType,
+        tab.type ?? DynamicsFeedType.mine,
+        tag: tab.tag,
         opUin: widget.authorUin,
       );
       if (!mounted || seq != _reqSeq) return; // 已切 tab，丢弃旧响应
@@ -150,6 +206,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
 
   Future<void> _loadMore() async {
     final client = _client;
+    final tab = _currentTab;
     final cache = _cache;
     if (client == null ||
         cache.loadingMore ||
@@ -162,7 +219,8 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
     setState(() => cache.loadingMore = true);
     try {
       final result = await client.pullPostings(
-        _feedType,
+        tab.type ?? DynamicsFeedType.mine,
+        tag: tab.tag,
         ct: cache.nextCt,
         opUin: widget.authorUin,
       );
@@ -187,16 +245,19 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       _scroll.jumpTo(0); // 回顶部（各分类独立列表）
     });
     // 保留其它分类内容：仅当此分类从没加载过时才拉取
-    if (!_caches[i].loadedOnce && _caches[i].error == null && _client != null) {
+    if (!_cacheFor(i).loadedOnce &&
+        _cacheFor(i).error == null &&
+        _client != null) {
       _load();
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final tabs = _tabs;
     return DefaultTabController(
-      length: _feedTypes.length,
-      initialIndex: 0, // 默认"热门"（最左）
+      length: tabs.length,
+      initialIndex: _tab.clamp(0, tabs.length - 1),
       child: Scaffold(
         appBar: AppBar(
           title: Text(
@@ -230,9 +291,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                 );
                 // 发布成功 → 刷新"我的"分类缓存
                 if (ok == true && mounted) {
-                  final i = _feedLabels.indexOf('我的');
+                  final i = _tabs.indexWhere(
+                    (t) => t.type == DynamicsFeedType.mine,
+                  );
                   if (i >= 0) {
-                    _caches[i].loadedOnce = false;
+                    _cacheFor(i).loadedOnce = false;
                     _switchTab(i);
                   }
                 }
@@ -248,7 +311,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
               ? null
               : TabBar(
                   onTap: _switchTab,
-                  tabs: [for (final l in _feedLabels) Tab(text: l)],
+                  tabs: [for (final t in tabs) Tab(text: t.label)],
                 ),
         ),
         body: _body(),
