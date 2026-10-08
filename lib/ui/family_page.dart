@@ -2,6 +2,7 @@ import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/services/family.dart';
+import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
@@ -17,7 +18,20 @@ class FamilyPage extends ConsumerStatefulWidget {
 
 class _FamilyPageState extends ConsumerState<FamilyPage> {
   FamilyClient? _client;
+
+  /// 已加入的全部家族（游戏里一个账号可以加入多个；`query_user_family_id_list`）。
+  List<FamilyInfo> _families = const [];
+
+  /// 当前展示的是第几个家族（切换用）。
+  int _selected = 0;
+
   FamilyInfo? _family;
+
+  /// 成员 / 申请者的头像（DIY 自定义头像 / 角色头像本体）。
+  ///
+  /// 家族接口只给 `uin`+昵称，不给头像；这类列表以前一律显示首字，现在按
+  /// 「DIY 头像 → 角色头像本体 → 首字」补齐（同好友列表）。
+  Map<int, PlayerProfile> _avatars = const {};
   final List<String> _messages = [];
   final TextEditingController _msgController = TextEditingController();
   bool _loading = true;
@@ -57,19 +71,60 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       _error = null;
     });
     try {
-      // get_family_list → 找我的家族 id → get_family_detail
-      final families = await client.getFamilyList();
-      final family = families.isEmpty ? null : families.first;
-      if (family != null) {
-        final detail = await client.getFamilyDetail(family.familyId);
-        _family = detail.info ?? family;
-      } else {
-        _family = null;
+      // 多家族：先拿已加入的家族 id 列表（`get_family_list` 只回一条），
+      // 再逐个查详情；拿不到 id 列表时回退到旧的单条接口。
+      List<Object> ids = const [];
+      try {
+        ids = await client.queryUserFamilyIds();
+      } catch (_) {
+        // 忽略：回退到 get_family_list
       }
+      final infos = <FamilyInfo>[];
+      if (ids.isNotEmpty) {
+        for (final id in ids) {
+          try {
+            final detail = await client.getFamilyDetail(id);
+            final info = detail.info;
+            if (info != null) infos.add(info);
+          } catch (_) {
+            // 单个家族详情失败不影响其它家族
+          }
+        }
+      }
+      if (infos.isEmpty) {
+        infos.addAll(await client.getFamilyList());
+      }
+      if (!mounted) return;
+      setState(() {
+        _families = infos;
+        if (_selected >= infos.length) _selected = 0;
+        _family = infos.isEmpty ? null : infos[_selected];
+      });
+      // 家族成员头像（拿不到就保持首字占位，不阻断加载）。
+      await _loadAvatars(infos.expand((f) => f.members.map((m) => m.uin)));
     } catch (e) {
       _error = '加载失败: $e';
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// 批量补头像（家族成员 / 入族申请者）。失败保持首字。
+  Future<void> _loadAvatars(Iterable<int> uins) async {
+    final list = uins.where((u) => u > 0).toSet().toList();
+    if (list.isEmpty) return;
+    final auth = ref.read(chatServiceProvider).auth;
+    if (auth == null) return;
+    try {
+      final map = await ProfileClient(
+        uin: auth.uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+      ).fetchAvatarProfiles(list);
+      if (!mounted || map.isEmpty) return;
+      setState(() => _avatars = {..._avatars, ...map});
+    } catch (_) {
+      // 拉不到头像就继续用首字占位
     }
   }
 
@@ -161,6 +216,8 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
           .showSnackBar(const SnackBar(content: Text('暂无入族申请')));
       return;
     }
+    await _loadAvatars(applies.map((a) => a.uin));
+    if (!mounted) return;
     final myUin = ref.read(myUinProvider);
     final isLeader = family.leaderUin == myUin;
     await showModalBottomSheet<void>(
@@ -181,7 +238,13 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               // 昵称已在 FamilyApply.fromJson 里洗过富文本标记。
               final name = a.nickname;
               return ListTile(
-                leading: AvatarView(name: name),
+                leading: AvatarView(
+                  name: name,
+                  avatarUrl: _avatars[uin]?.avatarUrl,
+                  headType: _avatars[uin]?.headType,
+                  headId: _avatars[uin]?.headId,
+                  frameId: _avatars[uin]?.headFrameId,
+                ),
                 title: Text(name),
                 subtitle: Text('迷你号 $uin'),
                 trailing: isLeader
@@ -252,6 +315,42 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
         Expanded(
           child: ListView(
             children: [
+              // 加入多个家族时给出切换（游戏允许一个账号加入多个家族）。
+              if (_families.length > 1) ...[
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.lg,
+                    AppSpacing.sm,
+                    AppSpacing.lg,
+                    AppSpacing.xs,
+                  ),
+                  child: Text(
+                    '已加入 ${_families.length} 个家族',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.lg,
+                  ),
+                  child: Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.xs,
+                    children: [
+                      for (var i = 0; i < _families.length; i++)
+                        ChoiceChip(
+                          label: Text(_families[i].name),
+                          selected: i == _selected,
+                          onSelected: (_) => setState(() {
+                            _selected = i;
+                            _family = _families[i];
+                          }),
+                        ),
+                    ],
+                  ),
+                ),
+                const Divider(),
+              ],
               _InfoTile(icon: Icons.home, label: '家族', value: family.name),
               _InfoTile(
                 icon: Icons.star,
@@ -282,6 +381,10 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                   (m) => ListTile(
                     leading: AvatarView(
                       name: m.nickname.isNotEmpty ? m.nickname : '${m.uin}',
+                      avatarUrl: _avatars[m.uin]?.avatarUrl,
+                      headType: _avatars[m.uin]?.headType,
+                      headId: _avatars[m.uin]?.headId,
+                      frameId: _avatars[m.uin]?.headFrameId,
                     ),
                     title: RichTextView(
                       m.nickname.isNotEmpty ? m.nickname : '${m.uin}',

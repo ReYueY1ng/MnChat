@@ -202,6 +202,57 @@ FamilyShowInfo? parseShowFamily(Map<String, Object?> resp) {
   return found;
 }
 
+/// 解析「已加入家族 id 列表」（`act=query_user_family_id_list`）。
+///
+/// 候选形态：`{data:[1,2]}`、`{data:[{family_id:1},…]}`、`{data:{"1":{…}}}`、
+/// `{id_list:[…]}`。脏数据跳过，绝不抛。
+List<Object> parseFamilyIdList(Map<String, Object?> resp) {
+  final out = <Object>[];
+  final seen = <String>{};
+
+  void addId(Object? v) {
+    if (v is num) {
+      final n = v.toInt();
+      if (n <= 0) return;
+      if (seen.add('$n')) out.add(n);
+      return;
+    }
+    final s = v?.toString() ?? '';
+    if (s.isEmpty || s == '0') return;
+    // 数字串归一成 int（家族 id 最终要喂给 get_family_detail）。
+    final asInt = int.tryParse(s);
+    if (asInt != null && asInt > 0) {
+      if (seen.add('$asInt')) out.add(asInt);
+      return;
+    }
+    if (seen.add(s)) out.add(s);
+  }
+
+  void collect(Object? node) {
+    if (node is List) {
+      for (final e in node) {
+        if (e is Map) {
+          final m = e.cast<String, Object?>();
+          addId(m['family_id'] ?? m['familyId'] ?? m['id']);
+        } else {
+          addId(e);
+        }
+      }
+    } else if (node is Map) {
+      // 形如 {"12": {family_id: 12, ...}}
+      for (final k in node.keys) {
+        addId(k);
+      }
+    }
+  }
+
+  for (final key in const ['data', 'id_list', 'family_id_list', 'list']) {
+    collect(resp[key]);
+    if (out.isNotEmpty) break;
+  }
+  return out;
+}
+
 /// 家族客户端。
 class FamilyClient {
   final int uin;
@@ -262,6 +313,24 @@ class FamilyClient {
       'get_family_list',
     ),
   );
+
+  /// 某个玩家加入的家族 id 列表（`act=query_user_family_id_list`）。
+  ///
+  /// 对齐 `familyservice.lua:55-73`：参数 `uin`（本人）+ `target`（被查者，
+  /// 不传即本人）。一个账号可以加入多个家族，但 `get_family_list` 只回一条，
+  /// 游戏用这个 act 拿到全部 id 再逐个 `get_family_detail`。
+  ///
+  /// 实测 2026-10-08：`/miniw/family?act=query_user_family_id_list` 回
+  /// `{"code":1,"msg":"参数错误"}`（不是 404）——接口存在，等签名参数。
+  Future<List<Object>> queryUserFamilyIds({int? target}) async {
+    final resp = await _get(
+      _url('query_user_family_id_list', {
+        if (target != null) 'target': '$target',
+      }),
+      'query_user_family_id_list',
+    );
+    return parseFamilyIdList(resp);
+  }
 
   /// 家族详情：家族信息 + 入族申请。
   Future<FamilyDetail> getFamilyDetail(Object familyId) async {
