@@ -155,7 +155,15 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
                   final s = list[i];
                   final name = s.name.isNotEmpty ? s.name : '${s.id}';
                   return ListTile(
-                    leading: AvatarView(name: name, radius: 24),
+                    leading: AvatarView(
+                      name: name,
+                      radius: 24,
+                      // 会话快照里已有头像本体 / 头像框（来自资料缓存）。
+                      avatarUrl: s.avatar,
+                      headType: s.headType,
+                      headId: s.headId,
+                      frameId: s.headFrameId,
+                    ),
                     title: RichTextView(name),
                     subtitle: Text('迷你号 ${s.id}'),
                     trailing: _busy

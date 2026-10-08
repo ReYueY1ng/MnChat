@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter/services.dart';
 
 import '../core/models/messages.dart';
+import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
@@ -292,6 +293,32 @@ class _RequestTile extends ConsumerStatefulWidget {
 class _RequestTileState extends ConsumerState<_RequestTile> {
   bool _busy = false;
 
+  /// 申请者头像（DIY 自定义头像 / 角色头像本体）；申请列表本身只带 uin+昵称。
+  PlayerProfile? _avatar;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadAvatar();
+  }
+
+  Future<void> _loadAvatar() async {
+    final auth = ref.read(chatServiceProvider).auth;
+    final uin = widget.request.uin;
+    if (auth == null || uin <= 0) return;
+    try {
+      final map = await ProfileClient(
+        uin: auth.uin,
+        s2: auth.s2,
+        s2t: auth.s2t,
+      ).fetchAvatarProfiles([uin]);
+      if (!mounted) return;
+      setState(() => _avatar = map[uin]);
+    } catch (_) {
+      // 拿不到就保持首字占位
+    }
+  }
+
   Future<void> _accept() async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -333,7 +360,13 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
     final semantic = AppSemanticColors.of(context);
     final r = widget.request;
     return ListTile(
-      leading: AvatarView(name: r.name.isNotEmpty ? r.name : '${r.uin}'),
+      leading: AvatarView(
+        name: r.name.isNotEmpty ? r.name : '${r.uin}',
+        avatarUrl: _avatar?.avatarUrl,
+        headType: _avatar?.headType,
+        headId: _avatar?.headId,
+        frameId: _avatar?.headFrameId,
+      ),
       title: RichTextView(r.name.isNotEmpty ? r.name : '${r.uin}'),
       subtitle: Text('Uin: ${r.uin} · ${_fmtTime(r.time)}'),
       trailing: _busy

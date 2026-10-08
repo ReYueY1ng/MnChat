@@ -59,19 +59,27 @@ class ProfileCache {
         // DIY 自定义头像是玩家显式选择的形象，必须压过角色头像：AvatarView 的规则是
         // 「头像本体优先于 URL」，所以有 DIY 头像时要把头像本体清空。
         final useDiy = head?.diyUrl != null;
+        // 没有 DIY 时按官方 `GetPlayerHeadPath` 展示角色头像本体（而非资料里的
+        // `header*` 网络头像）—— 那正是「没自定义头像的人却显示成自定义头像」的成因。
+        final roleHeadWins =
+            !useDiy && PlayerProfile.roleHeadHasLocalIcon(fallback);
         _friendSessions[p.uin] = ChatSession(
           id: s.id,
           type: s.type,
           name: p.nickname.isNotEmpty ? p.nickname : s.name,
-          avatar: head?.diyUrl ?? p.avatarUrl ?? s.avatar,
+          avatar: roleHeadWins ? null : (head?.diyUrl ?? p.avatarUrl ?? s.avatar),
           isOnline: s.isOnline,
           gameStatus: s.gameStatus,
           lastMessage: s.lastMessage,
           unreadCount: s.unreadCount,
           lastReadTime: s.lastReadTime,
           relation: s.relation,
-          headType: useDiy ? null : (fallback?.type ?? s.headType),
-          headId: useDiy ? null : (fallback?.id ?? s.headId),
+          headType: roleHeadWins
+              ? fallback?.type
+              : (useDiy ? null : (fallback?.type ?? s.headType)),
+          headId: roleHeadWins
+              ? fallback?.id
+              : (useDiy ? null : (fallback?.id ?? s.headId)),
           headFrameId: p.headFrameId ?? s.headFrameId,
         );
         updateContactHead(
@@ -100,17 +108,31 @@ class ProfileCache {
   }) {
     if (head == null && headFrameId == null && fallbackType == null) return;
     final useDiy = head?.diyUrl != null;
+    // 与 [fetchFriendInfos] 同规则：无 DIY 且角色头像有本地图标时，角色头像压过
+    // 资料里的 `header*` 网络头像。
+    final roleHeadWins =
+        !useDiy &&
+        fallbackType != null &&
+        fallbackId != null &&
+        PlayerProfile.roleHeadHasLocalIcon((
+          type: fallbackType,
+          id: fallbackId,
+        ));
     for (var i = 0; i < _contacts.length; i++) {
       final c = _contacts[i];
       if (c.uin != uin) continue;
       _contacts[i] = Contact(
         uin: c.uin,
         nickname: c.nickname,
-        avatar: head?.diyUrl ?? c.avatar,
+        avatar: roleHeadWins ? null : (head?.diyUrl ?? c.avatar),
         relation: c.relation,
         mark: c.mark,
-        headType: useDiy ? null : (fallbackType ?? c.headType),
-        headId: useDiy ? null : (fallbackId ?? c.headId),
+        headType: roleHeadWins
+            ? fallbackType
+            : (useDiy ? null : (fallbackType ?? c.headType)),
+        headId: roleHeadWins
+            ? fallbackId
+            : (useDiy ? null : (fallbackId ?? c.headId)),
         headFrameId: headFrameId ?? c.headFrameId,
       );
       return;
@@ -195,10 +217,12 @@ class ProfileCache {
           model: p.headModel,
         );
         final useDiy = head?.diyUrl != null;
+        final roleHeadWins =
+            !useDiy && PlayerProfile.roleHeadHasLocalIcon(fallback);
         member[p.uin] = PlayerProfile(
           uin: p.uin,
           nickname: p.nickname,
-          avatarUrl: head?.diyUrl ?? p.avatarUrl,
+          avatarUrl: roleHeadWins ? null : (head?.diyUrl ?? p.avatarUrl),
           headType: useDiy ? null : fallback?.type,
           headId: useDiy ? null : fallback?.id,
           headFrameId: p.headFrameId,

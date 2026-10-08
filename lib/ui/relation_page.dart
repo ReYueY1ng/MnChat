@@ -102,9 +102,9 @@ class _RelationPageState extends ConsumerState<RelationPage>
     for (var i = 0; i < uins.length; i += 20) {
       final batch = uins.sublist(i, (i + 20).clamp(0, uins.length));
       try {
-        for (final p in await client.getProfileBatch3(batch)) {
-          out[p.uin] = p;
-        }
+        // 用 fetchAvatarProfiles：getProfileBatch3 只给昵称/头像框，头像本体 /
+        // DIY 自定义头像要单独取（`header*` 已证实不是头像）。
+        out.addAll(await client.fetchAvatarProfiles(batch));
       } catch (_) {
         // 单批失败不阻断，退化为迷你号
       }

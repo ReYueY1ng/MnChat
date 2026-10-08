@@ -22,6 +22,7 @@ import 'settings_general_page.dart';
 import 'settings_notification_page.dart';
 import 'settings_privacy_page.dart';
 import 'theme/app_tokens.dart';
+import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 import 'widgets/settings_tiles.dart';
 
@@ -78,7 +79,7 @@ class SettingsPage extends ConsumerWidget {
           child: ListView(
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              _accountCard(context, auth),
+              _accountCard(context, ref, auth),
 
               const SettingsSectionHeader('账号'),
               SettingsNavTile(
@@ -136,25 +137,27 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  /// 账号卡：头像首字 + 富文本昵称 + Uin。
-  Widget _accountCard(BuildContext context, AuthState auth) {
+  /// 账号卡：本人头像（与聊天页 / 侧栏同源：DIY 头像 / 头像本体 / 头像框）
+  /// + 富文本昵称 + Uin。
+  Widget _accountCard(BuildContext context, WidgetRef ref, AuthState auth) {
     final theme = Theme.of(context);
     final name = plainNickname(auth.auth?.name);
+    // 本人头像与聊天页同源（DIY 头像 / 头像本体 / 头像框）—— 这个位置原先只画
+    // 一个首字母 CircleAvatar，所以永远只显示首字，也没有头像框。
+    final me = ref.watch(myAvatarInfoProvider).asData?.value;
+    final ownName = me?.name ?? '';
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
         child: Row(
           children: [
-            CircleAvatar(
+            AvatarView(
+              name: ownName.isNotEmpty ? ownName : name,
+              avatarUrl: me?.avatarUrl,
               radius: 28,
-              backgroundColor: theme.colorScheme.primaryContainer,
-              child: Text(
-                name.isNotEmpty ? name.characters.first : '?',
-                style: TextStyle(
-                  fontSize: 22,
-                  color: theme.colorScheme.onPrimaryContainer,
-                ),
-              ),
+              headType: me?.headType,
+              headId: me?.headId,
+              frameId: me?.frameId,
             ),
             const SizedBox(width: AppSpacing.lg),
             Expanded(

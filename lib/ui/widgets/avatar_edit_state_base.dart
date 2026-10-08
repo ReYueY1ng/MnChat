@@ -112,8 +112,11 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
   }
 
   /// 已拥有且有本地图标的皮肤（skinId → 图标 headId），与个人主页同源。
+  ///
+  /// 数据源换成 [ownedSkinIdsProvider]：登录响应对本账号不含 `BillDataSvr`，
+  /// 所以 `auth.ownedSkinIds` 常年为空，得走主账号长连接的账号快照。
   Map<int, int> get _skins {
-    final owned = ref.watch(authProvider).auth?.ownedSkinIds ?? const <int>{};
+    final owned = ref.watch(ownedSkinIdsProvider).asData?.value ?? const <int>{};
     final out = <int, int>{};
     for (final id in owned) {
       final head = kSkinHeadIcon[id];

@@ -31,3 +31,20 @@ final giftInventoryProvider = FutureProvider<AccountInventory>((ref) async {
     return AccountInventory.empty;
   }
 });
+
+/// 已拥有的角色皮肤 id（头像编辑「装扮」页签的数据源）。
+///
+/// 登录响应的 `baseinfo` 对测试账号**不含 `BillDataSvr`**（2026-10-06 实测：
+/// login_v3 的 baseinfo 只有 26 个键、没有 BillDataSvr），所以 `auth.ownedSkinIds`
+/// 常年为空、头像编辑列不出皮肤。这份数据只有主账号长连接能给：
+/// `baseinfo.update` → `Account.BillDataSvr.RoleSkinInfo`
+/// （`clientex/account.lua:1043-1085`）。拿不到时回退登录里那份（可能为空）。
+final ownedSkinIdsProvider = FutureProvider<Set<int>>((ref) async {
+  final fromAuth = ref.watch(authProvider).auth?.ownedSkinIds ?? const <int>{};
+  try {
+    final inv = await ref.watch(giftInventoryProvider.future);
+    return inv.ownedSkinIds.isNotEmpty ? inv.ownedSkinIds : fromAuth;
+  } catch (_) {
+    return fromAuth;
+  }
+});

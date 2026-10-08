@@ -55,7 +55,8 @@ import '../../core/services/title_config.dart'
         TitleClient,
         TitleConfigClient,
         TitleShowData;
-import '../../state/providers.dart' show authProvider, chatServiceProvider;
+import '../../state/providers.dart'
+    show authProvider, chatServiceProvider, ownedSkinIdsProvider;
 import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'head_frame.dart' show HeadFrameOverlay, headFrameSlotSize;

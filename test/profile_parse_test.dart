@@ -25,7 +25,9 @@ void main() {
       expect(p!.uin, 123);
       expect(p.nickname, '小明');
       expect(p.headFrameId, 20201);
-      expect(p.avatarUrl, 'https://example.com/a.png');
+      // `header`/`header2` 实测是**地图截图**（`map<NNN>.mini1.cn/map/...`），
+      // 不是头像 → 不再当头像用（2026-10-08 真实账号探针）。
+      expect(p.avatarUrl, isNull);
       expect(p.ownedHeadFrameIds, containsAll(<int>[20201, 20205, 20210]));
       expect(p.ownedHeadFrameIds.length, 3);
     });

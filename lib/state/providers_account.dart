@@ -238,10 +238,14 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   // DIY 自定义头像是显式选择，必须压过角色头像（AvatarView 本体优先于 URL，
   // 故有 DIY 时把本体清空），规则与好友资料一致（见 _fetchFriendInfos）。
   final useDiy = slot?.diyUrl != null;
+  // 没有 DIY 时按官方 `GetPlayerHeadPath` 展示角色头像本体，而不是资料里的
+  // `header*` 网络头像（那是别人的"自定义头像"假象的来源）。
+  final roleHeadWins =
+      !useDiy && PlayerProfile.roleHeadHasLocalIcon(fallback);
   final nickname = profile?.nickname ?? '';
   final info = MyAvatarInfo(
     name: nickname.isNotEmpty ? nickname : name,
-    avatarUrl: avatarUrl,
+    avatarUrl: roleHeadWins ? null : avatarUrl,
     headType: useDiy ? null : (fallback?.type ?? headType),
     headId: useDiy ? null : (fallback?.id ?? headId),
     frameId: profile?.headFrameId,

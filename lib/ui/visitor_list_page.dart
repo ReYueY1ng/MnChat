@@ -3,7 +3,7 @@
 /// 数据流（对齐反编译 playercenterv2homepagectrl.lua:ReqVisitorList）：
 ///   1. `PlayerHomeClient.getVisitorList(ownerUin)` 取 `[{uin, time}]`
 ///      （time 为 epoch 秒，官方客户端只取 offset=0 的第一页）；
-///   2. 用 `ProfileClient.getProfileBatch3` 批量补全昵称 / 头像 / 头像框；
+///   2. 用 `ProfileClient.fetchAvatarProfiles` 批量补全昵称 / 头像 / 头像框；
 ///   3. 按服务端返回顺序逐行渲染（不排序、不分页）。
 library;
 
@@ -83,10 +83,10 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
       var profiles = <int, PlayerProfile>{};
       if (records.isNotEmpty) {
         try {
-          final list = await profileClient.getProfileBatch3(
+          // 头像要连头像本体 / DIY 一起取（`header*` 不是头像）。
+          profiles = await profileClient.fetchAvatarProfiles(
             records.map((r) => r.uin).toList(),
           );
-          profiles = {for (final p in list) p.uin: p};
         } catch (_) {
           // 忽略：资料拉取失败时展示迷你号与首字占位头像
         }

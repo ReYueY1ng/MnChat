@@ -149,4 +149,75 @@ void main() {
       );
     });
   });
+
+  group('AccountInventory.ownedSkinIds', () {
+    /// 账号快照 + `RoleSkinInfo`（头像编辑「装扮」页签的数据源）。
+    List<Object?> respWith(Object? roleSkinInfo) => [
+      1,
+      'baseinfo',
+      'update',
+      1796406401,
+      5116137,
+      [
+        0,
+        [
+          307905116,
+          <int>[1],
+          {
+            'Account': {
+              'BillDataSvr': {
+                'RoleSkinNum': roleSkinInfo is List ? roleSkinInfo.length : 0,
+                'RoleSkinInfo': roleSkinInfo,
+              },
+            },
+          },
+          <String, Object?>{},
+        ],
+      ],
+    ];
+
+    test('线上形状：RoleSkinInfo 是 {SkinID, ExpireTime} 数组', () {
+      final inv = AccountInventory.fromUpdateResponse(
+        respWith([
+          {'SkinID': 31, 'ExpireTime': -1},
+          {'SkinID': 44, 'ExpireTime': 0},
+        ]),
+      );
+      expect(inv.ownedSkinIds, {31, 44});
+    });
+
+    test('容错：id 写成字符串 / 纯 id 列表 / {<id>: {...}} 映射', () {
+      expect(
+        AccountInventory.fromUpdateResponse(
+          respWith([
+            {'SkinID': '31'},
+          ]),
+        ).ownedSkinIds,
+        {31},
+      );
+      expect(
+        AccountInventory.fromUpdateResponse(respWith([7, 8])).ownedSkinIds,
+        {7, 8},
+      );
+      expect(
+        AccountInventory.fromUpdateResponse(
+          respWith({
+            '31': {'ExpireTime': -1},
+          }),
+        ).ownedSkinIds,
+        {31},
+      );
+    });
+
+    test('没有 RoleSkinInfo / 脏数据 → 空集合（不抛）', () {
+      expect(AccountInventory.fromUpdateResponse(respWith(null)).ownedSkinIds, isEmpty);
+      expect(
+        AccountInventory.fromUpdateResponse({
+          'junk': 1,
+        }).ownedSkinIds,
+        isEmpty,
+      );
+      expect(AccountInventory.empty.ownedSkinIds, isEmpty);
+    });
+  });
 }

@@ -11,11 +11,18 @@
 /// 账号 279630451 的 `Account.BillDataSvr.ItemInfo` 有 116 项，含 `[43000, 18]`。
 library;
 
-/// 持有道具：道具 id → 数量。
+/// 持有道具：道具 id → 数量 + 已拥有的角色皮肤。
 class AccountInventory {
   final Map<int, int> counts;
 
-  const AccountInventory(this.counts);
+  /// 已拥有的角色皮肤 id（`Account.BillDataSvr.RoleSkinInfo`）。
+  ///
+  /// 形状（`clientex/account.lua:1043-1085`）：`RoleSkinInfo` 是
+  /// **`1..RoleSkinNum` 的数组**，每项 `{SkinID, ExpireTime}`；也兼容
+  /// `{<SkinID>: {...}}` 映射。头像编辑的「装扮」页签用它列可选皮肤。
+  final Set<int> ownedSkinIds;
+
+  const AccountInventory(this.counts, {this.ownedSkinIds = const <int>{}});
 
   static const AccountInventory empty = AccountInventory(<int, int>{});
 
@@ -39,7 +46,50 @@ class AccountInventory {
     final counts = <int, int>{};
     final seen = <Object>{};
     _walk(result[1], counts, seen);
-    return counts.isEmpty ? empty : AccountInventory(counts);
+    return AccountInventory(
+      counts,
+      ownedSkinIds: _collectSkins(result[1]),
+    );
+  }
+
+  /// 从账号快照里收集 `RoleSkinInfo` 的皮肤 id。
+  static Set<int> _collectSkins(Object? node) {
+    final out = <int>{};
+    void walk(Object? n) {
+      if (n is Map) {
+        for (final e in n.entries) {
+          if ('${e.key}' == 'RoleSkinInfo') _absorbSkins(e.value, out);
+          walk(e.value);
+        }
+      } else if (n is List) {
+        for (final c in n) {
+          walk(c);
+        }
+      }
+    }
+
+    walk(node);
+    return out;
+  }
+
+  /// `[{SkinID, ExpireTime}, ...]` 与 `{<SkinID>: {...}}` 两种形状都吃。
+  static void _absorbSkins(Object? value, Set<int> out) {
+    if (value is List) {
+      for (final e in value) {
+        if (e is Map) {
+          final id = _toInt(e['SkinID'] ?? e['skin_id'] ?? e['id']);
+          if (id > 0) out.add(id);
+        } else {
+          final id = _toInt(e);
+          if (id > 0) out.add(id);
+        }
+      }
+    } else if (value is Map) {
+      for (final k in value.keys) {
+        final id = _toInt(k);
+        if (id > 0) out.add(id);
+      }
+    }
   }
 
   static void _walk(Object? node, Map<int, int> out, Set<Object> seen) {

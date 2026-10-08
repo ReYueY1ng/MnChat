@@ -9,6 +9,7 @@ import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
 
 import '../crypto/md5_sign.dart' show httpGetS1Map;
+import '../models/skin_head_catalog.dart' show headIconAsset;
 import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
@@ -88,12 +89,30 @@ class PlayerProfile {
     return null;
   }
 
+  /// 角色头像本体是否有本地图标（`assets/roleicons|rideicons`）。
+  ///
+  /// 官方头像展示只有两个来源（`headinfosysmgr.lua:321-383` `GetPlayerHeadPath`）：
+  /// DIY 自定义头像（`use_diy == 1` 时取 `diy_header.pass_url`／本人取 `pre_url`）
+  /// 与角色头像本体（`type/id` → `ui/roleicons|ui/rideicons/*.png`）；
+  /// **资料里的 `header*` 从不参与头像展示**（`header3` 只由 `set_usr_header3`
+  /// 写入）。客户端原先无条件把 `header3/2/1` 当头像 URL，所以没有 DIY 的玩家
+  /// 会被显示成"自定义头像"，而游戏里显示的是角色头像。
+  ///
+  /// 只有在角色头像确实有本地图标时才敢压过网络头像；否则宁可保留网络头像，
+  /// 免得退成首字占位。
+  static bool roleHeadHasLocalIcon(({int type, int id})? roleHead) =>
+      roleHead != null && headIconAsset(roleHead.type, roleHead.id) != null;
+
   /// 从 getProfileBatch3 响应项解析。
   /// 结构（LuaTable）: {profile: {uin, RoleInfo: {NickName, ...},
   ///        header: {url}, header2: {url}, header3: {url}}, uin}
   ///
-  /// 头像字段优先级：`header3` → `header2` → `header`。取不到则返回 null，
-  /// 由 UI 回退到首字母占位。
+  /// **`header*` 不是头像**：实测 2026-10-08，`header`/`header2` 的值一律是
+  /// `map<NNN>.mini1.cn/map/...` 的**地图截图**（自用与好友都一样），而真正的
+  /// 自定义头像是 `getPersonCenterHeadInfo` 的 `diy_header.pass_url`
+  /// （`prod-env-cloud-resshop.mini1.cn/resshop/<uin>/...png`）。所以这里不再把
+  /// `header*` 当头像，头像一律由「DIY → 角色头像本体 → 首字占位」决定；
+  /// 否则会把地图截图当成头像显示（用户反馈的"并不是自定义头像却显示成自定义头像"）。
   static PlayerProfile? fromItem(Map<String, Object?> item) {
     final profile = item['profile'];
     if (profile is! Map) return null;
@@ -128,6 +147,7 @@ class PlayerProfile {
     return PlayerProfile(
       uin: uin2,
       nickname: nickname,
+      // header* 已证实是地图截图而非头像，不再当头像用。
       avatarUrl: avatar,
       headFrameId: headFrameId <= 0 ? null : headFrameId,
       ownedHeadFrameIds: _parseOwnedFrames(p),
@@ -154,15 +174,13 @@ class PlayerProfile {
     return out;
   }
 
-  /// 按 header3 → header2 → header 顺序取头像 URL。
+  /// 头像 URL —— 恒为 null。
+  ///
+  /// 历史实现按 `header3 → header2 → header` 取「头像」；实测 2026-10-08 证明
+  /// 这三个字段在服务器上放的是**地图截图**（`map<NNN>.mini1.cn/map/...`），
+  /// 与头像无关。留这个函数只为说明链路：头像来源是
+  /// `getPersonCenterHeadInfo`（DIY `pass_url` / 头像本体 `type`,`id`）。
   static String? _pickAvatar(Map<String, Object?> p) {
-    for (final key in ['header3', 'header2', 'header']) {
-      final h = p[key];
-      if (h is Map) {
-        final url = (h.cast<String, Object?>())['url'];
-        if (url != null && url.toString().isNotEmpty) return url.toString();
-      }
-    }
     return null;
   }
 
@@ -403,7 +421,8 @@ class ProfileClient {
   /// 批量拉取玩家**DIY 自定义头像**（游戏内主界面头像来源）。
   ///
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`:
-  ///   `{HttpMap}miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list={uins}&{sign}`
+  ///   `{HttpMap}miniw/profile?act=getPersonCenterHeadInfo&uin={me}&op_uin_list={uins}&…&{sign}`
+  ///   （**必须带 `uin`**：2026-10-08 实测缺 `uin` 时服务端回空 body）
   /// 响应结构: `{code:0, data:{ "<uin>": {use_diy, diy_header:{pre_url, pass_url, aduit_fail}, ...} }}`
   /// 返回 Map&lt;uin, DIY头像URL&gt;（仅 use_diy==1 且解析出可用 url；其中
   /// `pre_url` 审核中头像仅本人可见，见 [resolveDiyUrl]）。
@@ -414,8 +433,12 @@ class ProfileClient {
     final base = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
     final uinList = uins.map((u) => '$u').join(',');
+    // 必须带 uin：实测（2026-10-08）缺 uin 时服务端回**空 body**（长度 0），
+    // 加回 uin（连同全局参数）才回 {code:0,data:{…}}。这条静默失败让好友头像的
+    // 「头像本体 / DIY 自定义头像」一直取不到（好友头像只能退回头像本体推导或首字）。
     final url =
-        '$base/miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list=$uinList&$sign';
+        '$base/miniw/profile?act=getPersonCenterHeadInfo&uin=$uin&op_uin_list=$uinList'
+        '&ver=$ver&apiid=$apiId&lang=$lang&country=$country&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
@@ -500,8 +523,9 @@ class ProfileClient {
   /// 拉取当前账号的"头像本体"（type/id）。
   ///
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`:
-  ///   `{HttpMap}miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list={uin}&{sign}`
+  ///   `{HttpMap}miniw/profile?act=getPersonCenterHeadInfo&uin={uin}&op_uin_list={uin}&…&{sign}`
   /// 响应 `{code:0, data:{"<uin>": {type, id, use_diy, diy_header, ...}}}`。
+  /// （缺 `uin` 时服务端回空 body。）
   Future<HeadInfo?> getMyHeadInfo() async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final base = baseUrl.endsWith('/')
@@ -509,7 +533,8 @@ class ProfileClient {
         : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
     final url =
-        '$base/miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list=$uin&$sign';
+        '$base/miniw/profile?act=getPersonCenterHeadInfo&uin=$uin&op_uin_list=$uin'
+        '&ver=$ver&apiid=$apiId&lang=$lang&country=$country&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
@@ -565,6 +590,61 @@ class ProfileClient {
     return false;
   }
 
+  /// 批量取「头像展示数据」（资料 + 头像本体 / DIY 自定义头像）。
+  ///
+  /// 给那些只拿到 uin 的列表（家族成员 / 好友申请 / 黑名单…）用：一次性把
+  /// `getProfileBatch3`（昵称 / 头像框 / 皮肤 / 模型）与
+  /// `getPersonCenterHeadInfo`（DIY 头像 / 头像本体 type,id）合起来，按与好友
+  /// 列表**同一条规则**给出头像：DIY 自定义头像 > 角色头像本体（本机有图标时）
+  /// > 首字占位（`headinfosysmgr.lua:321-383`）。
+  ///
+  /// 返回的 [PlayerProfile.headType]/[headId] 已填好，UI 直接：
+  /// `AvatarView(name: p.nickname, avatarUrl: p.avatarUrl, headType: p.headType,
+  /// headId: p.headId, frameId: p.headFrameId)`。
+  /// 单个接口失败不影响另一个；全失败时条目头像一个字段都不给（退首字）。
+  Future<Map<int, PlayerProfile>> fetchAvatarProfiles(List<int> uins) async {
+    final out = <int, PlayerProfile>{};
+    if (uins.isEmpty) return out;
+    final profiles = <int, PlayerProfile>{};
+    final heads = <int, HeadSlot>{};
+    try {
+      for (final p in await getProfileBatch3(uins)) {
+        profiles[p.uin] = p;
+      }
+    } catch (_) {
+      // 资料失败：只剩头像本体 / 首字
+    }
+    try {
+      heads.addAll(await getPersonCenterHeadInfos(uins));
+    } catch (_) {
+      // 头像本体失败：只剩资料 / 首字
+    }
+    for (final u in uins) {
+      final p = profiles[u];
+      final head = heads[u];
+      final fallback = PlayerProfile.resolveRoleHeadFallback(
+        headType: head?.type,
+        headId: head?.id,
+        skinId: p?.headSkinId,
+        model: p?.headModel,
+      );
+      final useDiy = head?.diyUrl != null;
+      // 注意：角色头像本体**必须保留** headType/headId —— AvatarView 靠它们
+      // 去查本地图标（`headIconAsset`）；只有 DIY 生效时才清空本体。
+      out[u] = PlayerProfile(
+        uin: u,
+        nickname: p?.nickname ?? '',
+        avatarUrl: useDiy ? head!.diyUrl : p?.avatarUrl,
+        headType: useDiy ? null : fallback?.type,
+        headId: useDiy ? null : fallback?.id,
+        headFrameId: p?.headFrameId,
+        headSkinId: p?.headSkinId,
+        headModel: p?.headModel,
+      );
+    }
+    return out;
+  }
+
   /// 批量拉取"头像槽位"（DIY 头像 url + 头像本体 type/id）。
   ///
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`。响应
@@ -578,8 +658,10 @@ class ProfileClient {
         : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
     final uinList = uins.map((u) => '$u').join(',');
+    // 同 getPersonCenterHeadInfo：必须带 uin，否则服务端回空 body。
     final url =
-        '$base/miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list=$uinList&$sign';
+        '$base/miniw/profile?act=getPersonCenterHeadInfo&uin=$uin&op_uin_list=$uinList'
+        '&ver=$ver&apiid=$apiId&lang=$lang&country=$country&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
@@ -619,8 +701,10 @@ class ProfileClient {
         ? baseUrl.substring(0, baseUrl.length - 1)
         : baseUrl;
     final sign = httpGetS1Map(now, s2, uin, s2t);
+    // 同 getPersonCenterHeadInfo：必须带 uin，否则服务端回空 body。
     final url =
-        '$base/miniw/profile?&act=getPersonCenterHeadInfo&op_uin_list=$uin&$sign';
+        '$base/miniw/profile?act=getPersonCenterHeadInfo&uin=$uin&op_uin_list=$uin'
+        '&ver=$ver&apiid=$apiId&lang=$lang&country=$country&$sign';
 
     final resp = await _dio.get(url);
     final text = resp.data is String ? resp.data as String : jsonEncode(resp.data);
