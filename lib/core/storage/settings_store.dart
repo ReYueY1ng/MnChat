@@ -81,19 +81,57 @@ class SavedAccount {
   final int uin;
   final String password; // 已解密明文
   final String? name;
-  const SavedAccount({required this.uin, required this.password, this.name});
 
-  Map<String, Object?> toJson() => {
-        'uin': uin,
-        'pwd': password,
-        'name': name,
-      };
+  /// 上次登录成功后缓存下来的头像展示信息（DIY 头像 URL / 头像本体 type-id /
+  /// 头像框 id）。
+  ///
+  /// 登录页在**登录前**没有会话（拿不到 s2），读不到任何资料 —— 这份缓存是那里
+  /// 唯一的头像来源，没有它就只能画首字占位。老数据 / 从未登录成功过 → null。
+  final String? avatarUrl;
+  final int? headType;
+  final int? headId;
+  final int? headFrameId;
 
+  const SavedAccount({
+    required this.uin,
+    required this.password,
+    this.name,
+    this.avatarUrl,
+    this.headType,
+    this.headId,
+    this.headFrameId,
+  });
+
+  /// 账号记录里承载头像缓存的 JSON key（[SettingsStore.saveAccount] 原样带回）。
+  static const List<String> avatarKeys = [
+    'avatar_url',
+    'head_type',
+    'head_id',
+    'head_frame_id',
+  ];
+
+  /// 宽松取 int：缺失 / 脏数据 → null，绝不抛。
+  static int? _lenientInt(Object? v) {
+    if (v is num) return v.toInt();
+    return int.tryParse('$v');
+  }
+
+  /// 非空字符串；缺失 / 空白 → null。
+  static String? _lenientUrl(Object? v) {
+    final s = v?.toString();
+    return (s == null || s.isEmpty) ? null : s;
+  }
+
+  /// 从存储 JSON 解析（头像字段可缺）。
   static SavedAccount fromJson(Map<String, Object?> m) => SavedAccount(
-        uin: (m['uin'] as num?)?.toInt() ?? 0,
-        password: m['pwd']?.toString() ?? '',
-        name: m['name']?.toString(),
-      );
+    uin: (m['uin'] as num?)?.toInt() ?? 0,
+    password: m['pwd']?.toString() ?? '',
+    name: m['name']?.toString(),
+    avatarUrl: _lenientUrl(m['avatar_url']),
+    headType: _lenientInt(m['head_type']),
+    headId: _lenientInt(m['head_id']),
+    headFrameId: _lenientInt(m['head_frame_id']),
+  );
 }
 
 /// 设置存储：直接读写 Drift 设置表。
@@ -167,14 +205,50 @@ class SettingsStore {
     String? name,
   }) async {
     final accounts = await _loadAccounts();
-    accounts.removeWhere((a) => a['uin'] == uin);
+    Map<String, Object?>? previous;
+    for (final a in accounts) {
+      if ((a['uin'] as num?)?.toInt() == uin) previous = a;
+    }
+    accounts.removeWhere((a) => (a['uin'] as num?)?.toInt() == uin);
     accounts.add({
       'uin': uin,
       'pwd': encryptPassword(password, uin),
       'name': name,
+      // 头像缓存原样带回（重新登录不能把它冲掉 —— 登录页靠它显示头像）。
+      for (final k in SavedAccount.avatarKeys)
+        if (previous?[k] != null) k: previous![k],
     });
     await _saveAccounts(accounts);
     await _db.setSetting(SettingsKeys.lastUin, '$uin');
+  }
+
+  /// 缓存某账号的头像展示信息（登录成功后调用）。
+  ///
+  /// 登录页在登录前没有 s2、读不到资料，这份缓存就是那里唯一的头像来源。
+  /// 四个值全空时不写（免得已存的有效缓存被清空），账号不在列表里也不写。
+  Future<void> saveAccountAvatar(
+    int uin, {
+    String? avatarUrl,
+    int? headType,
+    int? headId,
+    int? headFrameId,
+  }) async {
+    if (avatarUrl == null &&
+        headType == null &&
+        headId == null &&
+        headFrameId == null) {
+      return;
+    }
+    final accounts = await _loadAccounts();
+    for (final a in accounts) {
+      if ((a['uin'] as num?)?.toInt() != uin) continue;
+      a['avatar_url'] = avatarUrl;
+      a['head_type'] = headType;
+      a['head_id'] = headId;
+      a['head_frame_id'] = headFrameId;
+      await _saveAccounts(accounts);
+      return;
+    }
   }
 
   /// 保存/更新一个已登录账号（不额外重加密——login 成功后调用，
@@ -192,9 +266,7 @@ class SettingsStore {
       if (uin == 0 || enc.isEmpty) continue;
       final plain = decryptPassword(enc, uin);
       if (plain == null) continue; // 密文被篡改/密钥不符 → 跳过
-      out.add(
-        SavedAccount(uin: uin, password: plain, name: a['name']?.toString()),
-      );
+      out.add(SavedAccount.fromJson({...a, 'pwd': plain}));
     }
     // 最后登录的账号排最前
     final last = await getString(SettingsKeys.lastUin);

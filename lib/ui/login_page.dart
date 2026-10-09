@@ -4,12 +4,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/storage/settings_store.dart';
 import '../state/providers.dart';
 import 'widgets/avatar_view.dart';
+import 'widgets/head_frame.dart' show kAvatarListTileDensity, headFrameSlotSize;
 import 'widgets/rich_text_view.dart';
 import 'theme/app_tokens.dart';
 
 /// 登录/切换账号页：选择已保存账号一键登录；也可添加新账号。
 ///
 /// - 有已保存账号 → 默认展示账号列表，点选即登录（不再手动输入）；
+/// - 列表头像来自登录时缓存的展示信息（登录前没有会话，拉不到资料）。
 /// - "添加账号" → 展开 uin+密码 表单登录，成功后自动加入列表；
 /// - 无已保存账号 → 直接显示添加表单。
 class LoginPage extends ConsumerStatefulWidget {
@@ -214,8 +216,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 borderRadius: BorderRadius.circular(12),
               ),
               child: ListTile(
+                // 带头像框的槽位比 ListTile 的 leading 上限（紧凑密度下 48dp）高，
+                // 不抬高纵向密度会被压扁并裁掉框外圈（见 [kAvatarListTileDensity]）。
+                visualDensity: kAvatarListTileDensity,
+                minTileHeight: headFrameSlotSize(20),
                 contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 2),
-                leading: AvatarView(name: name, radius: 20),
+                leading: AvatarView(
+                  name: name,
+                  avatarUrl: acc.avatarUrl,
+                  radius: 20,
+                  headType: acc.headType,
+                  headId: acc.headId,
+                  frameId: acc.headFrameId,
+                ),
                 title: RichTextView(
                   name,
                   maxLines: 1,

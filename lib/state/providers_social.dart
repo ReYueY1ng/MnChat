@@ -34,6 +34,18 @@ final profileClientProvider = Provider<ProfileClient?>((ref) {
   return ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 });
 
+/// 「登录成功后缓存账号头像」用的资料客户端工厂（[MiniAuth] → [ProfileClient]）。
+///
+/// 刻意**不**依赖 authProvider：[AuthNotifier] 在 `login()` 里需要它，而
+/// [profileClientProvider] 依赖 authProvider —— 在 AuthNotifier 内部读那个
+/// provider 会形成循环依赖（实测报 CircularDependencyError）。测试用
+/// `overrideWithValue` 注入假客户端。
+final accountAvatarClientFactoryProvider =
+    Provider<ProfileClient Function(MiniAuth)>(
+      (ref) =>
+          (auth) => ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t),
+    );
+
 /// 地图信息客户端（作品互动卡片的作品名；未登录返回 null）。
 final mapInfoClientProvider = Provider<MapInfoClient?>((ref) {
   final auth = ref.watch(authProvider).auth;

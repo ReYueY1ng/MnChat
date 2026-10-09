@@ -89,6 +89,16 @@ class AuthNotifier extends Notifier<AuthState> {
       if (autoLogin) {
         await settings.saveCredentials(uin, password);
       }
+      // 头像展示信息随登录成功缓存一份：登录页（登录前没有 s2）只能靠它显示头像。
+      // 用工厂 provider 而不是 [profileClientProvider] —— 后者依赖 authProvider，
+      // 在 AuthNotifier 内部读它会形成循环依赖（实测 CircularDependencyError）。
+      unawaited(
+        cacheAccountAvatar(
+          ref.read(accountAvatarClientFactoryProvider)(auth),
+          settings,
+          uin: uin,
+        ),
+      );
       return true;
     } catch (e) {
       state = AuthState(error: e.toString());
@@ -116,6 +126,38 @@ class AuthNotifier extends Notifier<AuthState> {
     ref.read(activeSessionProvider.notifier).close();
     ref.read(chatBridgeProvider).reset();
     state = const AuthState();
+  }
+}
+
+
+// ── 账号头像缓存 ────────────────────────────────────────────────────────
+
+/// 拉一次头像展示信息并写入账号列表（登录页登录前靠它显示头像）。
+///
+/// 规则同聊天页 / 资料页：DIY 自定义头像 → 角色头像本体 → 不动原值
+/// （见 [PlayerProfile.resolveAvatarDisplay]）。失败只写日志 —— 缓存不上绝不能
+/// 影响登录。
+///
+/// 客户端由调用方传入（AuthNotifier 用 [accountAvatarClientFactoryProvider] 构建）：
+/// 不能在 AuthNotifier 里读依赖 authProvider 的 provider，那会形成循环依赖。
+Future<void> cacheAccountAvatar(
+  ProfileClient client,
+  SettingsStore settings, {
+  required int uin,
+}) async {
+  try {
+    final profile = (await client.fetchAvatarProfiles([uin]))[uin];
+    if (profile == null) return;
+    final display = PlayerProfile.resolveAvatarDisplay(profile: profile);
+    await settings.saveAccountAvatar(
+      uin,
+      avatarUrl: display.url,
+      headType: display.headType,
+      headId: display.headId,
+      headFrameId: profile.headFrameId,
+    );
+  } catch (e) {
+    log.warn('账号头像缓存失败: $e', tag: 'Auth');
   }
 }
 
