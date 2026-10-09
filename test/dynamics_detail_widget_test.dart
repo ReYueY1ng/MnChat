@@ -12,6 +12,7 @@
 /// 沿用 test/friend_label_pool_test.dart 的 `HttpClientAdapter` 写法。
 library;
 
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
@@ -26,11 +27,20 @@ import 'package:mnchat/ui/theme/app_theme.dart';
 
 /// 记录请求、按 `act` 回放固定响应体的 Dio 适配器（离线，不发真实请求）。
 class _RecordingAdapter implements HttpClientAdapter {
-  _RecordingAdapter({Map<String, String>? bodies})
-      : _bodies = bodies ?? const <String, String>{};
+  _RecordingAdapter({
+    Map<String, String>? bodies,
+    this.gate,
+    this.gateFromCall = 0,
+  }) : _bodies = bodies ?? const <String, String>{};
 
   final Map<String, String> _bodies;
   final List<RequestOptions> requests = <RequestOptions>[];
+
+  /// 第 [gateFromCall] 次（1 起算）及之后的请求会卡在 [gate] 上，直到测试放行 ——
+  /// 用来把「请求在途」这个窗口固定住（不依赖任何等待时间）。
+  final Completer<void>? gate;
+  final int gateFromCall;
+  int _calls = 0;
 
   /// 所有匹配 [act] 的已记录请求。
   List<RequestOptions> withAct(String act) => requests
@@ -44,6 +54,11 @@ class _RecordingAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     requests.add(options);
+    _calls++;
+    final gate = this.gate;
+    if (gate != null && gateFromCall > 0 && _calls >= gateFromCall) {
+      await gate.future;
+    }
     final act = options.uri.queryParameters['act'] ?? '';
     final body = _bodies[act] ?? '{"ret":0}';
     return ResponseBody.fromString(
@@ -71,6 +86,14 @@ String _commentBody({
     '{"ret":0,"data":{"list":[{"uin":$uin,"op_uin":$opUin,'
     '"content":"%E4%BD%A0%E5%A5%BD","last_time":1700000000,'
     '"pid_uin":$kMeUin,"pid_ct":1787757890,"com_cnt":$replyCount}]}}';
+
+/// [n] 条一级评论的响应（列表够长才能滚到底部触发翻页）。
+String _commentPageBody(int n) =>
+    '{"ret":0,"data":{"list":['
+    '${List.generate(n, (i) => '{"uin":$kOtherUin,"op_uin":0,'
+        '"content":"%E4%BD%A0%E5%A5%BD","last_time":${1700000000 + i},'
+        '"pid_uin":$kMeUin,"pid_ct":1787757890,"com_cnt":0}').join(',')}'
+    ']}}';
 
 /// 一条二级回复的响应条目（回复者 [repUin]）。
 String _replyBody({int repUin = kMeUin}) =>
@@ -120,6 +143,39 @@ Future<void> _pump(
 void main() {
   setUp(RequestErrorBus.instance.clear);
   tearDown(RequestErrorBus.instance.clear);
+
+  testWidgets('评论翻页在途时不再连发（连续滚动通知只多一次 get_recommend_comment）', (
+    tester,
+  ) async {
+    // 双栏（横屏且宽 ≥900）才走「评论区内滚 → 滚动通知触发翻页」这条路。
+    await tester.binding.setSurfaceSize(const Size(1000, 700));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final gate = Completer<void>();
+    final adapter = _RecordingAdapter(
+      bodies: {'get_recommend_comment': _commentPageBody(8)},
+      gate: gate,
+      gateFromCall: 2, // 首屏放行，之后的翻页请求卡住（固定“在途”窗口）
+    );
+    await _pump(tester, _post(), _client(adapter));
+
+    const act = 'get_recommend_comment';
+    final before = adapter.withAct(act).length;
+    // 连续拖到底：每次拖动都会产生多个滚动通知（距底 <200px 就调 onLoadMore）。
+    for (var i = 0; i < 3; i++) {
+      await tester.drag(find.byType(ListView).last, const Offset(0, -400));
+      await tester.pump();
+    }
+    final after = adapter.withAct(act).length;
+    expect(
+      after - before,
+      lessThanOrEqualTo(1),
+      reason: '翻页请求在途 → 后续滚动通知必须被门闩挡住',
+    );
+
+    gate.complete();
+    await tester.pumpAndSettle();
+  });
 
   testWidgets('(c) 本人动态：AppBar 管理菜单出现，删除动态发出 delete_posting', (
     tester,

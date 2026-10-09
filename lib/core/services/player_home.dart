@@ -25,7 +25,17 @@ import '../net/http_factory.dart' show createDio;
 import '../storage/settings_store.dart' show SettingsKeys, SettingsStore;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import '../utils/log.dart';
+import '../utils/request_cache.dart' show RequestCache;
 import 'request_errors.dart' show reportIfFailed;
+
+/// 玩家卡片 / 主页数据的缓存时长。
+///
+/// 同一个 uin 会被多条链路几乎同时要：玩家卡片
+/// （`session_player_info_popup` 的 `playerInfoOf`）先拿等级 + 主页，随后进
+/// 玩家主页（`ProfilePage`）又各要一遍 —— 就是“点开卡片再进主页，重复发
+/// get_user_homepage / get_level_info_batch”。这些数据变化很慢，缓存
+/// 这么久足够挡掉重复。
+const Duration kPlayerHomeCacheTtl = Duration(seconds: 30);
 
 /// 本模块日志标签。
 const String _logTag = 'PlayerHome';
@@ -94,9 +104,22 @@ class PlayerHomeClient {
     required this.s2t,
     Dio? dio,
     String? baseUrl,
+    this.cacheTtl = kPlayerHomeCacheTtl,
   }) : _dio = dio ?? createDio(),
        baseUrl =
            baseUrl ?? (kDefaultUrls['HttpCommon'] ?? kDefaultBase);
+
+  /// 本客户端只读接口的缓存时长（见 [kPlayerHomeCacheTtl]）。
+  final Duration cacheTtl;
+
+  /// 实例级“单飞 + 短 TTL”缓存：只有**复用同一个实例**才生效，
+  /// 所以 ChatService / ChatCommandClient 共用同一份 `_playerHome`。
+  late final RequestCache<Map<String, Object?>> _homeCache =
+      RequestCache<Map<String, Object?>>(ttl: cacheTtl);
+  late final RequestCache<Map<int, int>> _levelCache =
+      RequestCache<Map<int, int>>(ttl: cacheTtl);
+  late final RequestCache<Map<String, Object?>?> _scoreCache =
+      RequestCache<Map<String, Object?>?>(ttl: cacheTtl);
 
   /// 通用签名 URL（可指定相对路径）。
   String _url(
@@ -149,6 +172,17 @@ class PlayerHomeClient {
   Future<Map<String, Object?>> getUserHomepage(
     int targetUin, {
     String moduleList = PlayerHomeModule.defaultList,
+  }) {
+    return _homeCache.run(
+      '$uin|$targetUin|$moduleList',
+      () => _fetchUserHomepage(targetUin, moduleList: moduleList),
+      cacheable: (m) => m.isNotEmpty,
+    );
+  }
+
+  Future<Map<String, Object?>> _fetchUserHomepage(
+    int targetUin, {
+    String moduleList = PlayerHomeModule.defaultList,
   }) async {
     final url = _url('miniw/personal_center', 'get_user_homepage', {
       'target': '$targetUin',
@@ -166,7 +200,17 @@ class PlayerHomeClient {
 
   /// 角色等级（`miniw/upgrade?act=get_level_info_batch`）。
   /// 返回 `{uin: level}`；失败返回空 map。
-  Future<Map<int, int>> getPlatformLevels(List<int> uins) async {
+  Future<Map<int, int>> getPlatformLevels(List<int> uins) {
+    if (uins.isEmpty) return Future.value(const <int, int>{});
+    final sorted = uins.toSet().toList()..sort();
+    return _levelCache.run(
+      sorted.join(','),
+      () => _fetchPlatformLevels(uins),
+      cacheable: (m) => m.isNotEmpty,
+    );
+  }
+
+  Future<Map<int, int>> _fetchPlatformLevels(List<int> uins) async {
     final out = <int, int>{};
     if (uins.isEmpty) return out;
     final url = _url('miniw/upgrade', 'get_level_info_batch', {
@@ -188,7 +232,15 @@ class PlayerHomeClient {
 
   /// 冒险家等级（`miniw/mini_season?act=get_other_player_score`）。
   /// 返回 `{level, level_s, name}`；失败返回 null。
-  Future<Map<String, Object?>?> getOtherPlayerScore(int targetUin) async {
+  Future<Map<String, Object?>?> getOtherPlayerScore(int targetUin) {
+    return _scoreCache.run(
+      '$uin|$targetUin',
+      () => _fetchOtherPlayerScore(targetUin),
+      cacheable: (v) => v != null,
+    );
+  }
+
+  Future<Map<String, Object?>?> _fetchOtherPlayerScore(int targetUin) async {
     final url = _url('miniw/mini_season', 'get_other_player_score', {
       'op_uin': '$targetUin',
     });

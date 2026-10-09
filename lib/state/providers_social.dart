@@ -24,8 +24,12 @@ final dynamicsClientProvider = Provider<DynamicsClient?>((ref) {
 });
 
 /// 资料客户端（互动通知列表头像补全；未登录返回 null）。
+///
+/// 只 `select` 账号本身：登录/重连会连着发几个 AuthState（busy → connecting →
+/// connected），盯着整个状态会让这个 provider 反复重建 —— 重建就丢掉实例级
+/// 资料缓存（见 ProfileClient.cacheTtl），重复请求随之回来。
 final profileClientProvider = Provider<ProfileClient?>((ref) {
-  final auth = ref.watch(authProvider).auth;
+  final auth = ref.watch(authProvider.select((a) => a.auth));
   if (auth == null) return null;
   return ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 });
@@ -80,18 +84,41 @@ Future<T> _partnerGuard<T>(Ref ref, String label, Future<T> Function() run, T fa
   }
 }
 
-/// 会话可见好友的等级 / 拍档 / 大会员聚合缓存。
+/// 会话列表里「好友会话」的 uin 指纹（升序、逗号拼接）。
 ///
-/// 一次批量拉取（等级 + 拍档列表 + 大会员），随会话流变化重算；未登录或
-/// 数据未就绪时返回 [PartnerDirectory.empty]，行 UI 自动降级为无徽标。
-final partnerDirectoryProvider = FutureProvider<PartnerDirectory>((ref) async {
-  final snap = ref.watch(sessionListProvider).asData?.value;
-  if (snap == null) return PartnerDirectory.empty;
+/// [sessionListProvider] 是高频流：每条消息入库、每次标记已读、每次重连刷新都会
+/// 发一份**新的** `SessionSnapshot` 对象。让聚合 provider 直接 watch 它，那条链就
+/// 会跟着重跑并重新请求等级/拍档/大会员 —— 一条消息一轮请求，第二条还会撞上网关
+/// 的账号队列（`code=9`）。
+///
+/// 这里把「真正影响请求的输入」（好友 uin 集合）折算成字符串：riverpod 用 `==`
+/// 比较 provider 状态（见 riverpod 的 `updateShouldNotify`），字符串值相等就不会
+/// 重跑。集合内容没变（只是又来了条消息）时，下面的请求一次都不会发生。
+String friendSessionUinsKey(SessionSnapshot? snap) {
+  if (snap == null) return '';
   final uins = <int>{
     for (final s in snap.sessions)
       if (s.type == ChatSessionType.friend && s.id > 0) s.id,
-  }.toList();
-  if (uins.isEmpty) return PartnerDirectory.empty;
+  }.toList()..sort();
+  return uins.join(',');
+}
+
+/// 好友 uin 集合的稳定指纹，见 [friendSessionUinsKey]。
+final friendSessionUinsKeyProvider = Provider<String>(
+  (ref) => ref.watch(
+    sessionListProvider.select((a) => friendSessionUinsKey(a.asData?.value)),
+  ),
+);
+
+/// 会话可见好友的等级 / 拍档 / 大会员聚合缓存。
+///
+/// 一次批量拉取（等级 + 拍档列表 + 大会员），随**好友集合**变化重算（不是随每条
+/// 消息，见 [friendSessionUinsKey]）；未登录或数据未就绪时返回
+/// [PartnerDirectory.empty]，行 UI 自动降级为无徽标。
+final partnerDirectoryProvider = FutureProvider<PartnerDirectory>((ref) async {
+  final key = ref.watch(friendSessionUinsKeyProvider);
+  if (key.isEmpty) return PartnerDirectory.empty;
+  final uins = key.split(',').map(int.parse).toList();
   final client = _tryPartnerClient(ref);
   if (client == null) return PartnerDirectory.empty;
   final levels = await _partnerGuard(

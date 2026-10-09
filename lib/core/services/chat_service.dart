@@ -25,6 +25,8 @@ import 'chat/offline_cache.dart';
 import 'chat/profile_cache.dart';
 import 'chat/session_loader.dart';
 import 'chat/push_dispatcher.dart';
+import 'chat/reconnect_history.dart'
+    show kReconnectHistoryBatch, reconnectHistoryTargets;
 import 'chatpush.dart';
 import 'friend.dart';
 import 'group.dart';
@@ -453,26 +455,24 @@ class ChatService {
     return _connection.connect();
   }
 
-  /// 重连成功后的数据刷新：好友列表/群（含未读状态）+ 好友在线状态。
-  Future<void> _refreshAfterReconnect() async {
+  /// 重连成功后的数据刷新：好友列表/群（含未读状态）+ 好友在线状态 + 补拉
+  /// **掉线窗口内有动静**的会话历史。
+  ///
+  /// 以前是无条件逐个拉最近 20 个会话的 `chat_query`（串行）—— 一次重连就是
+  /// 20 次消费式读取，还撞网关的账号排队。现在按需挑
+  /// （见 [reconnectHistoryTargets]）+ 每批 [kReconnectHistoryBatch] 个并发。
+  Future<void> _refreshAfterReconnect(DateTime? droppedAt) async {
     try {
       await loadSessions(); // 好友/群列表重新拉（query_friend_list 未读/关系）
       final uins = _contacts.map((c) => c.uin).toList();
       await _probeBuddyMain(uins); // 在线/游玩状态经 chatpush 拉最新
-      // 逐个好友补拉离线期间的消息历史（前 N 个会话）
-      final chatted =
-          _friendSessions.values.where((s) => s.lastMessage != null).toList()
-            ..sort(
-              (a, b) => (b.lastMessage?.time ?? 0).compareTo(
-                a.lastMessage?.time ?? 0,
-              ),
-            );
-      for (final s in chatted.take(20)) {
-        try {
-          await requestFriendHistory(s.id);
-        } catch (_) {
-          // 单个失败不阻断
-        }
+      final targets = reconnectHistoryTargets(_friendSessions.values, droppedAt);
+      for (var i = 0; i < targets.length; i += kReconnectHistoryBatch) {
+        final end = (i + kReconnectHistoryBatch) < targets.length
+            ? i + kReconnectHistoryBatch
+            : targets.length;
+        // 单个失败不阻断：requestFriendHistory 内部已吞掉异常。
+        await Future.wait(targets.sublist(i, end).map(requestFriendHistory));
       }
     } catch (e) {
       log.warn('refresh after reconnect failed: $e', tag: _logTag);
@@ -1289,14 +1289,16 @@ class ChatService {
         ? _friendSessions
         : _groupSessions;
     final existing = sessionsMap[id];
-    if (existing != null) {
-      sessionsMap[id] = existing.copyWith(
-        unreadCount: 0,
-        lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      );
-    }
+    if (existing == null) return; // persistSession 对不存在的会话也是空操作
+    final hadUnread = existing.unreadCount != 0;
+    sessionsMap[id] = existing.copyWith(
+      unreadCount: 0,
+      lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+    );
     _store.persistSession(type, id);
-    _emitSessionSnapshot();
+    // 只在红点真的消掉时广播：进/出会话各调一次、回前台还会补一次，而会话快照
+    // 会连带让依赖它的聚合 provider 重跑 —— 没有变化就不为空转发买单。
+    if (hadUnread) _emitSessionSnapshot();
   }
 
   // ── 个人资料 ──────────────────────────────────────────────────────────
@@ -1340,7 +1342,14 @@ class ChatService {
   }) async {
     final a = _auth;
     if (a == null) return null;
-    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    // 复用同一个客户端实例：它带进程内缓存（kPlayerHomeCacheTtl），玩家卡片与
+    // 玩家主页共享同一份 get_user_homepage（以前每次调用都 new 一个，卡片→主页
+    // 就会各拉一遍）。
+    final client = _playerHome ??= PlayerHomeClient(
+      uin: a.uin,
+      s2: a.s2,
+      s2t: a.s2t,
+    );
     return client.getUserHomepage(uin, moduleList: moduleList);
   }
 

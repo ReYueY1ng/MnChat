@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/nickname.dart' show plainNickname;
 import '../core/services/dynamics.dart';
-import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
+import '../core/services/profile.dart' show PlayerProfile;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';

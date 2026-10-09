@@ -17,9 +17,18 @@ import '../net/photo_upload.dart' show uploadPresignedFile;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import 'gateway.dart' show buildMiniwParamMd5Url;
 import 'request_errors.dart' show reportIfFailed;
+import '../utils/request_cache.dart' show RequestCache;
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
+
+/// 资料批量接口（`getProfileBatch3` / `getPersonCenterHeadInfo`）的缓存时长。
+///
+/// 昵称 / 头像 / 头像框变化很慢，而同一份数据会被多条链路几乎同时要：自己的
+/// 资料被聊天页、会话列表、自己的资料页各要一遍；某个玩家的资料被玩家卡片、
+/// 资料页、关系页各要一遍。这条缓存只活这么久 —— 够把重复挡掉，又不至于让
+/// 刚改完的东西看不见。
+const Duration kProfileFetchCacheTtl = Duration(seconds: 30);
 
 /// 玩家资料批量结果。
 class PlayerProfile {
@@ -364,6 +373,9 @@ class ProfileClient {
   final String lang;
   final String country;
 
+  /// 资料批量接口的缓存时长（见 [kProfileFetchCacheTtl]）。
+  final Duration cacheTtl;
+
   ProfileClient({
     required this.uin,
     required this.s2,
@@ -374,9 +386,25 @@ class ProfileClient {
     this.apiId = '110',
     this.lang = '0',
     this.country = 'CN',
+    this.cacheTtl = kProfileFetchCacheTtl,
   })  : _dio = dio ?? createDio(),
         baseUrl =
             baseUrl ?? (kDefaultUrls['HttpMap'] ?? kDefaultBase);
+
+  /// 实例级“单飞 + 短 TTL”缓存（时长见 [cacheTtl]）。
+  ///
+  /// 只有**复用同一个实例**的调用点才共享：UI 侧统一走
+  /// `profileClientProvider`（providers_social.dart），不要每次 new 一个。
+  late final RequestCache<List<PlayerProfile>> _batch3Cache =
+      RequestCache<List<PlayerProfile>>(ttl: cacheTtl);
+  late final RequestCache<Map<int, HeadSlot>> _headSlotCache =
+      RequestCache<Map<int, HeadSlot>>(ttl: cacheTtl);
+
+  /// uin 集合的缓存键：去重 + 升序 → 与调用方传入的顺序无关。
+  static String _uinSetKey(List<int> uins) {
+    final sorted = uins.toSet().toList()..sort();
+    return sorted.join(',');
+  }
 
   /// 批量拉取玩家资料（昵称/头像）。
   ///
@@ -386,7 +414,18 @@ class ProfileClient {
   ///
   /// 注意：响应是 **LuaTable 数组**（{[1]=..,[2]=..}），非 JSON——
   /// 用 decodeHttpResponse 解析（支持 LuaTable 顶层 List）。
-  Future<List<PlayerProfile>> getProfileBatch3(List<int> uins) async {
+  Future<List<PlayerProfile>> getProfileBatch3(List<int> uins) {
+    // 同一批 uin 在 [cacheTtl] 内只发一次：资料页 / 玩家卡片 / 关系页 / 通讯录
+    // 会各自要同一份资料，而网关按账号排队，重复只会白挨。
+    if (uins.isEmpty) return Future.value(const <PlayerProfile>[]);
+    return _batch3Cache.run(
+      _uinSetKey(uins),
+      () => _fetchProfileBatch3(uins),
+      cacheable: (list) => list.isNotEmpty,
+    );
+  }
+
+  Future<List<PlayerProfile>> _fetchProfileBatch3(List<int> uins) async {
     if (uins.isEmpty) return [];
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final base = baseUrl.endsWith('/') ? baseUrl.substring(0, baseUrl.length - 1) : baseUrl;
@@ -675,7 +714,16 @@ class ProfileClient {
   ///
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`。响应
   /// `{code:0, data:{"<uin>": {type, id, use_diy, diy_header:{pre_url,pass_url}}}}`。
-  Future<Map<int, HeadSlot>> getPersonCenterHeadInfos(List<int> uins) async {
+  Future<Map<int, HeadSlot>> getPersonCenterHeadInfos(List<int> uins) {
+    if (uins.isEmpty) return Future.value(const <int, HeadSlot>{});
+    return _headSlotCache.run(
+      _uinSetKey(uins),
+      () => _fetchPersonCenterHeadInfos(uins),
+      cacheable: (m) => m.isNotEmpty,
+    );
+  }
+
+  Future<Map<int, HeadSlot>> _fetchPersonCenterHeadInfos(List<int> uins) async {
     final out = <int, HeadSlot>{};
     for (final batch in _headInfoBatches(uins)) {
       try {

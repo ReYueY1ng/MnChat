@@ -34,7 +34,7 @@ class ChatConnectionManager {
   final ChatPushClient _chatpush;
   final void Function(ChatServiceState) _onStateChange;
   final void Function(ChatPushPush) _onPush;
-  final Future<void> Function() _onReconnected;
+  final Future<void> Function(DateTime? droppedAt) _onReconnected;
   final void Function(String) _onError;
   final void Function(ChatPushConnection?) _onConnectionChanged;
 
@@ -42,6 +42,13 @@ class ChatConnectionManager {
   ChatPushConnection? conn;
 
   Timer? _reconnectTimer;
+
+  /// 正在进行的建连。并发调用共享它，见 [connect]。
+  Future<void>? _connecting;
+
+  /// 上次断开长连接的时刻（[_onClosed] 记录）。重连成功后据此只补拉
+  /// 「掉线窗口内有动静」的会话历史（见 `ChatService._refreshAfterReconnect`）。
+  DateTime? lastDroppedAt;
 
   /// 是否应自动重连（登录成功后 true，登出/清理后 false）。
   bool shouldReconnect = false;
@@ -57,8 +64,22 @@ class ChatConnectionManager {
 
   // ── 连接 ────────────────────────────────────────────────────────────────
 
-  /// 建立 ChatPush 长连接（登录 / 重连时调用）。
-  Future<void> connect() async {
+  /// 建立 ChatPush 长连接（登录 / 重连 / 回前台保活都走它）。
+  ///
+  /// 已有建连在途时**复用同一个 Future**：回前台的 [ensureConnection] 与重连
+  /// 定时器很容易同时想建连，以前会各发一次 `alloc` + `connect_gate` —— 两次重复
+  /// 请求，还会多出一条刚建好就被关掉的连接。
+  Future<void> connect() {
+    final inFlight = _connecting;
+    if (inFlight != null) return inFlight;
+    final future = _connect().whenComplete(() {
+      _connecting = null;
+    });
+    _connecting = future;
+    return future;
+  }
+
+  Future<void> _connect() async {
     final a = auth;
     if (a == null) return;
     // 是否为"重连"（此前已连接成功过）：用于重连成功后刷新数据。
@@ -92,7 +113,7 @@ class ChatConnectionManager {
       // 重连成功 → 刷新本地数据：掉线期间的会话/好友/未读离线了，
       // 主动重新拉取一遍，避免"断线重连后收不到之前消息"。
       if (isReconnect) {
-        unawaited(_onReconnected());
+        unawaited(_onReconnected(lastDroppedAt));
       }
     } catch (e) {
       _onError('ChatPush connect failed: $e');
@@ -108,13 +129,19 @@ class ChatConnectionManager {
   void _onClosed() {
     conn = null;
     _onConnectionChanged(null);
+    // 记下掉线时刻：重连后只补拉这段时间内有动静的会话历史。
+    lastDroppedAt = DateTime.now();
     if (!shouldReconnect) return; // 已在登出/清理中
     scheduleReconnect();
   }
 
-  /// 调度重连（指数退避 + 全抖动）。
+  /// 调度重连（指数退避 + 全抖动）。已有建连在途 / 已排了定时器则不重复排。
   void scheduleReconnect() {
-    if (!shouldReconnect || _reconnectTimer?.isActive == true) return;
+    if (!shouldReconnect ||
+        _reconnectTimer?.isActive == true ||
+        _connecting != null) {
+      return;
+    }
     _reconnectTimer = Timer(reconnectPolicy.next(), () {
       if (shouldReconnect) unawaited(connect());
     });
@@ -139,6 +166,7 @@ class ChatConnectionManager {
     shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _connecting = null;
     await conn?.close();
     conn = null;
     _onConnectionChanged(null);
@@ -149,6 +177,8 @@ class ChatConnectionManager {
     shouldReconnect = false;
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _connecting = null;
+    lastDroppedAt = null;
     conn = null;
     auth = null;
     hasConnectedOnce = false;

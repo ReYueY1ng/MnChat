@@ -241,7 +241,10 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     final auth = ref.read(authProvider).auth;
     if (auth == null) return;
     final target = _target;
-    final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    // 用共享实例：它带资料缓存（ProfileClient.cacheTtl），自己的资料在聊天页 /
+    // 会话列表已经拉过时这里直接命中，不再各拉一遍人物中心 / 批量资料。
+    final client = ref.read(profileClientProvider);
+    if (client == null) return;
 
     String? diyUrl;
     String? avatarUrl;

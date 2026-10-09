@@ -14,6 +14,25 @@ class AuthState {
     this.isBusy = false,
     this.error,
   });
+
+  /// 值相等。
+  ///
+  /// [AuthNotifier] 每次收到 ChatService 的状态事件都会 `state = _stateFrom(...)`，
+  /// 而登录/重连本身会连着发好几个状态（authenticating → connectingChatPush →
+  /// connected）；没有这层判断，`watch(authProvider)` 的每个 client provider 都会
+  /// 重建，依赖它们的网络 provider 也就跟着重跑一遍（同一份数据重复请求）。
+  /// [auth] 用默认的同一个实例比较（`MiniAuth` 没有值相等）：换账号/重登录必然是
+  /// 新实例，同一会话内的状态抖动则复用同一实例。
+  @override
+  bool operator ==(Object other) =>
+      other is AuthState &&
+      other.isLoggedIn == isLoggedIn &&
+      other.isBusy == isBusy &&
+      other.error == error &&
+      other.auth == auth;
+
+  @override
+  int get hashCode => Object.hash(isLoggedIn, isBusy, error, auth);
 }
 
 final authProvider = NotifierProvider<AuthNotifier, AuthState>(
@@ -172,10 +191,16 @@ class MyAvatarInfo {
 /// 失败不再静默吞掉 —— 写 warn 日志，便于从 logcat 定位成因为何头像/框没出来。
 /// `FutureProvider` 自带缓存，聊天页逐条消息读取不会重复请求。
 final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
-  final auth = ref.watch(authProvider).auth;
+  // 只依赖账号本身（select）：登录 / 重连会连着发好几个 AuthState（busy、
+  // connectingChatPush、connected），watch 整个状态会让本 provider 反复重跑 ——
+  // 表现就是「进 App 后自己的资料被多次获取」。
+  final auth = ref.watch(authProvider.select((a) => a.auth));
   final name = auth?.name ?? '';
   if (auth == null) return MyAvatarInfo(name: name);
-  final client = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+  // 复用共享客户端：它带资料缓存（ProfileClient.cacheTtl），与自己的资料页同源
+  // 同实例，不再各自去拉人物中心 / 批量资料。
+  final client = ref.watch(profileClientProvider);
+  if (client == null) return MyAvatarInfo(name: name);
   const tag = 'myAvatarInfo';
 
   // ① 人物中心：DIY 自定义头像 + 头像本体 type/id（isSelf 分支会放行审核中的 pre_url）
@@ -194,14 +219,20 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   } catch (e) {
     log.warn('getMyProfile 失败: $e', tag: tag);
   }
-  if (profile == null) {
+  // 批量资料只拉一次：下面「资料兜底」与「头像 URL 兜底」原先各拉一次同一个
+  // `getProfileBatch3([自己])`，正是「自己的信息被多次获取」的两次。
+  Future<PlayerProfile?>? batch3Once;
+  Future<PlayerProfile?> batch3Self() => batch3Once ??= () async {
     try {
       final list = await client.getProfileBatch3([auth.uin]);
-      if (list.isNotEmpty) profile = list.first;
+      return list.isEmpty ? null : list.first;
     } catch (e) {
       log.warn('getProfileBatch3 失败: $e', tag: tag);
+      return null;
     }
-  }
+  }();
+
+  profile ??= await batch3Self();
   // ② 头像本体：`getMyHeadInfo` 是本人专用端点；人物中心那个作兜底（还带 DIY）
   int? headType = slot?.type;
   int? headId = slot?.id;
@@ -221,12 +252,7 @@ final myAvatarInfoProvider = FutureProvider<MyAvatarInfo>((ref) async {
   //    两条都试，取到为止。
   var avatarUrl = slot?.diyUrl ?? profile?.avatarUrl;
   if (avatarUrl == null || avatarUrl.isEmpty) {
-    try {
-      final list = await client.getProfileBatch3([auth.uin]);
-      if (list.isNotEmpty) avatarUrl = list.first.avatarUrl;
-    } catch (e) {
-      log.warn('getProfileBatch3(本人头像) 失败: $e', tag: tag);
-    }
+    avatarUrl = (await batch3Self())?.avatarUrl;
   }
   // 人物中心缺失 / type=2（头套无 2D 资源）时用资料 SkinID/Model 回退角色头像
   final fallback = PlayerProfile.resolveRoleHeadFallback(

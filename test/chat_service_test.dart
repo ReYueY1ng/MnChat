@@ -321,4 +321,60 @@ void main() {
       await service.dispose();
     });
   });
+
+  group('markRead 只在红点真的消掉时发会话快照', () {
+    test('未读 3 → 发一次；已经是 0 / 会话不存在 → 不发', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      const owner = 42;
+      await db.insertMessage(chatMessageToCompanion(
+        ChatMessage(uin: 700, text: 'hi', time: 1700000000),
+        'friend_700',
+        myUin: owner,
+        ownerUin: owner,
+      ));
+      await db.upsertSession(chatSessionToCompanion(
+        ChatSession(
+          id: 700,
+          type: ChatSessionType.friend,
+          name: 'Bob',
+          unreadCount: 3,
+        ),
+        ownerUin: owner,
+      ));
+
+      final service = _loggedInService(db: db);
+      await service.login(uin: owner, password: 'p');
+      expect(
+        service.sessions.firstWhere((s) => s.id == 700).unreadCount,
+        3,
+        reason: '预置的未读要能恢复，否则本用例失去意义',
+      );
+
+      final snapshots = <SessionSnapshot>[];
+      final sub = service.sessionStream.listen(snapshots.add);
+      addTearDown(sub.cancel);
+
+      // 3 → 0：红点消掉，必须广播（列表要跟着清红点）。
+      service.markRead(ChatSessionType.friend, 700);
+      await pumpEventQueue();
+      expect(snapshots, hasLength(1));
+      expect(
+        snapshots.single.sessions.firstWhere((s) => s.id == 700).unreadCount,
+        0,
+      );
+
+      // 已经是 0：进/出会话、回前台都会再调一次，不该为空转发买单。
+      service.markRead(ChatSessionType.friend, 700);
+      await pumpEventQueue();
+      expect(snapshots, hasLength(1));
+
+      // 不存在的会话：无事可做，不发快照。
+      service.markRead(ChatSessionType.friend, 424242);
+      await pumpEventQueue();
+      expect(snapshots, hasLength(1));
+
+      await service.dispose();
+    });
+  });
 }

@@ -184,19 +184,30 @@ class ChatCommandClient {
 
   /// 拉取某玩家的冒险家等级（mini_season get_other_player_score）。
   Future<Map<String, Object?>?> otherPlayerScore(int uin) async {
-    final a = auth;
-    if (a == null) return null;
-    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    final client = _playerHomeClient();
+    if (client == null) return null;
     return client.getOtherPlayerScore(uin);
   }
 
   /// 拉取角色等级（miniw/upgrade get_level_info_batch）。无则返回 0。
   Future<int> platformLevel(int uin) async {
-    final a = auth;
-    if (a == null) return 0;
-    final client = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
+    final client = _playerHomeClient();
+    if (client == null) return 0;
     final map = await client.getPlatformLevels([uin]);
     return map[uin] ?? 0;
+  }
+
+  /// 复用同一个 [PlayerHomeClient]。
+  ///
+  /// 它带实例级缓存（见 kPlayerHomeCacheTtl）：玩家卡片与玩家主页共享同一份
+  /// `get_level_info_batch` / `get_user_homepage` —— 以前这两处各 new 一个
+  /// 客户端，缓存等于没有，卡片→主页就是重复发。
+  PlayerHomeClient? _playerHomeClient() {
+    final existing = playerHome;
+    if (existing != null) return existing;
+    final a = auth;
+    if (a == null) return null;
+    return playerHome = PlayerHomeClient(uin: a.uin, s2: a.s2, s2t: a.s2t);
   }
 
   /// 称号名称（远程 visual-cfg `title_manager`，进程内缓存）。无则 null。

@@ -12,9 +12,9 @@ lib/core/
 ├── models/          # data classes + lenient parsers (own AGENTS.md)
 ├── storage/         # Drift schema + settings KV store (own AGENTS.md)
 ├── crypto/          # signatures, XXTEA, base64/urlencode (own AGENTS.md)
-├── net/             # endpoint config, backend env switch, Dio factory
+├── net/             # endpoint config, backend env switch, Dio factory, duplicate-request counter
 ├── protocol/        # lua_table.dart — Lua-table/JSON hybrid response decoder
-├── utils/           # log.dart — global `log` const + redactUrl
+├── utils/           # log.dart (`log`/`redactUrl`) + request_cache.dart (single-flight + TTL)
 ├── emoticon.dart    # sprite-table emoticons + 4 image widgets (563 LOC)
 ├── chat_emoji.dart  # kChatEmoji game-code → Unicode map
 └── app_info.dart    # kAppVersion
@@ -25,6 +25,8 @@ lib/core/
 |------|----------|
 | Change a server endpoint / env | net/config.dart — `kDefaultBase`, `backendLogin()`, `backendChatpush(env)`, `kLoginPorts` (16 importers) |
 | Get an HTTP client | net/http_factory.dart → `createDio()` (15 importers). Never `Dio()` inline |
+| Spot repeated requests | net/duplicate_request_monitor.dart → `DuplicateRequestMonitor.instance.repeats`（`createDio()` 每次请求都记指纹，time/s2t/md5 等每次都变的参数已排除） |
+| Coalesce a repeated fetch | utils/request_cache.dart → `RequestCache.run(key, fetch)`（单飞 + TTL；`cacheable` 可让业务失败不进缓存） |
 | Decode a response body | protocol/lua_table.dart → `decodeHttpResponse`, `decodeLuaTable` (14 importers) |
 | Shared log / URL redaction | utils/log.dart → `log`, `LogLevel`, `redactUrl` |
 | Emoticon sprite lookup | emoticon.dart → `EmoticonImage`, `ImfcEmojiImage`, `rectForCode` |

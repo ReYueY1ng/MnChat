@@ -34,6 +34,7 @@ import '../protocol/lua_table.dart'
     show decodeHttpResponse, LuaTableDecodeError;
 import 'request_errors.dart' show RequestErrorBus;
 import '../utils/log.dart';
+import '../utils/request_cache.dart' show RequestCache;
 import 'config_text_cache.dart';
 import 'title_config.dart' show parseConfigIndex;
 
@@ -644,8 +645,19 @@ class PartnerClient {
   }
 
   /// 平台等级批量（`miniw/upgrade?act=get_level_info_batch`）。
-  Future<Map<int, int>> getPlatformLevels(List<int> uins) async {
-    if (uins.isEmpty) return const <int, int>{};
+  ///
+  /// 单飞 + [listCacheTtl]：同一批 uin 会被多条链路同时要（会话列表逐行、好友页、
+  /// 拍档页），重复请求只会撞上网关的账号排队。业务失败也返回空 map → 不缓存。
+  Future<Map<int, int>> getPlatformLevels(List<int> uins) {
+    if (uins.isEmpty) return Future.value(const <int, int>{});
+    return _levels.run(
+      _uinSetKey(uins),
+      () => _fetchPlatformLevels(uins),
+      cacheable: (m) => m.isNotEmpty,
+    );
+  }
+
+  Future<Map<int, int>> _fetchPlatformLevels(List<int> uins) async {
     final url = _url('miniw/upgrade', 'get_level_info_batch', {
       'op_uin_list': uins.join(','),
     });
@@ -714,10 +726,24 @@ class PartnerClient {
     return ret;
   }
 
-  /// 本人拍档列表的进程内缓存（单飞 + [listCacheTtl]）。
-  List<PartnerInfo>? _selfListCache;
-  DateTime? _selfListCacheAt;
-  Future<List<PartnerInfo>>? _selfListInFlight;
+  /// 本人拍档列表 / 平台等级 / 大会员：进程内单飞 + [listCacheTtl] 缓存。
+  ///
+  /// 三个都要：这些接口会被多条链路在同一时刻要（会话列表、好友页、拍档页、
+  /// 玩家浮窗），而网关对同账号连发会排队 —— 第二条回 `code=9`。列表最早加上
+  /// （线上实测「连续获取两遍，第一遍有数据、第二遍 code=9」），等级与大会员
+  /// 此前完全没有缓存，一并补上。缓存只活 [listCacheTtl]（默认 5s）。
+  late final RequestCache<(List<PartnerInfo>, bool)> _selfList =
+      RequestCache<(List<PartnerInfo>, bool)>(ttl: listCacheTtl);
+  late final RequestCache<Map<int, int>> _levels =
+      RequestCache<Map<int, int>>(ttl: listCacheTtl);
+  late final RequestCache<Map<int, int>> _vip =
+      RequestCache<Map<int, int>>(ttl: listCacheTtl);
+
+  /// uin 集合的缓存键：去重 + 升序 → 与调用方传入的顺序无关。
+  static String _uinSetKey(List<int> uins) {
+    final sorted = uins.toSet().toList()..sort();
+    return sorted.join(',');
+  }
 
   /// 拍档列表（含默契度 `tacitnum`）；[otherUin] 传他人迷你号（缺省查自己）。
   ///
@@ -727,36 +753,26 @@ class PartnerClient {
   /// （`lab == 0`），所以每个好友都有默契度。
   ///
   /// 网关对同一账号连发会排队（第二条回 `code=9`），所以本人列表做了单飞 +
-  /// 短缓存；查他人不受影响。
-  Future<List<PartnerInfo>> getPartnerList({int? otherUin}) {
-    if (otherUin != null) return _fetchPartnerList(otherUin);
-    final cached = _selfListCache;
-    final at = _selfListCacheAt;
-    if (cached != null &&
-        at != null &&
-        DateTime.now().difference(at) < listCacheTtl) {
-      return Future.value(cached);
-    }
-    final inFlight = _selfListInFlight;
-    if (inFlight != null) return inFlight;
-    final future = _fetchPartnerList(null)
-        .whenComplete(() => _selfListInFlight = null);
-    _selfListInFlight = future;
-    return future;
+  /// 短缓存（[RequestCache]）；查他人不进缓存。
+  Future<List<PartnerInfo>> getPartnerList({int? otherUin}) async {
+    if (otherUin != null) return (await _fetchPartnerList(otherUin)).$1;
+    // 本人列表只有一份 → 缓存键固定；业务失败（code != 0）不缓存。
+    final result = await _selfList.run(
+      'self',
+      () => _fetchPartnerList(null),
+      cacheable: (v) => v.$2,
+    );
+    return result.$1;
   }
 
-  Future<List<PartnerInfo>> _fetchPartnerList(int? otherUin) async {
+  /// 拉一次拍档列表；第二个值 = 业务是否成功（成功才允许进缓存）。
+  Future<(List<PartnerInfo>, bool)> _fetchPartnerList(int? otherUin) async {
     final ret = await _bestpartnerGet(
       'get_list',
       {'otheruin': ?otherUin},
       label: otherUin == null ? '拍档列表（我）' : '拍档列表（$otherUin）',
     );
-    final list = parsePartnerListResponse(ret);
-    if (otherUin == null && _isOk(ret)) {
-      _selfListCache = list;
-      _selfListCacheAt = DateTime.now();
-    }
-    return list;
+    return (parsePartnerListResponse(ret), _isOk(ret));
   }
 
   /// 拍档槽位（`act=get_bestpartner_data`，`uin` 放在 `extdata` 里）。
@@ -822,8 +838,18 @@ class PartnerClient {
 
   /// 他人批量大会员到期时间（`act=vip_get_uinlst_vipdata`）。
   /// [uins] 以 `_` 连接为 `param_id`；返回 `{uin: 到期 epoch 秒}`。
-  Future<Map<int, int>> getVipExpiry(List<int> uins) async {
-    if (uins.isEmpty) return const <int, int>{};
+  ///
+  /// 与 [getPlatformLevels] 同样做单飞 + [listCacheTtl]。
+  Future<Map<int, int>> getVipExpiry(List<int> uins) {
+    if (uins.isEmpty) return Future.value(const <int, int>{});
+    return _vip.run(
+      _uinSetKey(uins),
+      () => _fetchVipExpiry(uins),
+      cacheable: (m) => m.isNotEmpty,
+    );
+  }
+
+  Future<Map<int, int>> _fetchVipExpiry(List<int> uins) async {
     final url = _url('miniw/business', 'vip_get_uinlst_vipdata', {
       'param_id': uins.join('_'),
     });

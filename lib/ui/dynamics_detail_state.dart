@@ -108,7 +108,8 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     try {
       final auth = ref.read(chatServiceProvider).auth;
       if (auth == null) return;
-      final profile = ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+      final profile = ref.read(profileClientProvider);
+      if (profile == null) return;
       final list = await profile.getProfileBatch3([post.uin]);
       final heads = await profile.getPersonCenterHeadInfos([post.uin]);
       if (!mounted) return;
@@ -207,6 +208,10 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   Future<void> _loadComments({bool reset = false}) async {
     final client = _client;
     if (client == null) return;
+    // 滚动监听是**连续**触发的（双栏 fill 模式下每有滚动通知且距底 <200px
+    // 就调一次 onLoadMore），而这一页的 offset 要等响应回来才推进 —— 没有这道
+    // 门闩就会连发同一个 offset 的 get_recommend_comment（用户看到的“大量发”）。
+    if (!reset && (_loadingMore || !_hasMore)) return;
     final seq = ++_reqSeq;
     if (reset) {
       setState(() {
