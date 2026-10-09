@@ -426,7 +426,33 @@ class ProfileClient {
   /// 响应结构: `{code:0, data:{ "<uin>": {use_diy, diy_header:{pre_url, pass_url, aduit_fail}, ...} }}`
   /// 返回 Map&lt;uin, DIY头像URL&gt;（仅 use_diy==1 且解析出可用 url；其中
   /// `pre_url` 审核中头像仅本人可见，见 [resolveDiyUrl]）。
+  /// 头像接口单次请求的 uin 上限（实测 2026-10-09）。
+  ///
+  /// 请求 45 / 49 / 50 个 → 全回；请求 51 / 60 / 100 / 164 个 → **只回前 50 条**，
+  /// 其余静默丢失（对丢掉的人单独再问一次就有数据）。所以批量口一律在客户端分片。
+  static const int kHeadInfoBatchSize = 50;
+
+  /// 按 [kHeadInfoBatchSize] 切片（空列表 → 不产生任何批）。
+  Iterable<List<int>> _headInfoBatches(List<int> uins) sync* {
+    for (var i = 0; i < uins.length; i += kHeadInfoBatchSize) {
+      yield uins.sublist(i, (i + kHeadInfoBatchSize).clamp(0, uins.length));
+    }
+  }
+
   Future<Map<int, String?>> getPersonCenterHeadInfo(List<int> uins) async {
+    final out = <int, String?>{};
+    for (final batch in _headInfoBatches(uins)) {
+      try {
+        out.addAll(await _headInfoDiyOnce(batch));
+      } catch (_) {
+        // 单批失败不阻断其它批（该批退到角色头像本体 / 首字）
+      }
+    }
+    return out;
+  }
+
+  /// 单批（≤ [kHeadInfoBatchSize]）取 DIY 头像 url。
+  Future<Map<int, String?>> _headInfoDiyOnce(List<int> uins) async {
     final out = <int, String?>{};
     if (uins.isEmpty) return out;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
@@ -650,6 +676,19 @@ class ProfileClient {
   /// 反编译 `headinfosysmgr.lua:ReqPlayerHeadInfo`。响应
   /// `{code:0, data:{"<uin>": {type, id, use_diy, diy_header:{pre_url,pass_url}}}}`。
   Future<Map<int, HeadSlot>> getPersonCenterHeadInfos(List<int> uins) async {
+    final out = <int, HeadSlot>{};
+    for (final batch in _headInfoBatches(uins)) {
+      try {
+        out.addAll(await _headSlotsOnce(batch));
+      } catch (_) {
+        // 单批失败不阻断其它批（该批退到角色头像本体 / 首字）
+      }
+    }
+    return out;
+  }
+
+  /// 单批（≤ [kHeadInfoBatchSize]）取头像槽位。
+  Future<Map<int, HeadSlot>> _headSlotsOnce(List<int> uins) async {
     final out = <int, HeadSlot>{};
     if (uins.isEmpty) return out;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;

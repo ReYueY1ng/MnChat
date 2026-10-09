@@ -1,8 +1,10 @@
 /// `DynamicsTag.parseList`（动态大厅分类列表，`act=get_posting_tag_list`）
 /// 的解析口径回归：三种响应形态都要认，脏数据只跳过、绝不抛。
+/// 另含正文话题引用 `topicRef`（`#{名称&o:id}`）的解析。
 library;
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/models/nickname.dart' show topicRef;
 import 'package:mnchat/core/services/dynamics.dart';
 
 void main() {
@@ -49,5 +51,14 @@ void main() {
     ]);
     expect(tags.length, 2);
     expect(tags[0].title, '');
+  });
+
+  group('topicRef', () {
+    test('抽出标签与话题 id', () {
+      expect(topicRef('#{迷你世界&o:21}'), (label: '迷你世界', id: 'o:21'));
+      expect(topicRef('#{福利}'), (label: '福利', id: ''));
+      expect(topicRef('普通文本'), isNull);
+      expect(topicRef('#{}'), isNull);
+    });
   });
 }
