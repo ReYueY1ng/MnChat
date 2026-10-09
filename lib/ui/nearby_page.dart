@@ -3,9 +3,13 @@ import 'dart:math' as math;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../state/providers.dart';
 import 'player_home_page.dart';
 import 'theme/app_tokens.dart';
+import 'widgets/avatar_view.dart';
+import 'widgets/head_frame.dart' show kAvatarListTileDensity, headFrameSlotSize;
+import 'widgets/rich_text_view.dart';
 
 /// 附近的人（`cmd=get_nearby` / `report_location`，对齐 nearbyfriendserver.lua）。
 ///
@@ -32,6 +36,9 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
   String? _error;
   bool _loaded = false;
   List<_NearbyUser> _users = const [];
+
+  /// uin → 昵称 / 头像（DIY 头像 URL、角色头像本体 type-id、头像框）；拉不到则空。
+  Map<int, PlayerProfile> _profiles = const {};
 
   bool _allowAdd = false;
   bool _allowAddLoaded = false;
@@ -118,9 +125,25 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
       out.sort((a, b) => (a.distanceKm ?? double.infinity).compareTo(
             b.distanceKm ?? double.infinity,
           ));
+      // 服务端只回 `<geohash>_<uin>`：昵称与头像（含角色头像本体 / 头像框）
+      // 得自己按 uin 批量补一次，否则列表只有迷你号与占位图标。
+      Map<int, PlayerProfile> profiles = const {};
+      if (out.isNotEmpty) {
+        final profileClient = _profileClient();
+        if (profileClient != null) {
+          try {
+            profiles = await profileClient.fetchAvatarProfiles(
+              out.map((u) => u.uin).toList(),
+            );
+          } catch (_) {
+            // 资料拉取失败 → 退回迷你号 + 首字占位
+          }
+        }
+      }
       if (!mounted) return;
       setState(() {
         _users = out;
+        _profiles = profiles;
         _loaded = true;
         _busy = false;
       });
@@ -139,8 +162,16 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
   }
 
-  static const String _geoBase32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+  /// 共享资料客户端（带 30s 缓存）；未登录 / 测试环境读 provider 会抛 → null。
+  ProfileClient? _profileClient() {
+    try {
+      return ref.read(profileClientProvider);
+    } catch (_) {
+      return null;
+    }
+  }
 
+  static const String _geoBase32 = '0123456789bcdefghjkmnpqrstuvwxyz';
   /// geohash 解码 → (lat, lon)；非法返回 null。
   static (double, double)? _geohashDecode(String hash) {
     if (hash.isEmpty) return null;
@@ -283,19 +314,37 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
               ),
             )
           else
-            ..._users.map(
-              (u) => ListTile(
-                leading: const CircleAvatar(child: Icon(Icons.person)),
-                title: Text('迷你号 ${u.uin}'),
-                subtitle: Text(_distText(u.distanceKm)),
+            ..._users.map((u) {
+              final profile = _profiles[u.uin];
+              final nickname = profile?.nickname ?? '';
+              final name = nickname.isNotEmpty ? nickname : '${u.uin}';
+              return ListTile(
+                // 带头像框的槽位高于 ListTile 的 leading 上限（紧凑密度下 48dp），
+                // 不抬高纵向密度会被压扁并裁掉框外圈（见 [kAvatarListTileDensity]）。
+                visualDensity: kAvatarListTileDensity,
+                minTileHeight: headFrameSlotSize(24),
+                leading: AvatarView(
+                  name: name,
+                  avatarUrl: profile?.avatarUrl,
+                  radius: 24,
+                  headType: profile?.headType,
+                  headId: profile?.headId,
+                  frameId: profile?.headFrameId,
+                ),
+                title: RichTextView(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text('迷你号 ${u.uin} · ${_distText(u.distanceKm)}'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute(
                     builder: (_) => PlayerHomePage(targetUin: u.uin),
                   ),
                 ),
-              ),
-            ),
+              );
+            }),
           if (_loaded && _users.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
