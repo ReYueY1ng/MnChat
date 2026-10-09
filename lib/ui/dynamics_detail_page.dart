@@ -5,7 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../core/models/nickname.dart' show plainNickname;
 import '../core/services/dynamics.dart';
-import '../core/services/profile.dart' show PlayerProfile;
+import '../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
@@ -39,6 +39,8 @@ typedef PlayerCardTap =
       int uin,
       String name,
       String? avatar,
+      int? headType,
+      int? headId,
       int? headFrameId,
       Offset position,
     );

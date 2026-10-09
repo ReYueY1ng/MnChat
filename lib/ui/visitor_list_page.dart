@@ -166,6 +166,8 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
               avatarUrl: profile?.avatarUrl,
               name: profile?.nickname ?? '${rec.uin}',
               radius: 24,
+              headType: profile?.headType,
+              headId: profile?.headId,
               frameId: profile?.headFrameId,
             ),
             title: RichTextView(

@@ -8,6 +8,8 @@
 ///     `tag` 即话题 id）。
 library;
 
+import 'dart:async' show unawaited;
+
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_staggered_grid_view/flutter_staggered_grid_view.dart';
@@ -245,11 +247,24 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
           ..addAll(r.posts);
         _nextCt = r.nextCt;
       });
+      unawaited(_enrichAvatars());
     } catch (e) {
       if (mounted) setState(() => _error = '加载失败: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
+  }
+
+  /// 补作者头像展示（角色头像本体 / 头像框）：与动态大厅同一条规则
+  /// （见 [enrichPostAvatars]）—— 话题流里的卡片同样要显示角色头像。
+  Future<void> _enrichAvatars() async {
+    final next = await enrichPostAvatars(ref, _posts);
+    if (!mounted || identical(next, _posts)) return;
+    setState(() {
+      _posts
+        ..clear()
+        ..addAll(next);
+    });
   }
 
   Future<void> _loadMore() async {
@@ -266,6 +281,7 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
         _posts.addAll(r.posts);
         _nextCt = r.nextCt;
       });
+      unawaited(_enrichAvatars());
     } catch (_) {
       // 加载更多失败：保留已加载内容。
     } finally {

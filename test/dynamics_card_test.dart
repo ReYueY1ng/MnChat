@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/dynamics.dart';
+import 'package:mnchat/core/services/profile.dart' show ProfileClient;
 import 'package:mnchat/core/storage/app_database.dart';
 import 'package:mnchat/state/providers.dart';
 import 'package:mnchat/ui/dynamics_detail_page.dart';
@@ -351,5 +352,92 @@ void main() {
 
     await pumpCard(tester);
     expect(find.text('视频'), findsNothing);
+  });
+
+  testWidgets('头像：无自定义头像但有角色头像本体时渲染本地角色头像', (tester) async {
+    // 动态接口不下发角色头像本体，由页面经 enrichPostAvatars 补进 post；
+    // 卡片据此渲染 assets/roleicons/<id>.webp，而不再是首字占位。
+    await pumpCard(
+      tester,
+      post: const DynamicsPost(
+        pid: '273640665_1787757899',
+        uin: 273640665,
+        content: '角色头像动态',
+        nickname: '测试昵称',
+        location: '广东',
+        headType: 4,
+        headId: 31,
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    final image = tester.widget<Image>(
+      find.descendant(
+        of: find.byType(AvatarView),
+        matching: find.byType(Image),
+      ),
+    );
+    expect((image.image as AssetImage).assetName, 'assets/roleicons/31.webp');
+  });
+
+  testWidgets('enrichPostAvatars：DIY > 角色头像本体（type2 走 SkinID 兜底）> 保留原 URL', (
+    tester,
+  ) async {
+    final adapter = _StubAdapter({
+      'getProfileBatch3':
+          '{"data":['
+              '{"uin":11,"profile":{"uin":11,"RoleInfo":{"NickName":"甲","SkinID":211}}},'
+              '{"uin":22,"profile":{"uin":22,"RoleInfo":{"NickName":"乙","SkinID":211}}},'
+              '{"uin":33,"profile":{"uin":33,"RoleInfo":{"NickName":"丙"}}}]}',
+      // 11：人物中心给的是头套（type 2 无 2D 资源）→ 应落到 SkinID 的角色头像；
+      // 22：启用 DIY → 用 pass_url 并清掉角色头像本体；
+      // 33：两个接口都没有可用头像 → 保留列表自带的 URL。
+      'getPersonCenterHeadInfo':
+          '{"code":0,"data":{'
+              '"11":{"type":2,"id":9,"diy_header":{"pass_url":""}},'
+              '"22":{"type":1,"id":7,"use_diy":1,'
+              '"diy_header":{"pass_url":"http://cdn/diy.png"}},'
+              '"33":{"type":2,"id":9,"diy_header":{"pass_url":""}}}}',
+    });
+    const posts = [
+      DynamicsPost(pid: '11_1', uin: 11, content: 'a', avatar: 'http://cdn/old.png'),
+      DynamicsPost(pid: '22_2', uin: 22, content: 'b'),
+      DynamicsPost(pid: '33_3', uin: 33, content: 'c', avatar: 'http://cdn/keep.png'),
+    ];
+    late List<DynamicsPost> out;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          profileClientProvider.overrideWithValue(
+            ProfileClient(
+              uin: 7,
+              s2: 's2',
+              s2t: 's2t',
+              dio: Dio()..httpClientAdapter = adapter,
+              baseUrl: 'https://example.invalid',
+            ),
+          ),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(Brightness.light),
+          home: Consumer(
+            builder: (context, ref, _) => ElevatedButton(
+              onPressed: () async {
+                out = await enrichPostAvatars(ref, posts);
+              },
+              child: const Text('go'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('go'));
+    await tester.pumpAndSettle();
+
+    expect(out[0].avatar, isNull, reason: '角色头像有本地图标时要清掉列表自带的 URL');
+    expect(out[0].headType, 1, reason: 'type 2（头套）无 2D 资源 → 回退 SkinID 的角色头像');
+    expect(out[0].headId, 211);
+    expect(out[1].avatar, 'http://cdn/diy.png');
+    expect(out[1].headType, isNull, reason: 'DIY 生效时清空角色头像本体');
+    expect(out[2].avatar, 'http://cdn/keep.png', reason: '没有可用头像就保留原值');
   });
 }

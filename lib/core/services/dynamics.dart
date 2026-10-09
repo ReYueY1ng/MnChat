@@ -106,6 +106,14 @@ class DynamicsPost {
   /// 头像框 id（role_info_list.head_frame_id，对应 `assets/headframes/<id>.png`）。
   final int? headFrameId;
 
+  /// 头像本体 type/id（1=皮肤 3=坐骑 4=立绘）。
+  ///
+  /// 动态接口本身不下发它（只有 DIY 头像与头像框），由页面用
+  /// `ProfileClient.fetchAvatarProfiles` 批量补齐后经 [withAvatar] 填上；
+  /// `AvatarView` 靠它去查本机角色头像图标（`headIconAsset`）。
+  final int? headType;
+  final int? headId;
+
   /// 图片列表（带宽高）。
   final List<PostImage> pics;
 
@@ -149,6 +157,8 @@ class DynamicsPost {
     this.nickname,
     this.avatar,
     this.headFrameId,
+    this.headType,
+    this.headId,
     this.pics = const [],
     this.city = '',
     this.location = '',
@@ -264,6 +274,46 @@ class DynamicsPost {
         nickname: nickname ?? this.nickname,
         avatar: avatar ?? this.avatar,
         headFrameId: headFrameId ?? this.headFrameId,
+        headType: headType,
+        headId: headId,
+        pics: pics,
+        city: city,
+        location: location,
+        likeCount: likeCount,
+        commentCount: commentCount,
+        shareCount: shareCount,
+        linkName: linkName,
+        linkAuthor: linkAuthor,
+        isLottery: isLottery,
+        authSee: authSee,
+        videoResId: videoResId,
+        topics: topics,
+        lotteryId: lotteryId,
+        voteId: voteId,
+      );
+
+  /// 换一份头像展示信息（页面批量补资料后重建）。
+  ///
+  /// 与 [withProfile] 的区别：[url] 是**最终值** —— 传 null 表示清掉列表自带的
+  /// 头像 URL，让角色头像本体（[headType]/[headId]）生效；`withProfile` 对 null
+  /// 是「保留原值」，清不掉。
+  DynamicsPost withAvatar({
+    required String? url,
+    int? headType,
+    int? headId,
+    int? headFrameId,
+  }) =>
+      DynamicsPost(
+        pid: pid,
+        uin: uin,
+        content: content,
+        createTime: createTime,
+        ctype: ctype,
+        nickname: nickname,
+        avatar: url,
+        headFrameId: headFrameId ?? this.headFrameId,
+        headType: headType,
+        headId: headId,
         pics: pics,
         city: city,
         location: location,
@@ -336,6 +386,11 @@ class DynamicsComment {
 
   /// 头像框 id（role_info_list.head_frame_id）。
   final int? headFrameId;
+
+  /// 头像本体 type/id（1=皮肤 3=坐骑 4=立绘）；评论接口不下发，由页面用
+  /// `ProfileClient.fetchAvatarProfiles` 批量补齐后经 [withAvatar] 填上。
+  final int? headType;
+  final int? headId;
   final int likeCount;
   final int replyCount;
 
@@ -371,6 +426,8 @@ class DynamicsComment {
     this.nickname,
     this.avatar,
     this.headFrameId,
+    this.headType,
+    this.headId,
     this.likeCount = 0,
     this.replyCount = 0,
     this.location = '',
@@ -464,6 +521,34 @@ class DynamicsComment {
         nickname: nickname ?? this.nickname,
         avatar: avatar ?? this.avatar,
         headFrameId: headFrameId ?? this.headFrameId,
+        headType: headType,
+        headId: headId,
+        likeCount: likeCount,
+        replyCount: replyCount,
+        location: location,
+        pidUin: pidUin,
+        pidCt: pidCt,
+        opUin: opUin,
+        lastTime: lastTime,
+        repId: repId,
+      );
+
+  /// 换一份头像展示信息（见 [DynamicsPost.withAvatar]：`url` 是最终值）。
+  DynamicsComment withAvatar({
+    required String? url,
+    int? headType,
+    int? headId,
+    int? headFrameId,
+  }) =>
+      DynamicsComment(
+        uin: uin,
+        content: content,
+        createTime: createTime,
+        nickname: nickname,
+        avatar: url,
+        headFrameId: headFrameId ?? this.headFrameId,
+        headType: headType,
+        headId: headId,
         likeCount: likeCount,
         replyCount: replyCount,
         location: location,

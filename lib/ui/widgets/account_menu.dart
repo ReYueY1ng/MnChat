@@ -300,12 +300,22 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
     if (widget.showSelfInfo) {
       final uin = ref.read(myUinProvider);
       if (uin > 0) {
+        // 与侧栏头像同源（DIY 头像 / 头像本体 / 头像框）：不给的话卡片头部
+        // 只能画首字占位（头像本体 / 头像框都缺）。
+        final me = ref.read(myAvatarInfoProvider).asData?.value;
+        final ownName = me?.name ?? '';
         await showSessionPlayerInfoPopup(
           context,
           ref,
           uin: uin,
-          name: ref.read(authProvider).auth?.name ?? '',
+          name: ownName.isNotEmpty
+              ? ownName
+              : (ref.read(authProvider).auth?.name ?? ''),
           anchor: anchor,
+          avatarUrl: me?.avatarUrl,
+          headType: me?.headType,
+          headId: me?.headId,
+          headFrameId: me?.frameId,
           // 本人卡片的动作行只剩「个人主页」（见 session_player_info_popup：
           // 自己的卡不带置顶 / 赠送 / 更多这些好友操作）—— 没有它，侧边栏
           // 「我的资料」点进来就没有通往个人主页的入口。

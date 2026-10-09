@@ -17,6 +17,8 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     int uin,
     String name,
     String? avatar,
+    int? headType,
+    int? headId,
     int? headFrameId,
     Offset position,
   ) {
@@ -28,6 +30,8 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         name: name,
         anchor: Rect.fromLTWH(position.dx, position.dy, 1, 1),
         avatarUrl: avatar,
+        headType: headType,
+        headId: headId,
         headFrameId: headFrameId,
         showActions: uin != ref.read(myUinProvider),
         // 动态来源的按钮组（个人中心 / 加好友 / 赠送 / 关注）。
@@ -74,9 +78,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 本人动态是否已置顶（详情接口不下发该标志，先按本地态翻转）。
   bool _postTop = false;
 
-  /// 作者资料兜底（消息中心 / 通知页进来的动态往往只有 uin）。
-  String? _authorName;
-  String? _authorAvatar;
+  /// 补全后的作者动态（昵称 / 头像展示 / 头像本体 / 头像框）。
+  ///
+  /// 消息中心 / 通知页进来的动态往往只有 uin，且动态接口从不给角色头像本体；
+  /// 按 uin 补齐后整条替换，渲染用它而不是 `widget.post`。null = 还没补齐。
+  DynamicsPost? _displayPost;
 
   @override
   void initState() {
@@ -94,44 +100,46 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
     }
     _likeCount = widget.post.likeCount;
-    unawaited(_loadAuthorIfMissing());
+    unawaited(_loadAuthorProfile());
     _loadComments(reset: true);
   }
 
-  /// 按 uin 补齐作者昵称/头像（服务端对消息中心 / 通知页进入的动态常常只下发
-  /// uin，卡片就会只剩一串数字且没有头像）。失败保持原样，绝不抛。
-  Future<void> _loadAuthorIfMissing() async {
+  /// 按 uin 补齐作者资料（昵称 / 头像 / 头像本体 / 头像框）。
+  ///
+  /// 服务端对消息中心 / 通知页进入的动态常常只下发 uin，且动态接口从不给角色
+  /// 头像本体 —— 不补的话卡片只剩一串数字与首字占位。规则与好友 / 会话列表
+  /// 一致（`GetPlayerHeadPath`：DIY → 角色头像本体 → 首字）。失败保持原样，绝不抛。
+  Future<void> _loadAuthorProfile() async {
     final post = widget.post;
-    final hasName = post.nickname?.isNotEmpty ?? false;
-    final hasAvatar = post.avatar?.isNotEmpty ?? false;
-    if (hasName && hasAvatar) return;
+    // 未登录 / 测试环境未注入认证时读 provider 会抛，直接不补（保持原样）。
+    final ProfileClient? profile;
     try {
-      final auth = ref.read(chatServiceProvider).auth;
-      if (auth == null) return;
-      final profile = ref.read(profileClientProvider);
-      if (profile == null) return;
-      final list = await profile.getProfileBatch3([post.uin]);
-      final heads = await profile.getPersonCenterHeadInfos([post.uin]);
+      profile = ref.read(profileClientProvider);
+    } catch (_) {
+      return;
+    }
+    if (profile == null) return;
+    try {
+      final map = await profile.fetchAvatarProfiles([post.uin]);
       if (!mounted) return;
-      final p = list.isNotEmpty ? list.first : null;
-      final head = heads[post.uin];
+      final p = map[post.uin];
+      if (p == null) return;
+      final display = PlayerProfile.resolveAvatarDisplay(
+        profile: p,
+        fallbackUrl: post.avatar,
+      );
       setState(() {
-        if (!hasName && (p?.nickname.isNotEmpty ?? false)) {
-          _authorName = p!.nickname;
+        var next = post.withAvatar(
+          url: display.url,
+          headType: display.headType,
+          headId: display.headId,
+          headFrameId: p.headFrameId ?? post.headFrameId,
+        );
+        if ((post.nickname?.isNotEmpty ?? false) == false &&
+            p.nickname.isNotEmpty) {
+          next = next.withProfile(nickname: p.nickname);
         }
-        if (!hasAvatar) {
-          // 与好友资料同规则：DIY 自定义头像优先，其次资料网络头像。
-          final fallback = PlayerProfile.resolveRoleHeadFallback(
-            headType: head?.type,
-            headId: head?.id,
-            skinId: p?.headSkinId,
-            model: p?.headModel,
-          );
-          _authorAvatar = head?.diyUrl ??
-              (PlayerProfile.roleHeadHasLocalIcon(fallback)
-                  ? null
-                  : p?.avatarUrl);
-        }
+        _displayPost = next;
       });
     } catch (_) {
       // 补齐失败：保持原样（昵称回退 uin、头像首字）
@@ -204,6 +212,53 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     return content;
   }
 
+  /// 批量补评论作者的角色头像（评论接口只下发 DIY 头像与头像框）。
+  ///
+  /// 与动态卡片同一条规则（`GetPlayerHeadPath`）：一次请求补一整页
+  /// （`fetchAvatarProfiles` 内部按 50 个分片）；补不到原样返回，不清掉已有头像。
+  Future<List<DynamicsComment>> _withCommentAvatars(
+    List<DynamicsComment> list,
+  ) async {
+    if (list.isEmpty) return list;
+    // 未登录 / 测试环境未注入认证时读 provider 会抛，直接不补（保持原样）。
+    final ProfileClient? profile;
+    try {
+      profile = ref.read(profileClientProvider);
+    } catch (_) {
+      return list;
+    }
+    if (profile == null) return list;
+    final uins = <int>{
+      for (final c in list)
+        if (c.uin > 0) c.uin,
+    }.toList();
+    if (uins.isEmpty) return list;
+    Map<int, PlayerProfile> map;
+    try {
+      map = await profile.fetchAvatarProfiles(uins);
+    } catch (_) {
+      return list;
+    }
+    return [
+      for (final c in list) _enrichCommentAvatar(c, map[c.uin]),
+    ];
+  }
+
+  /// 单条评论的头像展示解析（见 [PlayerProfile.resolveAvatarDisplay]）。
+  DynamicsComment _enrichCommentAvatar(DynamicsComment c, PlayerProfile? p) {
+    if (p == null) return c;
+    final display = PlayerProfile.resolveAvatarDisplay(
+      profile: p,
+      fallbackUrl: c.avatar,
+    );
+    return c.withAvatar(
+      url: display.url,
+      headType: display.headType,
+      headId: display.headId,
+      headFrameId: p.headFrameId ?? c.headFrameId,
+    );
+  }
+
   /// 加载评论。默认排序 offset 翻页（每页 20）；最新排序 ct 游标。
   Future<void> _loadComments({bool reset = false}) async {
     final client = _client;
@@ -234,8 +289,10 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         ct: _nextCt,
       );
       if (!mounted || seq != _reqSeq) return;
+      final enriched = await _withCommentAvatars(page);
+      if (!mounted || seq != _reqSeq) return;
       setState(() {
-        _comments = reset ? page : [..._comments, ...page];
+        _comments = reset ? enriched : [..._comments, ...enriched];
         // 默认排序：offset 累加；最新排序：ct 用本页最后一条 last_time
         _nextOffset = _comments.length;
         _hasMore = page.isNotEmpty;
@@ -876,9 +933,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
               children: [
                 Expanded(
                   child: _PostPanel(
-                    post: widget.post,
-                    authorName: _authorName,
-                    authorAvatar: _authorAvatar,
+                    post: _displayPost ?? widget.post,
                     onAvatarTap: _showPlayerCard,
                     client: _client,
                     isMine: _isMinePost,
@@ -925,9 +980,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
                   child: ListView(
                     children: [
                       _PostPanel(
-                        post: widget.post,
-                        authorName: _authorName,
-                        authorAvatar: _authorAvatar,
+                        post: _displayPost ?? widget.post,
                         onAvatarTap: _showPlayerCard,
                         client: _client,
                         isMine: _isMinePost,

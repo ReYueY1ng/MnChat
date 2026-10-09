@@ -194,6 +194,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         cache.nextCt = result.nextCt;
         cache.loadedOnce = true;
       });
+      unawaited(_enrichAvatars(cache, seq));
     } catch (e) {
       if (!mounted || seq != _reqSeq) return;
       setState(() => cache.error = '加载失败: $e');
@@ -229,6 +230,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         cache.posts = [...cache.posts, ...result.posts];
         cache.nextCt = result.nextCt;
       });
+      unawaited(_enrichAvatars(cache, seq));
     } catch (_) {
       // 忽略加载更多失败
     } finally {
@@ -236,6 +238,16 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         setState(() => cache.loadingMore = false);
       }
     }
+  }
+
+  /// 补当前分类里作者的头像展示（角色头像本体 / 头像框），见 [enrichPostAvatars]。
+  ///
+  /// 动态接口自己不下发角色头像本体，没自定义头像的人到了卡片上只剩首字占位。
+  Future<void> _enrichAvatars(_TabCache cache, int seq) async {
+    final next = await enrichPostAvatars(ref, cache.posts);
+    if (!mounted || seq != _reqSeq) return;
+    if (identical(next, cache.posts)) return;
+    setState(() => cache.posts = next);
   }
 
   void _switchTab(int i) {

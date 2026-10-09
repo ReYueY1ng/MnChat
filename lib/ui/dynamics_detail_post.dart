@@ -2,6 +2,8 @@ part of 'dynamics_detail_page.dart';
 
 /// 左侧/顶部：动态全文。
 class _PostPanel extends StatelessWidget {
+  /// 要展示的动态；页面会先把作者资料（昵称 / 头像本体 / 头像框）补进去再传过来
+  /// （消息中心 / 通知页进来的动态常常只有 uin）。
   final DynamicsPost post;
 
   /// 点头像 → 玩家卡片。
@@ -10,31 +12,22 @@ class _PostPanel extends StatelessWidget {
   /// 动态服务客户端；投票卡用它拉取投票信息 / 提交投票。
   final DynamicsClient? client;
 
-  /// 作者资料兜底：消息中心 / 通知页进来的动态常常只有 uin（服务端不下发昵称/
-  /// 头像），由页面按 uin 补齐后传入。
-  final String? authorName;
-  final String? authorAvatar;
-
   /// 动态作者是不是我（投票拉取失败时是否提示，对齐游戏 `bolMine`）。
   final bool isMine;
 
   const _PostPanel({required this.post, this.onAvatarTap, this.client,
-    this.authorName,
-    this.authorAvatar,
     this.isMine = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    // 服务端对消息中心 / 通知页进入的动态常常只下发 uin，用页面补齐的作者资料兜底。
-    final nickname = (post.nickname?.isNotEmpty ?? false)
+    // 昵称 / 头像 / 头像本体 / 头像框都已由页面写进 [post]；这里只做最后降级：
+    // 昵称空 → 迷你号。
+    final name = (post.nickname?.isNotEmpty ?? false)
         ? post.nickname!
-        : ((authorName?.isNotEmpty ?? false) ? authorName! : '');
-    final name = nickname.isEmpty ? '${post.uin}' : nickname;
-    final avatar = (post.avatar?.isNotEmpty ?? false)
-        ? post.avatar
-        : authorAvatar;
+        : '${post.uin}';
+    final avatar = post.avatar;
     final meta = [
       if (post.createTime > 0) _relative(post.createTime),
       'IP ${post.location.isNotEmpty ? post.location : post.city}',
@@ -54,6 +47,8 @@ class _PostPanel extends StatelessWidget {
                         post.uin,
                         name,
                         avatar,
+                        post.headType,
+                        post.headId,
                         post.headFrameId,
                         d.globalPosition,
                       ),
@@ -61,6 +56,8 @@ class _PostPanel extends StatelessWidget {
                   name: name,
                   avatarUrl: avatar,
                   radius: 22,
+                  headType: post.headType,
+                  headId: post.headId,
                   frameId: post.headFrameId,
                 ),
               ),

@@ -14,6 +14,7 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/services/dynamics.dart';
 import 'package:mnchat/core/services/profile.dart';
 
 /// 按 `act` 回放固定响应体的假 Dio 适配器（离线）。
@@ -202,6 +203,88 @@ void main() {
       final slots = await _profileClient(adapter).getPersonCenterHeadInfos(uins(50));
       expect(slots.length, 50);
       expect(adapter.requests.length, 1);
+    });
+  });
+
+  group('PlayerProfile.resolveAvatarDisplay：列表头像展示合并', () {
+    // 动态 / 评论接口自己不下发角色头像本体，卡片侧的合并规则收在这个函数里
+    // （对齐 headinfosysmgr.lua:321-383 GetPlayerHeadPath）。
+    test('DIY 自定义头像优先，并清掉角色头像本体', () {
+      final r = PlayerProfile.resolveAvatarDisplay(
+        profile: const PlayerProfile(
+          uin: 7,
+          nickname: '甲',
+          avatarUrl: 'http://cdn/diy.png',
+          headType: 4,
+          headId: 2,
+        ),
+        fallbackUrl: 'http://cdn/old.png',
+      );
+      expect(r.url, 'http://cdn/diy.png');
+      expect(r.headType, isNull);
+      expect(r.headId, isNull);
+    });
+
+    test('无 DIY 且角色头像有本地图标 → 用角色头像本体（url 置空）', () {
+      final r = PlayerProfile.resolveAvatarDisplay(
+        profile: const PlayerProfile(uin: 7, nickname: '甲', headType: 4, headId: 2),
+        fallbackUrl: 'http://cdn/map-screenshot.png',
+      );
+      expect(r.url, isNull, reason: '有 URL 就不显示角色头像本体，必须置空');
+      expect(r.headType, 4);
+      expect(r.headId, 2);
+    });
+
+    test('无任何可展示头像 → 保留列表自带头像，不退成首字', () {
+      final r = PlayerProfile.resolveAvatarDisplay(
+        profile: const PlayerProfile(uin: 7, nickname: '甲'),
+        fallbackUrl: 'http://cdn/keep.png',
+      );
+      expect(r.url, 'http://cdn/keep.png');
+      expect(r.headType, isNull);
+      expect(r.headId, isNull);
+    });
+
+    test('资料缺失（拉取失败）→ 原样保留列表自带头像', () {
+      final r = PlayerProfile.resolveAvatarDisplay(
+        profile: null,
+        fallbackUrl: 'http://cdn/keep.png',
+      );
+      expect(r.url, 'http://cdn/keep.png');
+    });
+
+    test('角色头像本体无本地图标（未收录皮肤）→ 不压过列表头像', () {
+      final r = PlayerProfile.resolveAvatarDisplay(
+        profile: const PlayerProfile(uin: 7, nickname: '甲', headType: 1, headId: 999999),
+        fallbackUrl: 'http://cdn/keep.png',
+      );
+      expect(r.url, 'http://cdn/keep.png');
+      expect(r.headType, isNull);
+    });
+  });
+
+  group('DynamicsPost.withAvatar：头像 URL 是最终值', () {
+    const post = DynamicsPost(
+      pid: '7_1787757890',
+      uin: 7,
+      content: '正文',
+      avatar: 'http://cdn/map-screenshot.png',
+      headFrameId: 100,
+    );
+
+    test('url 传 null 会清掉列表自带头像（让角色头像本体生效）', () {
+      final next = post.withAvatar(url: null, headType: 4, headId: 2);
+      expect(next.avatar, isNull);
+      expect(next.headType, 4);
+      expect(next.headId, 2);
+      expect(next.headFrameId, 100, reason: '传空时保留原头像框');
+      expect(next.content, '正文');
+    });
+
+    test('url 非空时覆盖列表自带头像', () {
+      final next = post.withAvatar(url: 'http://cdn/diy.png');
+      expect(next.avatar, 'http://cdn/diy.png');
+      expect(next.headType, isNull);
     });
   });
 }

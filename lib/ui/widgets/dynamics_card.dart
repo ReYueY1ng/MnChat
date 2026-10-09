@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/models/messages.dart';
 import '../../core/services/dynamics.dart';
+import '../../core/services/profile.dart' show PlayerProfile, ProfileClient;
 import '../../state/providers.dart';
 import '../dynamics_detail_page.dart';
 import '../dynamics_topic_page.dart';
@@ -15,6 +16,62 @@ import 'head_frame.dart';
 import 'image_viewer.dart';
 import 'rich_text_view.dart';
 import '../../core/services/image_disk_cache.dart';
+
+/// 批量补齐动态作者的头像展示（DIY → 角色头像本体 → 首字占位）。
+///
+/// 动态接口只在 `role_info_list` 里下发 DIY 自定义头像与头像框，**从不给角色
+/// 头像本体** —— 没自定义头像的人到了卡片上就只剩网络头像或首字占位，而好友 /
+/// 会话 / 访客列表用的是官方 `GetPlayerHeadPath`（`headinfosysmgr.lua:321-383`）
+/// 那条规则。这里按同一条规则补一次。
+///
+/// 一次请求补整页（`fetchAvatarProfiles` 内部两个批量口，各按 50 个分片）；
+/// 拉不到时原样返回（不会把已有头像清掉）。动态大厅与话题流共用。
+Future<List<DynamicsPost>> enrichPostAvatars(
+  WidgetRef ref,
+  List<DynamicsPost> posts,
+) async {
+  if (posts.isEmpty) return posts;
+  // 未登录 / 测试环境未注入认证时读 provider 会抛，直接不补（保持原样）。
+  final ProfileClient? client;
+  try {
+    client = ref.read(profileClientProvider);
+  } catch (_) {
+    return posts;
+  }
+  if (client == null) return posts;
+  final uins = <int>{
+    for (final p in posts)
+      if (p.uin > 0) p.uin,
+  }.toList();
+  if (uins.isEmpty) return posts;
+  Map<int, PlayerProfile> profiles;
+  try {
+    profiles = await client.fetchAvatarProfiles(uins);
+  } catch (_) {
+    return posts;
+  }
+  return [
+    for (final post in posts)
+      if (profiles[post.uin] == null)
+        post
+      else
+        _withAvatarDisplay(post, profiles[post.uin]!),
+  ];
+}
+
+/// 单条动态的头像展示解析（见 [PlayerProfile.resolveAvatarDisplay]）。
+DynamicsPost _withAvatarDisplay(DynamicsPost post, PlayerProfile p) {
+  final display = PlayerProfile.resolveAvatarDisplay(
+    profile: p,
+    fallbackUrl: post.avatar,
+  );
+  return post.withAvatar(
+    url: display.url,
+    headType: display.headType,
+    headId: display.headId,
+    headFrameId: p.headFrameId ?? post.headFrameId,
+  );
+}
 
 /// 动态卡片 —— 左上头像+徽标+昵称 / 相对时间·IP属地 / 内容(查看全文) /
 /// 图片 / 视频·投票·抽奖标记 / 附加信息 / 右下操作区。
@@ -219,6 +276,8 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
                       name: name,
                       avatarUrl: post.avatar,
                       radius: 20,
+                      headType: post.headType,
+                      headId: post.headId,
                       frameId: post.headFrameId,
                     ),
                   ),
@@ -346,6 +405,8 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
         name: post.nickname ?? '${post.uin}',
         anchor: Rect.fromLTWH(position.dx, position.dy, 1, 1),
         avatarUrl: post.avatar,
+        headType: post.headType,
+        headId: post.headId,
         headFrameId: post.headFrameId,
         // 别人：带好友操作；自己：只有「个人主页」入口。
         showActions: !isMine,

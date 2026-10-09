@@ -112,6 +112,35 @@ class PlayerProfile {
   static bool roleHeadHasLocalIcon(({int type, int id})? roleHead) =>
       roleHead != null && headIconAsset(roleHead.type, roleHead.id) != null;
 
+  /// 头像展示解析 —— 「DIY 自定义头像 / 角色头像本体 / 列表自带头像 URL /
+  /// 首字占位」的判定收在一处，供那些**接口自己不下发角色头像**的列表复用
+  /// （动态卡片、动态详情、评论、访客…）。规则同官方 `GetPlayerHeadPath`
+  /// （`headinfosysmgr.lua:321-383`）与好友/会话列表：
+  ///
+  /// 1. [profile] 的 [avatarUrl] 非空 = 启用了 DIY 自定义头像 → 用它，且清空
+  ///    角色头像本体（`AvatarView` 的规则是「有 URL 就不用本体」）；
+  /// 2. 否则角色头像本体（已由 `fetchAvatarProfiles` 按 SkinID/Model 归一）
+  ///    在本机有图标时用它 —— 这正是「没自定义头像的人显示成首字」的修法；
+  /// 3. 都没有时保留列表自带的 [fallbackUrl]（服务端字段），免得退成首字占位。
+  static ({String? url, int? headType, int? headId}) resolveAvatarDisplay({
+    PlayerProfile? profile,
+    String? fallbackUrl,
+  }) {
+    final p = profile;
+    if (p == null) return (url: fallbackUrl, headType: null, headId: null);
+    final diy = p.avatarUrl;
+    if (diy != null && diy.isNotEmpty) {
+      return (url: diy, headType: null, headId: null);
+    }
+    final roleHead = (p.headType != null && p.headId != null)
+        ? (type: p.headType!, id: p.headId!)
+        : null;
+    if (roleHead != null && roleHeadHasLocalIcon(roleHead)) {
+      return (url: null, headType: roleHead.type, headId: roleHead.id);
+    }
+    return (url: fallbackUrl, headType: null, headId: null);
+  }
+
   /// 从 getProfileBatch3 响应项解析。
   /// 结构（LuaTable）: {profile: {uin, RoleInfo: {NickName, ...},
   ///        header: {url}, header2: {url}, header3: {url}}, uin}
