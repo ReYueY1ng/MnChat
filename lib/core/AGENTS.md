@@ -1,49 +1,42 @@
 # lib/core
 
-**Score: 11** — 7 subdirs, the distinct framework layer. `services/`, `models/`, `storage/`, `crypto/` own their own AGENTS.md; `net/`, `protocol/`, `utils/` are covered here (each under 8 points on its own).
+**Score: 11** — 7 subdirs; the framework layer between `lib/ui` and the network. `services/`, `models/`, `storage/`, `crypto/` and now `net/` own their own AGENTS.md; `protocol/` and `utils/` (score 6 each) are covered here.
 
 ## OVERVIEW
-Framework layer of MNChat: HTTP/WS clients, data models, SQLite storage, signing, endpoint config. Faithful ports of a legacy Lua/Python Mini World client.
+Framework layer of MNChat: HTTP/WS clients, data models, SQLite storage, signing, endpoint config, the Lua/JSON response decoder, and log/cache helpers. Faithful ports of a legacy Lua/Python Mini World client.
 
 ## STRUCTURE
 ```
 lib/core/
-├── services/        # 30 HTTP service clients + WS chat pipeline (own AGENTS.md)
+├── services/        # 33 HTTP clients + WS chat pipeline, `chat/` subdir (own AGENTS.md)
 ├── models/          # data classes + lenient parsers (own AGENTS.md)
-├── storage/         # Drift schema + settings KV store (own AGENTS.md)
-├── crypto/          # signatures, XXTEA, base64/urlencode (own AGENTS.md)
-├── net/             # endpoint config, backend env switch, Dio factory, duplicate-request counter
-├── protocol/        # lua_table.dart — Lua-table/JSON hybrid response decoder
+├── storage/         # Drift v9 schema + settings KV store (own AGENTS.md)
+├── crypto/          # signatures, XXTEA, encodings (own AGENTS.md)
+├── net/             # endpoint config, Dio factory, msgpack, upload, dup-request monitor (own AGENTS.md)
+├── protocol/        # lua_table.dart (340) — Lua-table/JSON hybrid response decoder
 ├── utils/           # log.dart (`log`/`redactUrl`) + request_cache.dart (single-flight + TTL)
-├── emoticon.dart    # sprite-table emoticons + 4 image widgets (563 LOC)
-├── chat_emoji.dart  # kChatEmoji game-code → Unicode map
-└── app_info.dart    # kAppVersion
+├── emoticon.dart    # sprite-table emoticons + image widgets (563)
+├── chat_emoji.dart  # kChatEmoji game-code → Unicode map (76)
+└── app_info.dart    # kAppVersion (2)
 ```
 
 ## WHERE TO LOOK
 | Task | Location |
 |------|----------|
-| Change a server endpoint / env | net/config.dart — `kDefaultBase`, `backendLogin()`, `backendChatpush(env)`, `kLoginPorts` (16 importers) |
-| Get an HTTP client | net/http_factory.dart → `createDio()` (15 importers). Never `Dio()` inline |
-| Spot repeated requests | net/duplicate_request_monitor.dart → `DuplicateRequestMonitor.instance.repeats`（`createDio()` 每次请求都记指纹，time/s2t/md5 等每次都变的参数已排除） |
+| Decode any HTTP response body | protocol/lua_table.dart → `decodeHttpResponse` (18 files), `decodeLuaTable`, `LuaTableDecodeError` |
 | Coalesce a repeated fetch | utils/request_cache.dart → `RequestCache.run(key, fetch)`（单飞 + TTL；`cacheable` 可让业务失败不进缓存） |
-| Decode a response body | protocol/lua_table.dart → `decodeHttpResponse`, `decodeLuaTable` (14 importers) |
-| Shared log / URL redaction | utils/log.dart → `log`, `LogLevel`, `redactUrl` |
+| Shared log / redact secrets | utils/log.dart → `log`, `LogLevel`, `redactUrl` (16 files) |
 | Emoticon sprite lookup | emoticon.dart → `EmoticonImage`, `ImfcEmojiImage`, `rectForCode` |
-| Emoji-code text rendering | chat_emoji.dart → `kChatEmoji`, `decodeEmojiCodes` |
-| Wire all service clients | ../state/providers.dart (single construction point) |
+| Emoji-code text rendering | chat_emoji.dart → `kChatEmoji`, `decodeEmojiCodes`, `emojiRepr` |
+| App version string | app_info.dart → `kAppVersion` |
+| Transport: endpoints, Dio, msgpack, upload | net/ (own AGENTS.md) |
+| Wire every service client | ../state/providers.dart (the single construction point; no DI container) |
 
 ## CONVENTIONS
-- Relative imports only inside core (`../net/config.dart`); consumers use `../../core/...`. No `package:mnchat/` self-imports.
-- Every parser is lenient: skip dirty data, return null/0/empty. Never throw.
-- Static catalogs are `k`-prefixed const Map/Set tables generated from decompiled game CSVs — not Dart classes.
-- Every file opens with a Chinese `///` doc comment; ports cite the source Lua line range.
-- Riverpod 3.x `Notifier` classes only (10 in repo, zero `@riverpod` codegen).
-- `material_ui` ^1.4.0 replaces `flutter/material.dart` (48 files import it, 0 import flutter/material).
+- Every file opens with a Chinese `///` doc comment citing its ported source (Lua line range or an MNClient `*.py`); files that carry one declare `library;`.
+- `lib/core` is a leaf of the dependency graph: it imports packages and its own relatives, never `lib/ui` or `lib/state`.
+- Static catalogs and path constants are `k`-prefixed const tables lifted from decompiled game CSVs — update the table, not the code.
 
 ## ANTI-PATTERNS
-- No barrel/index.dart anywhere in core. Importers name files directly; do not add one.
-- Never let a model constructor or parser throw on malformed server data.
-- Never log raw URLs containing s2/s2t/md5 — use `redactUrl` with `sensitiveQueryKeys`.
-- Protocol constants (`kS7Alphabet`, `protocol_keys.dart`) are pinned; changing one breaks signing silently.
-- Never import `flutter/material.dart` — it collides with `material_ui` symbols.
+- Never log a raw URL carrying s2/s2t/md5 — route it through `redactUrl` (`sensitiveQueryKeys`); that is why it is the most-used helper in utils/.
+- Protocol constants (`kS7Alphabet`, `protocol_keys.dart`) are pinned; a wrong one breaks signing silently — there is no server-side validation loop in this repo.

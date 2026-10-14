@@ -1,28 +1,28 @@
 # lib/ui
 
-Score 11 (distinct domain): navigation hub + 24 screens, 13185 LOC across 27 files. Distinct from `lib/state`, `lib/chat`, `lib/core` — pages hold no state of their own, they project providers.
+Score 12 (distinct domain): 48 top-level `.dart` files / 17,698 LOC, 32 `*_page.dart` libraries. Distinct from `lib/core` (services/models) and `lib/state` (provider graph) — pages own only local view state and project providers.
 
 ## OVERVIEW
-App UI layer: `MainShell` is the entry widget imported by `main.dart`, plus one screen per file (`*_page.dart`). Shared, page-agnostic widgets live in `widgets/` (has its own AGENTS.md); design tokens live in `theme/`.
+App UI layer: `MainShell` is the entry widget imported by `main.dart` (`show MainShell`), plus one screen per file (`*_page.dart`). Only two subdirectories — shared page-agnostic widgets in `widgets/` (own AGENTS.md) and tokens/theme in `theme/` (own AGENTS.md).
 
 ## WHERE TO LOOK
 | Task | Location |
 |------|----------|
-| Entry shell, 3 tabs (会话/好友/动态), responsive rail vs bar | `home_shell.dart` (`MainShell`) |
-| Chat screen | `chat_page.dart` (1439 LOC) |
-| Own / other player profile | `profile_page.dart` (450 LOC library + 4 `part` files), `player_home_page.dart` (delegate, 23 LOC) |
-| Session list + sort | `session_list_page.dart` |
-| Friends / family / partner social graph | `friends_page.dart` (1125), `family_page.dart`, `partner_page.dart` |
-| Mail | `mail_page.dart` (1296; also owns `MailDetailPage`) |
-| Dynamics feed | `dynamics_page.dart`, `dynamics_detail_page.dart` (938), `publish_dynamics_page.dart` |
-| Settings (顶层 + 账号与安全 / 通用与外观 / 消息与通知 / 隐私与数据 / 关于 5 个子页) | `settings_page.dart` + `settings_*_page.dart`;`theme_settings_page.dart` 是主题子页 |
+| Entry shell, 3 tabs (会话/好友/动态), responsive rail vs bar | `home_shell.dart` (`MainShell`, 427 LOC) |
+| Chat screen | `chat_page.dart` (902) + parts `chat_page_composer` (291) / `chat_page_bubbles` (607) / `chat_page_message_row` |
+| Own / other player profile | `profile_page.dart` (448) + parts `profile_page_state_base` (565) / `_state_actions` (278) / `_widgets` (579) / `_widgets_compact` (290); `player_home_page.dart` (23) delegates to `ProfilePage(targetUin:)` |
+| Session list + sort | `session_list_page.dart` (560) |
+| Social graph: friends / family / partner / requests / relations | `friends_page.dart` (44) + `friends_page_state` (854) + `friends_page_list` (262); `family_page.dart` (505), `partner_page.dart`, `friend_request_page.dart` (470), `relation_page.dart` |
+| Mail / message centre | `mail_page.dart` (137 — declares `MailPage`, `MailDetailPage`, `MailSelection`) + parts `mail_page_state` (1238) / `_widgets` (272) / `_detail` (137) |
+| Dynamics feed / detail / publish | `dynamics_page.dart` (400), `dynamics_detail_page.dart` (62) + `_state` (1025) / `_post` (490) / `_comments` (574), `publish_dynamics_page.dart` (715), `dynamics_topic_page.dart` |
+| Settings — top level is the account card + 5 `SettingsNavTile` entries + logout only | `settings_page.dart` + `settings_account/_general/_notification/_privacy/_about_page.dart`; `theme_settings_page.dart` (337) is pushed from `settings_general_page.dart` |
 | Auth / lock | `login_page.dart`, `lock_page.dart` |
-| Groups, visitors, QR, blacklist, sign-in, data | `group_detail_page.dart`, `visitor_list_page.dart`, `my_qr_page.dart`, `blacklist_page.dart`, `social_sign_page.dart`, `data_page.dart` |
+| Groups, visitors, QR, blacklist, sign-in, data, bubbles | `group_detail_page.dart` (711), `visitor_list_page.dart`, `my_qr_page.dart`, `blacklist_page.dart`, `social_sign_page.dart`, `data_page.dart`, `bubble_page.dart`, `quit_group_page.dart` |
 
 ## CONVENTIONS
 - Settings is two levels: `settings_page.dart` is only the account card + 5 group entries + logout; each entry pushes a `settings_*_page.dart` sub-page (shared row widgets live in `widgets/settings_tiles.dart` — `SettingsSectionHeader` / `SettingsNavTile` / `SettingsSwitchTile` / `SettingsInfoTile` / `showSettingsToast`). Put a new setting in the matching sub-page, never back on the top level.
 - One screen per file with `_page.dart` suffix; one public `XxxPage` widget per file; private helper widgets are `_PascalCase` in the same file.
-- When a page outgrows ~600 lines, split it with `part` / `part of` — the library and its public symbols (including test-locator keys and shared tiles like `HomePartnerTile`) stay byte-identical, so no importer changes. `profile_page.dart` = `profile_page_state_base/state_actions/widgets/widgets_compact.dart`; the same pattern is used for `widgets/avatar_edit_dialog.dart`.
+- When a page outgrows ~600 lines, split it with `part` / `part of` — the library and its public symbols (including test-locator keys and `MailSelection`) stay identical, so no importer changes. Split today: `chat_page` (3 parts), `dynamics_detail_page` (3), `mail_page` (3), `profile_page` (4), `friends_page` (2); `widgets/avatar_edit_dialog.dart` uses the same pattern.
 - Opening/closing a chat never happens by navigation — mutate `activeSessionProvider.notifier` (`open` / `close`) and let `MainShell` react.
 - Chat state is preserved by `MainShell._chatInstance`, keyed `ValueKey(sessionKeyOf(type, id))` (format defined in `core/models/session_key.dart`); `IndexedStack` swaps list vs chat on narrow widths.
 - Responsive checks come from `theme/app_tokens.dart` (`isCompactWidth`, `adaptiveDensity`), not raw `MediaQuery` arithmetic.

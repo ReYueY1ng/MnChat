@@ -1,6 +1,6 @@
 # lib/ui/widgets
 
-Score ~24 (distinct domain, high complexity): 26 self-contained modules, 7078 LOC. Root covers general lib/ui conventions.
+Score 12 (distinct domain, high complexity): 26 self-contained modules, 7,785 LOC — `AvatarView` alone is referenced 66 times repo-wide. `lib/ui` covers page-level conventions.
 
 ## OVERVIEW
 Shared, page-agnostic popup/dialog/panel widget modules. Each file is a self-contained unit: public symbols, its own private `_` helpers, and usually a top-level `Future show*(BuildContext, ...)` launcher.
@@ -13,15 +13,20 @@ Flat directory — no subdirectories. No barrel file; consumers import per-file 
 |------|------|
 | Anchor panel popup primitive (bottom sheet on narrow, centered on wide ≥600) | `floating_panel.dart` (`showFloatingPanel<T>`, `kFloatingPanelWideWidth`) |
 | Rich text / UBB parsing (`@` mentions, `#[cC]RRGGBB` colors, `[mdemo]`, `@IMFC&`) | `rich_text_view.dart` (`buildRichSpans`, `RichTextView`) |
-| Avatar editor, 5 tabs (头像/头像框/昵称/称号/家族) | `avatar_edit_dialog.dart` (317 LOC library + 5 `part` files; loader typedefs `FamilyListLoader`, `TitleLoader`, `DiyAvatarUploader`, `FrameTopToggler`) |
-| Friend/session action menu (long-press / right-click / 信息卡「更多」) | `session_player_info_popup.dart` (`showFriendMenu`) |
+| Avatar editor, 5 tabs (头像/头像框/昵称/称号/家族) | `avatar_edit_dialog.dart` (319 LOC library + 5 `part` files `avatar_edit_state_base/_data/_views/_views_ext` + `avatar_edit_widgets`; loader typedefs `FamilyListLoader`, `TitleLoader`, `DiyAvatarUploader`, `FrameTopToggler`) |
+| Friend/session action menu (long-press / right-click / 信息卡「更多」) | `session_menu.dart` (`showSessionMenu`) |
 | Shared player-info model + fetch cache + content pieces | `player_info_common.dart` (`SessionPlayerInfo`, `playerInfoOf`, `PlayerInfoHeader` / `PlayerInfoStats` / `PlayerCircleAction`) |
-| Per-player home popup (anchored, not a sheet) | `session_player_info_popup.dart` (`showSessionPlayerInfoPopup` — 26 call sites) |
-| Dynamics feed card | `dynamics_card.dart` (`DynamicsCard` + 9 private sub-widgets) |
+| Per-player home popup (anchored, not a sheet) | `session_player_info_popup.dart` (`showSessionPlayerInfoPopup` — 6 call sites; its「更多」entry reuses `showSessionMenu`) |
+| Dynamics feed card | `dynamics_card.dart` (`DynamicsCard`, 1108 LOC — largest widget file, built from private sub-widgets) |
 | Emoji / gift pickers | `emoji_picker.dart`, `gift_picker.dart` (each built on `showFloatingPanel`) |
 | Head frame + avatar | `head_frame.dart` (`headFrameAsset`, `headFrameStaticAsset`, `HeadFrameOverlay`), `avatar_view.dart` |
 | Partner name badges | `partner_badges.dart` (`LevelBadge`, `VipBadge`, `PartnerNameBadges`) |
-| Menus / filters / image viewer | `session_menu.dart`, `friend_filter_dialog.dart`, `friend_tag_dialog.dart`, `account_menu.dart`, `image_viewer.dart` |
+| Menus / filters / image viewer | `session_menu.dart`, `friend_filter_dialog.dart`, `friend_tag_dialog.dart`, `account_menu.dart` (`showAccountMenu`), `image_viewer.dart` (`openImageViewer`) |
+| Settings rows + toast (shared by every `settings_*_page`) | `settings_tiles.dart` (`SettingsSectionHeader`, `SettingsSwitchTile`, `SettingsNavTile`, `SettingsInfoTile`, `showSettingsToast`) |
+| Author-dynamics overlay opened from a feed card | `dynamics_overlay.dart` (`showAuthorDynamics`, `kDynamicsOverlayWideWidth` = 700) |
+| Home-layout picker dialog | `home_layout_dialog.dart` (`showHomeLayoutDialog`) |
+| Request-failure UI: inline indicator, listener, dialog, detail sheet | `request_error_indicator.dart` (`RequestErrorIndicator`, `RequestErrorListener`, `showRequestErrorsDialog`, `showRequestFailureDetail`) |
+| Emoji code → image | `emoji_code_image.dart` (`EmojiCodeImage`) |
 
 ## CONVENTIONS
 - Popups are launched by top-level `show*` functions; the widget class is often private and returned via `showDialog` / `showModalBottomSheet` / `showFloatingPanel`.
