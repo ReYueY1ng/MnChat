@@ -100,72 +100,77 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
           ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                const Text('想要…', style: TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   children: [
-                    ChoiceChip(
-                      label: const Text('不设置'),
-                      selected: _socialLab == 0,
-                      onSelected: (_) => setState(() => _socialLab = 0),
+                    const Text('想要…', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('不设置'),
+                          selected: _socialLab == 0,
+                          onSelected: (_) => setState(() => _socialLab = 0),
+                        ),
+                        for (final (id, tag) in catalog.socialOptions)
+                          ChoiceChip(
+                            label: Text(tag),
+                            selected: _socialLab == id,
+                            onSelected: (_) => setState(() => _socialLab = id),
+                          ),
+                      ],
                     ),
-                    for (final (id, tag) in catalog.socialOptions)
-                      ChoiceChip(
-                        label: Text(tag),
-                        selected: _socialLab == id,
-                        onSelected: (_) => setState(() => _socialLab = id),
+                    const SizedBox(height: AppSpacing.xl),
+                    const Text('喜欢…', style: TextStyle(fontWeight: FontWeight.w600)),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        ChoiceChip(
+                          label: const Text('不设置'),
+                          selected: _gameLab == 0,
+                          onSelected: (_) => setState(() => _gameLab = 0),
+                        ),
+                        for (final (id, tag) in catalog.gameOptions)
+                          ChoiceChip(
+                            label: Text(tag),
+                            selected: _gameLab == id,
+                            onSelected: (_) => setState(() => _gameLab = id),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.xxl),
+                    Card(
+                      child: ListTile(
+                        leading: const Icon(Icons.auto_awesome),
+                        title: const Text('我的名片'),
+                        subtitle: Text(
+                          formatDeclaration(
+                            _socialLab,
+                            _gameLab,
+                            catalog: catalog,
+                          ).isEmpty
+                              ? '未设置'
+                              : formatDeclaration(
+                                  _socialLab,
+                                  _gameLab,
+                                  catalog: catalog,
+                                ),
+                        ),
                       ),
+                    ),
                   ],
                 ),
-                const SizedBox(height: AppSpacing.xl),
-                const Text('喜欢…', style: TextStyle(fontWeight: FontWeight.w600)),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    ChoiceChip(
-                      label: const Text('不设置'),
-                      selected: _gameLab == 0,
-                      onSelected: (_) => setState(() => _gameLab = 0),
-                    ),
-                    for (final (id, tag) in catalog.gameOptions)
-                      ChoiceChip(
-                        label: Text(tag),
-                        selected: _gameLab == id,
-                        onSelected: (_) => setState(() => _gameLab = id),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.xxl),
-                Card(
-                  child: ListTile(
-                    leading: const Icon(Icons.auto_awesome),
-                    title: const Text('我的名片'),
-                    subtitle: Text(
-                      formatDeclaration(
-                        _socialLab,
-                        _gameLab,
-                        catalog: catalog,
-                      ).isEmpty
-                          ? '未设置'
-                          : formatDeclaration(
-                              _socialLab,
-                              _gameLab,
-                              catalog: catalog,
-                            ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
+        ),
+      ),
     );
   }
 }

@@ -124,7 +124,13 @@ class _SessionPlayerInfoPopup extends StatelessWidget {
   Widget build(BuildContext context) {
     final size = MediaQuery.sizeOf(context);
     final rect = anchor ?? Rect.fromLTWH(AppSpacing.lg, AppSpacing.lg, 1, 1);
-    final maxLeft = size.width - _maxWidth - AppSpacing.sm;
+    // 浮窗是固定宽度定位（不是 maxWidth），窄屏必须缩到可用宽度内，
+    // 否则 ≤348dp 的窗口（折叠屏外屏、老式 320dp 机）右缘会被裁掉。
+    final panelWidth = (size.width - AppSpacing.lg * 2).clamp(
+      AppSpacing.xl * 6,
+      _maxWidth,
+    );
+    final maxLeft = size.width - panelWidth - AppSpacing.sm;
     final left = maxLeft <= AppSpacing.sm
         ? AppSpacing.sm
         : rect.left.clamp(AppSpacing.sm, maxLeft).toDouble();
@@ -140,7 +146,7 @@ class _SessionPlayerInfoPopup extends StatelessWidget {
           left: left,
           top: below ? rect.bottom + AppSpacing.sm : null,
           bottom: below ? null : size.height - rect.top + AppSpacing.sm,
-          width: _maxWidth,
+          width: panelWidth,
           child: ConstrainedBox(
             constraints: BoxConstraints(maxHeight: maxHeight),
             child: SingleChildScrollView(

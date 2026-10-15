@@ -464,163 +464,168 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
           ),
         ],
       ),
-      body: _publishing
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                TextField(
-                  key: publishDynamicsContentKey,
-                  controller: _textCtrl,
-                  maxLines: 6,
-                  maxLength: 500,
-                  decoration: const InputDecoration(
-                    hintText: '分享新鲜事…',
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                // 图片（≤9）
-                _buildPicSection(theme),
-                const SizedBox(height: AppSpacing.md),
-                // 可见范围（auth_see）
-                Text('可见范围', style: theme.textTheme.titleSmall),
-                const SizedBox(height: AppSpacing.sm),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.xs,
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: _publishing
+              ? const Center(child: CircularProgressIndicator())
+              : ListView(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
                   children: [
-                    for (final e in DynamicsAuth.labels.entries)
-                      ChoiceChip(
-                        key: publishDynamicsAuthSeeKey(e.key),
-                        label: Text(e.value),
-                        selected: _authSee == e.key,
-                        onSelected: (_) => setState(() => _authSee = e.key),
+                    TextField(
+                      key: publishDynamicsContentKey,
+                      controller: _textCtrl,
+                      maxLines: 6,
+                      maxLength: 500,
+                      decoration: const InputDecoration(
+                        hintText: '分享新鲜事…',
+                        border: OutlineInputBorder(),
                       ),
-                  ],
-                ),
-                const SizedBox(height: AppSpacing.md),
-                // @好友（notice_uins）
-                Row(
-                  children: [
-                    Text('@好友', style: theme.textTheme.titleSmall),
-                    const SizedBox(width: AppSpacing.sm),
-                    OutlinedButton.icon(
-                      key: publishDynamicsNoticeUinsKey,
-                      onPressed: () => _pickNoticeUins(contacts),
-                      icon: const Icon(Icons.alternate_email, size: 18),
-                      label: const Text('选择好友'),
                     ),
-                  ],
-                ),
-                if (_noticeUins.isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.sm),
-                    child: Wrap(
+                    const SizedBox(height: AppSpacing.md),
+                    // 图片（≤9）
+                    _buildPicSection(theme),
+                    const SizedBox(height: AppSpacing.md),
+                    // 可见范围（auth_see）
+                    Text('可见范围', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
                       spacing: AppSpacing.sm,
                       runSpacing: AppSpacing.xs,
                       children: [
-                        for (final uin in _noticeUins)
-                          InputChip(
-                            label: Text('@$uin'),
-                            onDeleted: () =>
-                                setState(() => _noticeUins.remove(uin)),
+                        for (final e in DynamicsAuth.labels.entries)
+                          ChoiceChip(
+                            key: publishDynamicsAuthSeeKey(e.key),
+                            label: Text(e.value),
+                            selected: _authSee == e.key,
+                            onSelected: (_) => setState(() => _authSee = e.key),
                           ),
                       ],
                     ),
-                  ),
-                const SizedBox(height: AppSpacing.md),
-                // 话题选择
-                Text('话题（可选）', style: theme.textTheme.titleSmall),
-                const SizedBox(height: AppSpacing.sm),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _topicCtrl,
-                        decoration: const InputDecoration(
-                          isDense: true,
-                          hintText: '搜索话题',
-                          prefixText: '# ',
+                    const SizedBox(height: AppSpacing.md),
+                    // @好友（notice_uins）
+                    Row(
+                      children: [
+                        Text('@好友', style: theme.textTheme.titleSmall),
+                        const SizedBox(width: AppSpacing.sm),
+                        OutlinedButton.icon(
+                          key: publishDynamicsNoticeUinsKey,
+                          onPressed: () => _pickNoticeUins(contacts),
+                          icon: const Icon(Icons.alternate_email, size: 18),
+                          label: const Text('选择好友'),
                         ),
-                        onSubmitted: (_) => _searchTopic(),
+                      ],
+                    ),
+                    if (_noticeUins.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
+                        child: Wrap(
+                          spacing: AppSpacing.sm,
+                          runSpacing: AppSpacing.xs,
+                          children: [
+                            for (final uin in _noticeUins)
+                              InputChip(
+                                label: Text('@$uin'),
+                                onDeleted: () =>
+                                    setState(() => _noticeUins.remove(uin)),
+                              ),
+                          ],
+                        ),
                       ),
+                    const SizedBox(height: AppSpacing.md),
+                    // 话题选择
+                    Text('话题（可选）', style: theme.textTheme.titleSmall),
+                    const SizedBox(height: AppSpacing.sm),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _topicCtrl,
+                            decoration: const InputDecoration(
+                              isDense: true,
+                              hintText: '搜索话题',
+                              prefixText: '# ',
+                            ),
+                            onSubmitted: (_) => _searchTopic(),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        IconButton(
+                          tooltip: '搜索',
+                          icon: const Icon(Icons.search),
+                          onPressed: _searchTopic,
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: AppSpacing.sm),
-                    IconButton(
-                      tooltip: '搜索',
-                      icon: const Icon(Icons.search),
-                      onPressed: _searchTopic,
+                    if (_selectedTopic != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: AppSpacing.sm),
+                        child: InputChip(
+                          label: Text('#${_selectedTopic!.title}'),
+                          onDeleted: () => setState(() => _selectedTopic = null),
+                        ),
+                      ),
+                    if (_topicResults.isNotEmpty) ...[
+                      const SizedBox(height: AppSpacing.xs),
+                      ..._topicResults.take(5).map(
+                            (t) => ListTile(
+                              dense: true,
+                              contentPadding: EdgeInsets.zero,
+                              title: Text('#${t.title}'),
+                              onTap: () => setState(() {
+                                _selectedTopic = t;
+                                _topicResults = [];
+                                _topicCtrl.text = '';
+                              }),
+                            ),
+                          ),
+                    ],
+                    const Divider(height: 24),
+                    // 投票开关
+                    SwitchListTile(
+                      title: const Text('附带投票'),
+                      subtitle: const Text('发布后可让好友投票'),
+                      value: _withVote,
+                      onChanged: (v) => setState(() => _withVote = v),
                     ),
+                    if (_withVote) ...[
+                      TextField(
+                        controller: _voteTitleCtrl,
+                        decoration: const InputDecoration(
+                          labelText: '投票标题',
+                          isDense: true,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      for (var i = 0; i < 4; i++)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 6),
+                          child: TextField(
+                            controller: _voteOptCtrls[i],
+                            decoration: InputDecoration(
+                              labelText: '选项 ${i + 1}',
+                              isDense: true,
+                            ),
+                          ),
+                        ),
+                      SwitchListTile(
+                        title: const Text('允许多选'),
+                        value: _voteMulti,
+                        onChanged: (v) => setState(() => _voteMulti = v),
+                      ),
+                      ListTile(
+                        key: publishDynamicsVoteEndKey,
+                        contentPadding: EdgeInsets.zero,
+                        title: const Text('截止时间'),
+                        subtitle: Text(_formatVoteEnd(_voteEnd)),
+                        trailing: const Icon(Icons.schedule),
+                        onTap: _pickVoteEnd,
+                      ),
+                    ],
                   ],
                 ),
-                if (_selectedTopic != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: AppSpacing.sm),
-                    child: InputChip(
-                      label: Text('#${_selectedTopic!.title}'),
-                      onDeleted: () => setState(() => _selectedTopic = null),
-                    ),
-                  ),
-                if (_topicResults.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xs),
-                  ..._topicResults.take(5).map(
-                        (t) => ListTile(
-                          dense: true,
-                          contentPadding: EdgeInsets.zero,
-                          title: Text('#${t.title}'),
-                          onTap: () => setState(() {
-                            _selectedTopic = t;
-                            _topicResults = [];
-                            _topicCtrl.text = '';
-                          }),
-                        ),
-                      ),
-                ],
-                const Divider(height: 24),
-                // 投票开关
-                SwitchListTile(
-                  title: const Text('附带投票'),
-                  subtitle: const Text('发布后可让好友投票'),
-                  value: _withVote,
-                  onChanged: (v) => setState(() => _withVote = v),
-                ),
-                if (_withVote) ...[
-                  TextField(
-                    controller: _voteTitleCtrl,
-                    decoration: const InputDecoration(
-                      labelText: '投票标题',
-                      isDense: true,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.sm),
-                  for (var i = 0; i < 4; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: 6),
-                      child: TextField(
-                        controller: _voteOptCtrls[i],
-                        decoration: InputDecoration(
-                          labelText: '选项 ${i + 1}',
-                          isDense: true,
-                        ),
-                      ),
-                    ),
-                  SwitchListTile(
-                    title: const Text('允许多选'),
-                    value: _voteMulti,
-                    onChanged: (v) => setState(() => _voteMulti = v),
-                  ),
-                  ListTile(
-                    key: publishDynamicsVoteEndKey,
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('截止时间'),
-                    subtitle: Text(_formatVoteEnd(_voteEnd)),
-                    trailing: const Icon(Icons.schedule),
-                    onTap: _pickVoteEnd,
-                  ),
-                ],
-              ],
-            ),
+        ),
+      ),
     );
   }
 

@@ -95,7 +95,7 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
         0,
       ),
       content: SizedBox(
-        width: 380,
+        width: dialogContentWidth(context, 380),
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,

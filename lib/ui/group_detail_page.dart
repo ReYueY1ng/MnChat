@@ -56,59 +56,64 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
       appBar: AppBar(
         title: RichTextView(widget.name.isEmpty ? '群详情' : widget.name),
       ),
-      body: ListView(
-        children: [
-          _InfoTile(icon: Icons.group, label: '群号', value: '${widget.groupId}'),
-          _InfoTile(
-            icon: Icons.person,
-            label: '成员数',
-            value: members.isEmpty ? '—' : '${members.length}',
-          ),
-          if (creatorUin != 0)
-            _InfoTile(
-              icon: Icons.star,
-              label: '群主',
-              value: _displayName(creatorUin, service),
-            ),
-
-          const Padding(
-            padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
-            child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
-          ),
-          if (members.isEmpty)
-            Padding(
-              padding: AppSpacing.listTilePadding,
-              child: Text(
-                '暂无成员信息（可能未拉取到）',
-                style: TextStyle(color: scheme.onSurfaceVariant),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: ListView(
+            children: [
+              _InfoTile(icon: Icons.group, label: '群号', value: '${widget.groupId}'),
+              _InfoTile(
+                icon: Icons.person,
+                label: '成员数',
+                value: members.isEmpty ? '—' : '${members.length}',
               ),
-            )
-          else
-            ...members.map((uin) {
-              final profile = service.groupMemberProfile(widget.groupId, uin);
-              return _MemberTile(
-                uin: uin,
-                name: _displayName(uin, service),
-                avatarUrl: profile?.avatarUrl,
-                headType: profile?.headType,
-                headId: profile?.headId,
-                headFrameId: profile?.headFrameId,
-                isOwner: uin == creatorUin,
-                isSelf: uin == myUin,
-                onTap: uin == myUin
-                    ? null
-                    : () => _showMemberActions(uin, isOwner: isOwner),
-              );
-            }),
-
-          if (_busy)
-            const Padding(
-              padding: EdgeInsets.all(AppSpacing.lg),
-              child: Center(child: CircularProgressIndicator()),
-            )
-          else
-            _buildActions(isOwner, myUin, creatorUin, members, service),
-        ],
+              if (creatorUin != 0)
+                _InfoTile(
+                  icon: Icons.star,
+                  label: '群主',
+                  value: _displayName(creatorUin, service),
+                ),
+    
+              const Padding(
+                padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
+                child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+              if (members.isEmpty)
+                Padding(
+                  padding: AppSpacing.listTilePadding,
+                  child: Text(
+                    '暂无成员信息（可能未拉取到）',
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                )
+              else
+                ...members.map((uin) {
+                  final profile = service.groupMemberProfile(widget.groupId, uin);
+                  return _MemberTile(
+                    uin: uin,
+                    name: _displayName(uin, service),
+                    avatarUrl: profile?.avatarUrl,
+                    headType: profile?.headType,
+                    headId: profile?.headId,
+                    headFrameId: profile?.headFrameId,
+                    isOwner: uin == creatorUin,
+                    isSelf: uin == myUin,
+                    onTap: uin == myUin
+                        ? null
+                        : () => _showMemberActions(uin, isOwner: isOwner),
+                  );
+                }),
+    
+              if (_busy)
+                const Padding(
+                  padding: EdgeInsets.all(AppSpacing.lg),
+                  child: Center(child: CircularProgressIndicator()),
+                )
+              else
+                _buildActions(isOwner, myUin, creatorUin, members, service),
+            ],
+          ),
+        ),
       ),
     );
   }

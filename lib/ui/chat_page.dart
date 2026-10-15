@@ -59,11 +59,20 @@ class ChatPage extends ConsumerStatefulWidget {
   final int sessionId;
   final String name;
 
+  /// 是否嵌在「会话列表 + 聊天」双栏布局里（列表就在旁边，不需要返回箭头）。
+  ///
+  /// 必须由主壳告知：聊天面板自身的宽度是「内容区宽 - 会话列表栏」，永远小于
+  /// 双栏断点，所以本页不能用 `MediaQuery` 的窗口宽自己判定 —— 否则在
+  /// [700, 760) 这段窗口宽度上会判错（手机横屏正落在这段：主壳走单栏、聊天
+  /// 顶掉列表，却不显示返回箭头）。
+  final bool wide;
+
   const ChatPage({
     super.key,
     required this.type,
     required this.sessionId,
     required this.name,
+    this.wide = false,
   });
 
   @override
@@ -501,17 +510,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
     final displayName = widget.name.isEmpty
         ? (widget.type == ChatSessionType.group ? '群' : '好友')
         : widget.name;
-    final isWide = MediaQuery.of(context).size.width >= 700;
     _scheduleUnreadResolve();
 
     return Column(
       children: [
         // 标题栏与会话列表 AppBar 对齐：同主题底色 / 同 toolbarHeight /
-        // 左对齐粗体标题；窄屏显示返回箭头回到会话列表，桌面端不再提供关闭
-        // 按钮（关闭由再次点击当前会话卡片完成）。
+        // 左对齐粗体标题；单栏（列表被聊天顶掉）时显示返回箭头回到会话列表，
+        // 双栏时不需要（关闭由再次点击当前会话卡片完成）。
         AppBar(
           automaticallyImplyLeading: false,
-          leading: isWide
+          leading: widget.wide
               ? null
               : IconButton(
                   tooltip: '返回',
@@ -662,7 +670,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   // 遮住的输入框塞字），导致新会话完全无法开始。
                   chatAnimatedListBuilder: (context, itemBuilder) => MediaQuery(
                     data: MediaQuery.of(context).copyWith(
-                      textScaler: TextScaler.linear(chatFontScale),
+                      // 与系统无障碍字号**相乘**组合，而不是整体替换：早期写法
+                      // 直接覆盖 textScaler，系统字号调到 1.5x/2x 的人只有聊天
+                      // 记录这块文字不跟着变大。
+                      textScaler: composeTextScaler(
+                        MediaQuery.textScalerOf(context),
+                        chatFontScale,
+                      ),
                     ),
                     child: ChatAnimatedList(itemBuilder: itemBuilder),
                   ),

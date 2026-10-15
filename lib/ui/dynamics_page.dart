@@ -323,6 +323,13 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
               ? null
               : TabBar(
                   onTap: _switchTab,
+                  // 分类数随服务端下发的自定义标签变化（≥5 个）。固定等分宽度
+                  // 会把标签压到淡出（文字被挤没），改为可横向滚动的标签条；
+                  // 窄屏贴左对齐，宽屏沿用 M3 默认的起始偏移。
+                  isScrollable: true,
+                  tabAlignment: isCompactWidth(context)
+                      ? TabAlignment.start
+                      : null,
                   tabs: [for (final t in tabs) Tab(text: t.label)],
                 ),
         ),
@@ -367,34 +374,40 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       );
     }
     final myUin = ref.read(myUinProvider);
-    return Column(
-      children: [
-        Expanded(
-          child: LayoutBuilder(builder: (context, constraints) {
-            // 竖屏/窄 → 单列；横屏/宽 → 双列瀑布流
-            final wide = constraints.maxWidth >= 700;
-            return RefreshIndicator(
-              onRefresh: _load,
-              child: MasonryGridView.count(
-                controller: _scroll,
-                physics: const AlwaysScrollableScrollPhysics(),
-                crossAxisCount: wide ? 2 : 1,
-                mainAxisSpacing: 8,
-                crossAxisSpacing: 8,
-                padding: const EdgeInsets.all(AppSpacing.sm),
-                itemCount: cache.posts.length,
-                itemBuilder: (context, i) => DynamicsCard(
-                  post: cache.posts[i],
-                  isMine: cache.posts[i].uin == myUin,
-                ),
-              ),
-            );
-          }),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+        child: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(builder: (context, constraints) {
+                // 竖屏/窄 → 单列；横屏/宽 → 双列瀑布流
+                final wide =
+                    constraints.maxWidth >= AppSizes.feedTwoColumnBreakpoint;
+                return RefreshIndicator(
+                  onRefresh: _load,
+                  child: MasonryGridView.count(
+                    controller: _scroll,
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    crossAxisCount: wide ? 2 : 1,
+                    mainAxisSpacing: 8,
+                    crossAxisSpacing: 8,
+                    padding: const EdgeInsets.all(AppSpacing.sm),
+                    itemCount: cache.posts.length,
+                    itemBuilder: (context, i) => DynamicsCard(
+                      post: cache.posts[i],
+                      isMine: cache.posts[i].uin == myUin,
+                    ),
+                  ),
+                );
+              }),
+            ),
+            if (cache.loading && cache.loadedOnce)
+              const LinearProgressIndicator(minHeight: 2),
+            if (cache.loadingMore) const LinearProgressIndicator(minHeight: 2),
+          ],
         ),
-        if (cache.loading && cache.loadedOnce)
-          const LinearProgressIndicator(minHeight: 2),
-        if (cache.loadingMore) const LinearProgressIndicator(minHeight: 2),
-      ],
+      ),
     );
   }
 }

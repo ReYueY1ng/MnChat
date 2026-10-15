@@ -236,14 +236,16 @@ class _FollowButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // 高度随系统字号缩放：标签 13sp 会跟着系统字号放大，写死 34 会裁字。
+    final height = MediaQuery.textScalerOf(context).scale(34);
     return SizedBox(
-      height: 34,
+      height: height,
       child: FilledButton(
         onPressed: followed ? null : onPressed,
         style: FilledButton.styleFrom(
           // M3 默认配色（primary / onPrimary），与全局强调色一致。
           padding: const EdgeInsets.symmetric(horizontal: 14),
-          minimumSize: const Size(0, 34),
+          minimumSize: Size(0, height),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),

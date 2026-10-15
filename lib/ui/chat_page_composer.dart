@@ -85,7 +85,8 @@ class _ComposerBar extends ConsumerWidget {
         // 快捷短语 chips
         if (phrases.isNotEmpty)
           SizedBox(
-            height: 36,
+            // 行高随系统字号缩放，否则大字号下 13sp 的短语会被裁掉。
+            height: MediaQuery.textScalerOf(context).scale(36),
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: AppSpacing.xs),

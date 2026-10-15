@@ -890,22 +890,25 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     // 竖屏（手机/平板立放）一律单列堆叠；仅横屏且宽度足够才左右双栏。
     final isLandscapeWide =
         MediaQuery.orientationOf(context) == Orientation.landscape &&
-        MediaQuery.sizeOf(context).width >= 900;
+        MediaQuery.sizeOf(context).width >= AppSizes.detailTwoColumnBreakpoint;
     return Scaffold(
       appBar: AppBar(
         title: const Text('动态详情'),
         actions: [
+          // 点赞数并入图标角标：360dp 手机上标题栏放不下「图标 + 数字文本 +
+          // 评论 + 分享 + 更多」五个 action，标题会被挤成省略号。
           IconButton(
+            tooltip: '点赞',
             onPressed: _toggleLike,
-            icon: Icon(
-              _liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
-              color: _liked ? Theme.of(context).colorScheme.primary : null,
+            icon: Badge(
+              isLabelVisible: _likeCount > 0,
+              label: Text('$_likeCount'),
+              child: Icon(
+                _liked ? Icons.thumb_up_alt : Icons.thumb_up_alt_outlined,
+                color: _liked ? Theme.of(context).colorScheme.primary : null,
+              ),
             ),
           ),
-          if (_likeCount > 0)
-            Center(
-              child: Text('$_likeCount', style: const TextStyle(fontSize: 13)),
-            ),
           IconButton(
             icon: const Icon(Icons.mode_comment_outlined),
             onPressed: _writeComment,

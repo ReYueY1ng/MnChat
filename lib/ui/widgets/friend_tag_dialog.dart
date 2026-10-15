@@ -57,7 +57,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
         0,
       ),
       content: SizedBox(
-        width: 360,
+        width: dialogContentWidth(context, 360),
         child: tags == null
             ? const SizedBox(
                 height: 80,

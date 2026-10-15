@@ -451,11 +451,14 @@ class _PostContent extends StatelessWidget {
     this.onTopicTap,
   });
 
-  bool _overflows(double maxWidth) {
+  bool _overflows(BuildContext context, double maxWidth) {
     final tp = TextPainter(
       text: TextSpan(text: content, style: style),
       maxLines: 3,
       textDirection: TextDirection.ltr,
+      // 必须按真实字号量测：下面的正文 `Text.rich` 会随系统无障碍字号放大，
+      // 这里漏掉 textScaler 会在大字号下「正文已被截断却不显示查看全文」。
+      textScaler: MediaQuery.textScalerOf(context),
     )..layout(maxWidth: maxWidth);
     return tp.didExceedMaxLines;
   }
@@ -465,7 +468,7 @@ class _PostContent extends StatelessWidget {
     final theme = Theme.of(context);
     return LayoutBuilder(
       builder: (context, constraints) {
-        final over = _overflows(constraints.maxWidth);
+        final over = _overflows(context, constraints.maxWidth);
         return InkWell(
           onTap: onViewFull,
           child: Column(

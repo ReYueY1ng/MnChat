@@ -161,22 +161,30 @@ class _TopicListState extends State<_TopicList> {
     for (final t in _all) {
       if (seen.add(t.topicId)) merged.add(_TopicEntry(t, official: false));
     }
-    return RefreshIndicator(
-      onRefresh: _load,
-      child: ListView.separated(
-        physics: const AlwaysScrollableScrollPhysics(),
-        itemCount: merged.length,
-        separatorBuilder: (_, _) => const Divider(height: 1),
-        itemBuilder: (context, i) {
-          final e = merged[i];
-          return ListTile(
-            leading: Icon(e.official ? Icons.verified_outlined : Icons.tag),
-            title: Text('#${e.topic.title}'),
-            subtitle: Text('话题 ${e.topic.topicId}'),
-            trailing: const Icon(Icons.chevron_right),
-            onTap: () => _open(e.topic),
-          );
-        },
+    return Center(
+      child: ConstrainedBox(
+        // 宽屏下话题列表同样不能拉满整屏（与动态流一致）。
+        constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+        child: RefreshIndicator(
+          onRefresh: _load,
+          child: ListView.separated(
+            physics: const AlwaysScrollableScrollPhysics(),
+            itemCount: merged.length,
+            separatorBuilder: (_, _) => const Divider(height: 1),
+            itemBuilder: (context, i) {
+              final e = merged[i];
+              return ListTile(
+                leading: Icon(
+                  e.official ? Icons.verified_outlined : Icons.tag,
+                ),
+                title: Text('#${e.topic.title}'),
+                subtitle: Text('话题 ${e.topic.topicId}'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => _open(e.topic),
+              );
+            },
+          ),
+        ),
       ),
     );
   }
@@ -321,26 +329,32 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
       );
     }
     final myUin = ref.read(myUinProvider);
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final wide = constraints.maxWidth >= 700;
-        return RefreshIndicator(
-          onRefresh: _load,
-          child: MasonryGridView.count(
-            controller: _scroll,
-            physics: const AlwaysScrollableScrollPhysics(),
-            crossAxisCount: wide ? 2 : 1,
-            mainAxisSpacing: 8,
-            crossAxisSpacing: 8,
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            itemCount: _posts.length,
-            itemBuilder: (context, i) => DynamicsCard(
-              post: _posts[i],
-              isMine: _posts[i].uin == myUin,
-            ),
-          ),
-        );
-      },
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide =
+                constraints.maxWidth >= AppSizes.feedTwoColumnBreakpoint;
+            return RefreshIndicator(
+              onRefresh: _load,
+              child: MasonryGridView.count(
+                controller: _scroll,
+                physics: const AlwaysScrollableScrollPhysics(),
+                crossAxisCount: wide ? 2 : 1,
+                mainAxisSpacing: 8,
+                crossAxisSpacing: 8,
+                padding: const EdgeInsets.all(AppSpacing.sm),
+                itemCount: _posts.length,
+                itemBuilder: (context, i) => DynamicsCard(
+                  post: _posts[i],
+                  isMine: _posts[i].uin == myUin,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
     );
   }
 }

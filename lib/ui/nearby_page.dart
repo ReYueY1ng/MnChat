@@ -229,130 +229,135 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('附近的人')),
-      body: ListView(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        children: [
-          Text(
-            '外部客户端未接入系统定位，请手动填写经纬度后再查询。',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Row(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: ListView(
+            padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              Expanded(
-                child: TextField(
-                  controller: _latCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
+              Text(
+                '外部客户端未接入系统定位，请手动填写经纬度后再查询。',
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _latCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: '纬度 latitude',
+                        hintText: '如 39.9042',
+                      ),
+                    ),
                   ),
-                  decoration: const InputDecoration(
-                    labelText: '纬度 latitude',
-                    hintText: '如 39.9042',
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: TextField(
+                      controller: _lonCtrl,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                        signed: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: '经度 longitude',
+                        hintText: '如 116.4074',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              FilledButton.icon(
+                onPressed: _busy ? null : _search,
+                icon: _busy
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.near_me_outlined),
+                label: const Text('上报位置并查找附近的人'),
+              ),
+              const SizedBox(height: AppSpacing.sm),
+              Card(
+                child: ListTile(
+                  leading: const Icon(Icons.person_add_alt),
+                  title: const Text('允许附近的人加我'),
+                  subtitle: Text(
+                    _allowAddLoaded ? '开启后附近的人可搜索到我并加好友' : '读取中…',
+                  ),
+                  trailing: Switch(
+                    value: _allowAdd,
+                    onChanged: _allowAddLoaded ? _toggleAllowAdd : null,
                   ),
                 ),
               ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: TextField(
-                  controller: _lonCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                    signed: true,
+              const Divider(height: 24),
+              if (_error != null)
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Text(
+                    '查询失败：$_error',
+                    style: TextStyle(color: scheme.error),
                   ),
-                  decoration: const InputDecoration(
-                    labelText: '经度 longitude',
-                    hintText: '如 116.4074',
+                )
+              else if (_loaded && _users.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.xl),
+                  child: Center(
+                    child: Text(
+                      '附近没有找到人',
+                      style: TextStyle(color: scheme.onSurfaceVariant),
+                    ),
                   ),
+                )
+              else
+                ..._users.map((u) {
+                  final profile = _profiles[u.uin];
+                  final nickname = profile?.nickname ?? '';
+                  final name = nickname.isNotEmpty ? nickname : '${u.uin}';
+                  return ListTile(
+                    // 带头像框的槽位高于 ListTile 的 leading 上限（紧凑密度下 48dp），
+                    // 不抬高纵向密度会被压扁并裁掉框外圈（见 [kAvatarListTileDensity]）。
+                    visualDensity: kAvatarListTileDensity,
+                    minTileHeight: headFrameSlotSize(24),
+                    leading: AvatarView(
+                      name: name,
+                      avatarUrl: profile?.avatarUrl,
+                      radius: 24,
+                      headType: profile?.headType,
+                      headId: profile?.headId,
+                      frameId: profile?.headFrameId,
+                    ),
+                    title: RichTextView(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text('迷你号 ${u.uin} · ${_distText(u.distanceKm)}'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => PlayerHomePage(targetUin: u.uin),
+                      ),
+                    ),
+                  );
+                }),
+              if (_loaded && _users.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(
+                  '共 ${_users.length} 人（仅显示第 1 页）',
+                  style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
-              ),
+              ],
             ],
           ),
-          const SizedBox(height: AppSpacing.md),
-          FilledButton.icon(
-            onPressed: _busy ? null : _search,
-            icon: _busy
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.near_me_outlined),
-            label: const Text('上报位置并查找附近的人'),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Card(
-            child: ListTile(
-              leading: const Icon(Icons.person_add_alt),
-              title: const Text('允许附近的人加我'),
-              subtitle: Text(
-                _allowAddLoaded ? '开启后附近的人可搜索到我并加好友' : '读取中…',
-              ),
-              trailing: Switch(
-                value: _allowAdd,
-                onChanged: _allowAddLoaded ? _toggleAllowAdd : null,
-              ),
-            ),
-          ),
-          const Divider(height: 24),
-          if (_error != null)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Text(
-                '查询失败：$_error',
-                style: TextStyle(color: scheme.error),
-              ),
-            )
-          else if (_loaded && _users.isEmpty)
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.xl),
-              child: Center(
-                child: Text(
-                  '附近没有找到人',
-                  style: TextStyle(color: scheme.onSurfaceVariant),
-                ),
-              ),
-            )
-          else
-            ..._users.map((u) {
-              final profile = _profiles[u.uin];
-              final nickname = profile?.nickname ?? '';
-              final name = nickname.isNotEmpty ? nickname : '${u.uin}';
-              return ListTile(
-                // 带头像框的槽位高于 ListTile 的 leading 上限（紧凑密度下 48dp），
-                // 不抬高纵向密度会被压扁并裁掉框外圈（见 [kAvatarListTileDensity]）。
-                visualDensity: kAvatarListTileDensity,
-                minTileHeight: headFrameSlotSize(24),
-                leading: AvatarView(
-                  name: name,
-                  avatarUrl: profile?.avatarUrl,
-                  radius: 24,
-                  headType: profile?.headType,
-                  headId: profile?.headId,
-                  frameId: profile?.headFrameId,
-                ),
-                title: RichTextView(
-                  name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text('迷你号 ${u.uin} · ${_distText(u.distanceKm)}'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => Navigator.of(context).push(
-                  MaterialPageRoute(
-                    builder: (_) => PlayerHomePage(targetUin: u.uin),
-                  ),
-                ),
-              );
-            }),
-          if (_loaded && _users.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Text(
-              '共 ${_users.length} 人（仅显示第 1 页）',
-              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-            ),
-          ],
-        ],
+        ),
       ),
     );
   }

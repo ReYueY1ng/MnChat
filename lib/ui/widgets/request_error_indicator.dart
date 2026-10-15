@@ -47,7 +47,7 @@ Future<void> showRequestFailureDetail(
       return AlertDialog(
         title: Text(f.summary),
         content: SizedBox(
-          width: 560,
+          width: dialogContentWidth(context, 560),
           child: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,7 +203,7 @@ class _RequestErrorsDialog extends StatelessWidget {
     return AlertDialog(
       title: const Text('请求失败记录'),
       content: SizedBox(
-        width: 560,
+        width: dialogContentWidth(context, 560),
         // 高度随内容收缩（shrinkWrap + maxHeight）：只有一条记录时不再撑出
         // 一大片空白。
         child: ConstrainedBox(

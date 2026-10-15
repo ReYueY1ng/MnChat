@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../core/models/messages.dart';
 import '../core/services/chat_service.dart' show SessionSnapshot;
 import '../state/providers.dart';
+import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 
@@ -144,43 +145,48 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
             ),
         ],
       ),
-      body: list.isEmpty
-          ? const Center(child: Text('暂无黑名单好友'))
-          : RefreshIndicator(
-              onRefresh: () async {},
-              child: ListView.separated(
-                itemCount: list.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, i) {
-                  final s = list[i];
-                  final name = s.name.isNotEmpty ? s.name : '${s.id}';
-                  return ListTile(
-                    leading: AvatarView(
-                      name: name,
-                      radius: 24,
-                      // 会话快照里已有头像本体 / 头像框（来自资料缓存）。
-                      avatarUrl: s.avatar,
-                      headType: s.headType,
-                      headId: s.headId,
-                      frameId: s.headFrameId,
-                    ),
-                    title: RichTextView(name),
-                    subtitle: Text('迷你号 ${s.id}'),
-                    trailing: _busy
-                        ? const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : IconButton(
-                            tooltip: '移出黑名单',
-                            icon: const Icon(Icons.person_remove_outlined),
-                            onPressed: () => _remove(s),
-                          ),
-                  );
-                },
-              ),
-            ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+          child: list.isEmpty
+              ? const Center(child: Text('暂无黑名单好友'))
+              : RefreshIndicator(
+                  onRefresh: () async {},
+                  child: ListView.separated(
+                    itemCount: list.length,
+                    separatorBuilder: (_, _) => const Divider(height: 1),
+                    itemBuilder: (context, i) {
+                      final s = list[i];
+                      final name = s.name.isNotEmpty ? s.name : '${s.id}';
+                      return ListTile(
+                        leading: AvatarView(
+                          name: name,
+                          radius: 24,
+                          // 会话快照里已有头像本体 / 头像框（来自资料缓存）。
+                          avatarUrl: s.avatar,
+                          headType: s.headType,
+                          headId: s.headId,
+                          frameId: s.headFrameId,
+                        ),
+                        title: RichTextView(name),
+                        subtitle: Text('迷你号 ${s.id}'),
+                        trailing: _busy
+                            ? const SizedBox(
+                                width: 28,
+                                height: 28,
+                                child: CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : IconButton(
+                                tooltip: '移出黑名单',
+                                icon: const Icon(Icons.person_remove_outlined),
+                                onPressed: () => _remove(s),
+                              ),
+                      );
+                    },
+                  ),
+                ),
+        ),
+      ),
     );
   }
 }

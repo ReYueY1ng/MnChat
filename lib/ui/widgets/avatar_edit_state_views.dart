@@ -89,10 +89,22 @@ mixin _AvatarEditStateViews
   /// 左侧竖排页签：选中项为白色圆角胶囊。
   Widget _buildNav(ThemeData theme) {
     final scheme = theme.colorScheme;
+    // 页签只有文字：大字号下 84 装不下三字的「头像框」（会挤成两行）。
+    // 栏宽按最长页签的字数与实际字号放大，默认字号仍为 84（宽屏观感不变）；
+    // 高度不够时由外面的 SingleChildScrollView 滚动。
+    final maxChars = AvatarEditTab.values
+        .map((tab) => tab.label.length)
+        .reduce(math.max);
+    final navWidth = math.max(
+      84.0,
+      MediaQuery.textScalerOf(context).scale(14) * maxChars +
+          AppSpacing.xl +
+          AppSpacing.xs,
+    );
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Container(
-        width: 84,
+        width: navWidth,
         decoration: BoxDecoration(
           color: scheme.surfaceContainerHigh,
           borderRadius: AppRadius.cardR,
@@ -146,25 +158,32 @@ mixin _AvatarEditStateViews
           selected: false,
           // 真实上传入口：`upload_pre_photo` → 上传字节 → `set_usr_header3`。
           onTap: _pickAndUploadDiy,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (_diyUploading || _diyLoading)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              else
-                Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                '自定义',
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
+          // 格子宽度由网格决定，大字号下「+ 自定义」装不进格子：整体等比缩小
+          // 而不是溢出（默认字号本就装得下，scaleDown 不缩放）。
+          child: SizedBox.expand(
+            child: FittedBox(
+              fit: BoxFit.scaleDown,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (_diyUploading || _diyLoading)
+                    const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  else
+                    Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    '自定义',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       );
@@ -350,7 +369,8 @@ mixin _AvatarEditStateViews
               color: AppSemanticColors.of(context).warning,
             ),
             const SizedBox(width: AppSpacing.xs),
-            const Text('会员免费'),
+            // 窄栏 + 大字号时这一行放不下四个字：换行而不是横向溢出。
+            const Flexible(child: Text('会员免费')),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),

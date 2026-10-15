@@ -11,11 +11,11 @@ Score 8 (distinct domain — the design-token definition site): only 2 files / 3
 | `AppSpacing` | `xs/sm/md/lg/xl/xxl` = 4/8/12/16/24/32, `pagePadding`, `cardPadding`, `listTilePadding` |
 | `AppRadius` | `chip/input/card/panel/pill` = 8/12/18/22/999 + the matching `chipR`…`pillR` `BorderRadius` consts |
 | `AppColors` | seeds only — `brandSeed` `0xFF108850`, `successSeed`, `warningSeed`; fed to `ColorScheme.fromSeed`, never used as a role colour |
-| `AppSizes` | wide-screen clamps used by `home_shell.dart`: `narrowContent` 760, `listContent` 1000, `chatSplitBreakpoint` 760, `railBreakpoint` 800, `railMinWindow` 480, `chatListWidth` 320 (240–460) |
+| `AppSizes` | wide-screen clamps used by `home_shell.dart`: `narrowContent` 760, `listContent` 1000, `chatSplitBreakpoint` 760, `railBreakpoint` 800, `railMinWindow` 480, `chatListWidth` 320 (240–460), `feedTwoColumnBreakpoint` 700, `detailTwoColumnBreakpoint` 900 |
 | `AppSemanticColors` | `ThemeExtension` for the roles M3 lacks (success / warning + their containers) |
 | `buildAppTheme` | the only `ThemeData` builder: seed → `ColorScheme.tonalSpot`, plus appBar/card/dialog/input/button/chip/snackBar themes |
 | `AppScrollBehavior` | returns the child without an overscroll indicator |
-| helpers | `isCompactWidth` (shortestSide < 600), `adaptiveDensity`, `isDesktopPlatform` (linux/windows), `dialogContentWidth`, `dialogContentHeight` |
+| helpers | `isCompactWidth` (shortestSide < 600), `adaptiveDensity`, `isDesktopPlatform` (linux/windows), `usesRailLayout` (the ONE rail-vs-bottom-bar decision, shared by `home_shell` and `session_list_page`), `composeTextScaler` (multiply an in-app font scale onto the system accessibility scaler instead of replacing it), `dialogContentWidth`, `dialogContentHeight` |
 
 ## CONVENTIONS
 - `buildAppTheme` builds the scheme with `ColorScheme.fromSeed(..., dynamicSchemeVariant: tonalSpot)` and copies only `outlineVariant` (`0x1FFFFFFF` dark / `0x1F000000` light); every other role comes from the seed, which is `AppColors.brandSeed` unless the settings page passes an accent seed.

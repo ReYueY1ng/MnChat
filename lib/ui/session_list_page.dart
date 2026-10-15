@@ -70,10 +70,11 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     final theme = Theme.of(context);
     final sessions = widget.sessions;
 
-    // 与 HomeShell 一致：横屏且够宽时账号入口在侧栏底部，AppBar 不再重复展示。
-    final railLayout =
-        MediaQuery.orientationOf(context) == Orientation.landscape &&
-        MediaQuery.sizeOf(context).width >= 800;
+    // 与 HomeShell 一致（同一个 `usesRailLayout`）：出侧栏时账号入口在侧栏，
+    // AppBar 不再重复展示。以前这里用「横屏 && ≥800」自行判定，与主壳的
+    // 「移动端 ≥800 / 桌面 ≥480，不看方向」不一致 —— 平板竖屏、桌面竖窗下会
+    // 同时出现侧栏头像和 AppBar 头像两个账号入口。
+    final railLayout = usesRailLayout(MediaQuery.sizeOf(context).width);
 
     // 过滤：已移除 → 搜索（昵称 / 迷你号 / 群名）
     final filtered = sessions.where((s) {

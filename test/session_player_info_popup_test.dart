@@ -103,4 +103,21 @@ void main() {
     expect(find.text('加好友'), findsNothing);
     expect(find.text('关注'), findsNothing);
   });
+
+  testWidgets('浮窗是固定宽度定位，窄屏（280dp）也必须缩进屏内', (tester) async {
+    // 340dp 写死宽度在 ≤348dp 的窗口（折叠屏外屏、老式 320dp 机）会裁掉右缘。
+    tester.view.physicalSize = const Size(280, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await _openCard(tester);
+    final card = tester.getRect(find.byType(SingleChildScrollView));
+    expect(card.left, greaterThanOrEqualTo(0));
+    expect(
+      card.right,
+      lessThanOrEqualTo(280),
+      reason: '浮窗右缘不能超出 280dp 的屏宽',
+    );
+    expect(card.width, lessThan(340), reason: '窄屏必须缩到可用宽度');
+  });
 }

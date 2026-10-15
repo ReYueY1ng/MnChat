@@ -78,6 +78,7 @@ void main() {
     DynamicsPost? post,
     AppDatabase? db,
     DynamicsClient? client,
+    double textScale = 1.0,
   }) async {
     await tester.pumpWidget(
       ProviderScope(
@@ -87,11 +88,18 @@ void main() {
         ],
         child: MaterialApp(
           theme: buildAppTheme(Brightness.light),
-          home: Scaffold(
-            body: DynamicsCard(
-              post: post ?? basePost,
-              isMine: isMine,
-              client: client,
+          home: Builder(
+            builder: (context) => MediaQuery(
+              data: MediaQuery.of(context).copyWith(
+                textScaler: TextScaler.linear(textScale),
+              ),
+              child: Scaffold(
+                body: DynamicsCard(
+                  post: post ?? basePost,
+                  isMine: isMine,
+                  client: client,
+                ),
+              ),
             ),
           ),
         ),
@@ -99,6 +107,25 @@ void main() {
     );
     await tester.pumpAndSettle();
   }
+
+  testWidgets('系统大字号下正文被截断时必须给出「查看全文」', (tester) async {
+    tester.view.physicalSize = const Size(400, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+    // 60 个全角字符：默认字号 3 行内放得下，放大 1.6 倍后放不下 ——
+    // 量测（_overflows）必须用与正文相同的 textScaler，否则放大后不显示入口。
+    final post = DynamicsPost(pid: '1_1', uin: 1, content: '动态正文内容' * 10);
+
+    await pumpCard(tester, post: post);
+    expect(find.text('查看全文'), findsNothing, reason: '默认字号三行内放得下');
+
+    await pumpCard(tester, post: post, textScale: 1.6);
+    expect(
+      find.text('查看全文'),
+      findsOneWidget,
+      reason: '正文实际已被截断，必须给出查看全文入口',
+    );
+  });
 
   testWidgets('头部：文字居中于头像槽位，关注按钮钉在行右上角', (tester) async {
     await pumpCard(tester);

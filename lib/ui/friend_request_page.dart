@@ -63,11 +63,16 @@ class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
             ],
           ),
         ),
-        body: const TabBarView(
-          children: [
-            _FriendApplyTab(),
-            _GroupApplyTab(onChanged: _noop),
-          ],
+        body: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+            child: const TabBarView(
+              children: [
+                _FriendApplyTab(),
+                _GroupApplyTab(onChanged: _noop),
+              ],
+            ),
+          ),
         ),
       ),
     );

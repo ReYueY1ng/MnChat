@@ -130,17 +130,22 @@ class _RelationPageState extends ConsumerState<RelationPage>
           ],
         ),
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? _errorView()
-          : TabBarView(
-              controller: _tabs,
-              children: [
-                _list(_following, '还没有关注任何人'),
-                _list(_fans, '还没有粉丝'),
-              ],
-            ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? _errorView()
+              : TabBarView(
+                  controller: _tabs,
+                  children: [
+                    _list(_following, '还没有关注任何人'),
+                    _list(_fans, '还没有粉丝'),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 

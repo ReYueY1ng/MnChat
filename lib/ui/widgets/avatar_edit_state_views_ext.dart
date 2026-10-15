@@ -227,6 +227,12 @@ mixin _AvatarEditStateViewsExt
       );
     }
     final titles = _filteredTitles(catalog);
+    // 手机窄屏：3 列 / 1.7 比例的格子只有 ~35dp 高，而称号卡片的内容（名称 +
+    // 有效期两行）随字号变化、默认字号就要 ~100dp，直接溢出。窄屏改 2 列、格子
+    // 高度按字号算（1.0x ≈102dp、2.0x ≈196dp）；宽屏格子宽 300+，保持 3 列 / 1.7。
+    final compact = isCompactWidth(context);
+    final tileHeight =
+        MediaQuery.textScalerOf(context).scale(94) + AppSpacing.sm;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -235,12 +241,16 @@ mixin _AvatarEditStateViewsExt
         Expanded(
           child: titles.isEmpty
               ? const Center(child: _EmptyHint('该分类下暂无称号', center: true))
-              : GridView.count(
+              : GridView(
                   padding: EdgeInsets.zero,
-                  crossAxisCount: 3,
-                  mainAxisSpacing: AppSpacing.sm,
-                  crossAxisSpacing: AppSpacing.sm,
-                  childAspectRatio: 1.7,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: compact ? 2 : 3,
+                    mainAxisSpacing: AppSpacing.sm,
+                    crossAxisSpacing: AppSpacing.sm,
+                    childAspectRatio: 1.7,
+                    // 非空时覆盖比例：窄屏格子高度由字号决定。
+                    mainAxisExtent: compact ? tileHeight : null,
+                  ),
                   children: [
                     for (final t in titles)
                       _TitleCard(
@@ -271,12 +281,19 @@ mixin _AvatarEditStateViewsExt
     if (_families.isEmpty) {
       return const Center(child: _EmptyHint('你尚未加入任何家族', center: true));
     }
-    return GridView.count(
+    // 同上：窄屏 2 列 + 格子高度跟随字号，宽屏保持 3 列 / 1.7。
+    final compact = isCompactWidth(context);
+    final tileHeight =
+        MediaQuery.textScalerOf(context).scale(94) + AppSpacing.sm;
+    return GridView(
       padding: EdgeInsets.zero,
-      crossAxisCount: 3,
-      mainAxisSpacing: AppSpacing.sm,
-      crossAxisSpacing: AppSpacing.sm,
-      childAspectRatio: 1.7,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: compact ? 2 : 3,
+        mainAxisSpacing: AppSpacing.sm,
+        crossAxisSpacing: AppSpacing.sm,
+        childAspectRatio: 1.7,
+        mainAxisExtent: compact ? tileHeight : null,
+      ),
       children: [
         for (final family in _families)
           _FamilyCard(
@@ -304,7 +321,14 @@ mixin _AvatarEditStateViewsExt
             children: [
               Expanded(child: grid),
               const SizedBox(height: AppSpacing.sm),
-              panel(true),
+              // 字号放大后说明文字会高过整块内容区：右栏最多占一半高度，
+              // 超出就在自身内部滚动，而不是把整列撑到溢出。
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxHeight: constraints.maxHeight * 0.5,
+                ),
+                child: SingleChildScrollView(child: panel(true)),
+              ),
             ],
           );
         }

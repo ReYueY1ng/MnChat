@@ -67,15 +67,6 @@ class _MainShellState extends ConsumerState<MainShell> {
     svc.setBackgroundMode(background);
   }
 
-  /// 是否使用左侧常驻导航栏。
-  ///
-  /// 桌面端（有鼠标键盘、窗口通常够高）只要窗口不是极端窄就用侧栏 —— 以前用
-  /// 「横屏 && ≥800」判定，窄而高的桌面窗口会退化成底部导航栏，很别扭。
-  /// 移动端仍按宽度判定：竖屏手机保持底部栏，横屏手机（≥800）用侧栏。
-  bool _useRail(double maxWidth) => isDesktopPlatform
-      ? maxWidth >= AppSizes.railMinWindow
-      : maxWidth >= AppSizes.railBreakpoint;
-
   /// 返回上一级：聊天打开 → 回会话列表；其他 tab → 回「会话」tab。
   ///
   /// [background] 为 true 时（系统返回键一路退到会话列表）才把应用退到后台；
@@ -147,30 +138,35 @@ class _MainShellState extends ConsumerState<MainShell> {
     final activeSession = active;
     final session =
         activeSession == null ? null : findActive(list, activeSession);
-    // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）。
-    if (activeSession != null) {
-      _chatInstance = ChatPage(
-        key: ValueKey(sessionKeyOf(activeSession.type, activeSession.id)),
-        type: activeSession.type,
-        sessionId: activeSession.id,
-        name: session?.name ?? '',
-      );
-    }
-    final chatPane = _chatInstance ?? const _EmptyChatPlaceholder();
 
     return LayoutBuilder(builder: (context, constraints) {
-      final useRail = _useRail(constraints.maxWidth);
+      final useRail = usesRailLayout(constraints.maxWidth);
       final chatOpen = activeSession != null;
 
       // 内容区宽度 = 窗口宽 - 侧栏宽，而侧栏宽度由 Material 内部决定。这里不再
       // 用硬编码的 76 去推算（rail 一改宽就错位），双栏判定交给内层
       // LayoutBuilder 用实测的内容区宽度（见下面的 useRail 分支）。
       Widget buildTabs(double availableWidth) {
+        final wide = availableWidth >= AppSizes.chatSplitBreakpoint;
+        // 有活动会话时更新/创建聊天页实例（同 key 时 Element 复用，State 保留）。
+        // 双栏与否必须在这里告知 [ChatPage]：聊天面板自身的宽度永远小于双栏断点，
+        // 让它自己用窗口宽度判定，会在 [700, 760) 这段窗口宽度上判错（手机横屏
+        // 正落在这段：主壳走单栏、却以为自己是宽屏 → 没有返回箭头）。
+        if (activeSession != null) {
+          _chatInstance = ChatPage(
+            key: ValueKey(sessionKeyOf(activeSession.type, activeSession.id)),
+            type: activeSession.type,
+            sessionId: activeSession.id,
+            name: session?.name ?? '',
+            wide: wide,
+          );
+        }
+        final chatPane = _chatInstance ?? const _EmptyChatPlaceholder();
         final sessionsTab = _SessionsTab(
           sessions: _conversations(list),
           chatPane: chatPane,
           chatOpen: chatOpen,
-          wide: availableWidth >= AppSizes.chatSplitBreakpoint,
+          wide: wide,
           listWidth: _chatListWidth,
           onListWidthChanged: (w) => setState(() => _chatListWidth = w),
           onOpenSession: _toggleSession,

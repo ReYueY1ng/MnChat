@@ -177,6 +177,13 @@ abstract final class AppSizes {
   /// 会话列表栏可拖拽的最小 / 最大宽度。
   static const double chatListMinWidth = 240;
   static const double chatListMaxWidth = 460;
+
+  /// 动态流（瀑布流）从单列切双列所需的最小内容区宽度。
+  static const double feedTwoColumnBreakpoint = 700;
+
+  /// 动态详情从「单列堆叠」切「正文 + 评论双栏」所需的最小窗口宽度
+  /// （还要求横屏，见 `dynamics_detail_state.dart`）。
+  static const double detailTwoColumnBreakpoint = 900;
 }
 
 /// 是否桌面端（linux / windows）。
@@ -192,6 +199,51 @@ bool get isDesktopPlatform =>
 /// 从而始终保住触控目标尺寸。
 bool isCompactWidth(BuildContext context) =>
     MediaQuery.sizeOf(context).shortestSide < 600;
+
+/// 是否使用左侧常驻导航栏（宽度传**窗口宽**）。
+///
+/// 桌面端（有鼠标键盘、窗口通常够高）只要窗口不极端窄就用侧栏 —— 以前用
+/// 「横屏 && ≥800」判定，窄而高的桌面窗口会退化成底部导航栏，很别扭。移动端
+/// （横屏手机也算移动端）按 [AppSizes.railBreakpoint] 判定：竖屏手机保持底部栏，
+/// 横屏手机（≥800）用侧栏。**判定只有这一处**：主壳（`home_shell.dart`）和会话
+/// 列表（`session_list_page.dart`）必须用同一个函数，否则会出现「主壳出了侧栏、
+/// 会话列表又在 AppBar 里放一个账号入口」。
+bool usesRailLayout(double windowWidth) => isDesktopPlatform
+    ? windowWidth >= AppSizes.railMinWindow
+    : windowWidth >= AppSizes.railBreakpoint;
+
+/// 把应用内的字号设置与系统无障碍字号**相乘**组合起来。
+///
+/// 写成 `copyWith(textScaler: TextScaler.linear(v))` 会把系统字号整个丢掉 ——
+/// 系统字号调到 1.5x/2x 的人，只有这块文字不跟着变大。这里组合而不是替换：
+/// [appFactor] 为 1.0 时原样返回系统 scaler（不引入多余包装）。
+TextScaler composeTextScaler(TextScaler system, double appFactor) =>
+    appFactor == 1.0 ? system : _ScaledTextScaler(system, appFactor);
+
+/// 在系统 [TextScaler] 之上再乘一个应用内倍率。
+class _ScaledTextScaler extends TextScaler {
+  const _ScaledTextScaler(this.system, this.appFactor);
+
+  final TextScaler system;
+  final double appFactor;
+
+  @override
+  double scale(double fontSize) => system.scale(fontSize * appFactor);
+
+  /// 保留已废弃的估算成员（[TextScaler] 要求实现）；用 1.0 号字号估算倍率，
+  /// 避免引用已废弃的 `system.textScaleFactor`。
+  @override
+  double get textScaleFactor => scale(1.0);
+
+  @override
+  bool operator ==(Object other) =>
+      other is _ScaledTextScaler &&
+      other.system == system &&
+      other.appFactor == appFactor;
+
+  @override
+  int get hashCode => Object.hash(system, appFactor);
+}
 
 /// 自适应触控密度：手机用 [VisualDensity.standard]（保住 ≥48dp 触控目标），
 /// 桌面 / 平板保留紧凑密度。

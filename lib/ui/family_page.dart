@@ -199,7 +199,12 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
           ),
         ],
       ),
-      body: _body(),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: _body(),
+        ),
+      ),
     );
   }
 

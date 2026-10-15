@@ -303,6 +303,10 @@ class _TitleCard extends StatelessWidget {
                     ),
                     Text(
                       dateRange,
+                      // 有效期是一段日期区间，窄格子里会被换成五、六行，把卡片
+                      // 撑到溢出；卡到两行、超出省略，格子高度才算得出来。
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: baseColor,
                       ),

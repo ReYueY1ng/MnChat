@@ -553,4 +553,114 @@ void main() {
     expect(find.text('头像编辑'), findsNothing);
     expect(result, isFalse);
   });
+
+  testWidgets('窄屏 360x640 + 2 倍系统字号：无溢出且标题 / 左 nav 可达', (tester) async {
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          chatServiceProvider.overrideWithValue(ChatService(db: null)),
+          sessionListProvider.overrideWith(
+            (_) => Stream.value(const SessionSnapshot([], [])),
+          ),
+          authProvider.overrideWith(_FakeAuthNotifier.new),
+        ],
+        child: MaterialApp(
+          theme: buildAppTheme(Brightness.light),
+          home: Builder(
+            builder: (context) => MediaQuery(
+              // 只放大字号，尺寸等其余数据保持真实视图值。
+              data: MediaQuery.of(
+                context,
+              ).copyWith(textScaler: const TextScaler.linear(2.0)),
+              child: Scaffold(
+                body: AvatarEditDialog(
+                  initial: initial,
+                  diyLoader: () async => null,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('头像编辑'), findsOneWidget);
+    // 5 个页签在大字号下仍要存在且可点（rail 允许超出后可滚动）。
+    for (final label in ['头像', '头像框', '昵称', '称号', '家族']) {
+      expect(
+        find.descendant(
+          of: find.byKey(avatarEditNavKey),
+          matching: find.text(label),
+        ),
+        findsOneWidget,
+        reason: '大字号下缺少左 nav 文案：$label',
+      );
+    }
+  });
+
+  testWidgets('窄屏 360x640：五个页签在默认字号与 2 倍字号下都不溢出', (tester) async {
+    // 原 3 列 / 1.7 比例的格子只有 ~35dp 高，而称号卡片内容需要 ~84dp：360dp
+    // 手机上默认字号就溢出。窄屏改成 2 列 + 格子高度跟随字号后逐个页签断言。
+    // loader 全部注入假件：不注入会发真实请求，pumpAndSettle 永远等不到收敛。
+    Future<void> pumpAt(double scale) async {
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            chatServiceProvider.overrideWithValue(ChatService(db: null)),
+            sessionListProvider.overrideWith(
+              (_) => Stream.value(const SessionSnapshot([], [])),
+            ),
+            authProvider.overrideWith(_FakeAuthNotifier.new),
+          ],
+          child: MaterialApp(
+            theme: buildAppTheme(Brightness.light),
+            home: Builder(
+              builder: (context) => MediaQuery(
+                data: MediaQuery.of(
+                  context,
+                ).copyWith(textScaler: TextScaler.linear(scale)),
+                child: Scaffold(
+                  body: AvatarEditDialog(
+                    initial: initial,
+                    diyLoader: () async => null,
+                    titleCatalogLoader: () async => _catalog,
+                    titleLoader: () async => _titles,
+                    frameTopLoader: () async => const <int>{},
+                    familyLoader: () async => const [
+                      FamilyInfo(familyId: 1, name: 'MoonX'),
+                    ],
+                    showFamilyLoader: () async =>
+                        const FamilyShowInfo(familyId: 1, name: 'MoonX'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    for (final scale in [1.0, 2.0]) {
+      await pumpAt(scale);
+      for (final label in ['头像', '头像框', '昵称', '称号', '家族']) {
+        await tapNav(tester, label);
+        expect(
+          tester.takeException(),
+          isNull,
+          reason: '${scale}x 字号下「$label」页签溢出',
+        );
+      }
+    }
+  });
 }

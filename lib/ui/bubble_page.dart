@@ -121,76 +121,81 @@ class _BubblePageState extends ConsumerState<BubblePage> {
             ),
         ],
       ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xl),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.cloud_off_outlined,
-                      size: 40,
-                      color: scheme.outline,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text('加载失败：$_error', textAlign: TextAlign.center),
-                    const SizedBox(height: AppSpacing.md),
-                    FilledButton.tonal(
-                      onPressed: _load,
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: ListView(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
-                    child: Text(
-                      '气泡名称/样式由游戏内置配置决定，外部客户端无法显示，'
-                      '仅能切换佩戴。',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: scheme.onSurfaceVariant,
-                      ),
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.cloud_off_outlined,
+                          size: 40,
+                          color: scheme.outline,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text('加载失败：$_error', textAlign: TextAlign.center),
+                        const SizedBox(height: AppSpacing.md),
+                        FilledButton.tonal(
+                          onPressed: _load,
+                          child: const Text('重试'),
+                        ),
+                      ],
                     ),
                   ),
-                  if (_bubbles.isEmpty)
-                    Padding(
-                      padding: const EdgeInsets.all(AppSpacing.xl),
-                      child: Center(
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
                         child: Text(
-                          '还没有可用气泡',
-                          style: TextStyle(color: scheme.onSurfaceVariant),
+                          '气泡名称/样式由游戏内置配置决定，外部客户端无法显示，'
+                          '仅能切换佩戴。',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
-                    )
-                  else
-                    ..._bubbles.map(
-                      (b) => ListTile(
-                        onTap: () => _use(b.id),
-                        leading: Icon(
-                          Icons.chat_bubble_outline,
-                          color: _using == b.id
-                              ? scheme.primary
-                              : scheme.onSurfaceVariant,
+                      if (_bubbles.isEmpty)
+                        Padding(
+                          padding: const EdgeInsets.all(AppSpacing.xl),
+                          child: Center(
+                            child: Text(
+                              '还没有可用气泡',
+                              style: TextStyle(color: scheme.onSurfaceVariant),
+                            ),
+                          ),
+                        )
+                      else
+                        ..._bubbles.map(
+                          (b) => ListTile(
+                            onTap: () => _use(b.id),
+                            leading: Icon(
+                              Icons.chat_bubble_outline,
+                              color: _using == b.id
+                                  ? scheme.primary
+                                  : scheme.onSurfaceVariant,
+                            ),
+                            title: Text('气泡 #${b.id}'),
+                            subtitle: Text(_expiryText(b)),
+                            trailing: _using == b.id
+                                ? Icon(Icons.check_circle, color: scheme.primary)
+                                : null,
+                          ),
                         ),
-                        title: Text('气泡 #${b.id}'),
-                        subtitle: Text(_expiryText(b)),
-                        trailing: _using == b.id
-                            ? Icon(Icons.check_circle, color: scheme.primary)
-                            : null,
-                      ),
-                    ),
-                ],
-              ),
-            ),
+                    ],
+                  ),
+                ),
+        ),
+      ),
     );
   }
 }

@@ -33,8 +33,9 @@ part 'mail_page_state.dart';
 part 'mail_page_widgets.dart';
 part 'mail_page_detail.dart';
 
-/// 宽窄分界：内容宽 ≥760 双栏（对齐 home_shell 会话双栏阈值）。
-const double kMailCentreWideWidth = 760;
+/// 宽窄分界：内容宽 ≥[AppSizes.narrowContent] 双栏（与 home_shell 会话双栏同值，
+/// 直接用 token，不再单独维护一个 760）。
+const double kMailCentreWideWidth = AppSizes.narrowContent;
 
 /// 消息中心选中项：顶部互动入口 或 左列邮件/系统分类（二者互斥）。
 class MailSelection {

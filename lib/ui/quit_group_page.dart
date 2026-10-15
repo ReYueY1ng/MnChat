@@ -103,62 +103,67 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(title: const Text('退群记录')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-          ? Center(
-              child: Padding(
-                padding: const EdgeInsets.all(AppSpacing.xl),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.cloud_off_outlined,
-                      size: 40,
-                      color: scheme.outline,
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                    Text('加载失败：$_error', textAlign: TextAlign.center),
-                    const SizedBox(height: AppSpacing.md),
-                    FilledButton.tonal(
-                      onPressed: _load,
-                      child: const Text('重试'),
-                    ),
-                  ],
-                ),
-              ),
-            )
-          : RefreshIndicator(
-              onRefresh: _load,
-              child: _records.isEmpty
-                  ? ListView(
+      body: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
+          child: _loading
+              ? const Center(child: CircularProgressIndicator())
+              : _error != null
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(height: 120),
-                        Center(
-                          child: Text(
-                            '没有退群记录',
-                            style: TextStyle(color: scheme.onSurfaceVariant),
-                          ),
+                        Icon(
+                          Icons.cloud_off_outlined,
+                          size: 40,
+                          color: scheme.outline,
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                        Text('加载失败：$_error', textAlign: TextAlign.center),
+                        const SizedBox(height: AppSpacing.md),
+                        FilledButton.tonal(
+                          onPressed: _load,
+                          child: const Text('重试'),
                         ),
                       ],
-                    )
-                  : ListView.builder(
-                      itemCount: _records.length,
-                      itemBuilder: (context, i) {
-                        final r = _records[i];
-                        return ListTile(
-                          leading: const Icon(Icons.group_off_outlined),
-                          title: Text(r.name.isEmpty ? '群 ${r.groupId}' : r.name),
-                          subtitle: Text(r.label),
-                          trailing: IconButton(
-                            tooltip: '清除',
-                            icon: const Icon(Icons.close),
-                            onPressed: () => _delete(r),
-                          ),
-                        );
-                      },
                     ),
-            ),
+                  ),
+                )
+              : RefreshIndicator(
+                  onRefresh: _load,
+                  child: _records.isEmpty
+                      ? ListView(
+                          children: [
+                            const SizedBox(height: 120),
+                            Center(
+                              child: Text(
+                                '没有退群记录',
+                                style: TextStyle(color: scheme.onSurfaceVariant),
+                              ),
+                            ),
+                          ],
+                        )
+                      : ListView.builder(
+                          itemCount: _records.length,
+                          itemBuilder: (context, i) {
+                            final r = _records[i];
+                            return ListTile(
+                              leading: const Icon(Icons.group_off_outlined),
+                              title: Text(r.name.isEmpty ? '群 ${r.groupId}' : r.name),
+                              subtitle: Text(r.label),
+                              trailing: IconButton(
+                                tooltip: '清除',
+                                icon: const Icon(Icons.close),
+                                onPressed: () => _delete(r),
+                              ),
+                            );
+                          },
+                        ),
+                ),
+        ),
+      ),
     );
   }
 }

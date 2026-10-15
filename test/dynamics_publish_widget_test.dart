@@ -11,6 +11,7 @@ import 'package:mnchat/core/services/dynamics.dart';
 import 'package:mnchat/state/providers.dart';
 import 'package:mnchat/ui/publish_dynamics_page.dart';
 import 'package:mnchat/ui/theme/app_theme.dart';
+import 'package:mnchat/ui/theme/app_tokens.dart' show AppSizes;
 
 /// 发布动态页回归测试 —— 断言请求线格式（不联网）：
 ///   1. 选图 → `add_posting_pic` 的 `seq`/`md5`/`ext` 与实际字节一致，
@@ -153,6 +154,27 @@ void main() {
     await tester.tap(find.text('open'));
     await tester.pumpAndSettle();
   }
+
+  testWidgets('宽窗口：表单内容夹到窄栏宽度，不再拉满整屏', (tester) async {
+    final adapter = _FakePostingAdapter();
+    await pumpPublish(
+      tester,
+      client: _client(adapter),
+      imagePicker: (_) async => [],
+    );
+
+    // 2K/4K 类超宽窗口（pumpPublish 默认 1000x1600，这里重新布局）。
+    tester.view.physicalSize = const Size(1800, 1200);
+    await tester.pumpAndSettle();
+
+    final body = tester.getRect(find.byType(ListView).first);
+    expect(
+      body.width,
+      lessThanOrEqualTo(AppSizes.narrowContent),
+      reason: '宽屏下单列表单必须夹到 narrowContent（${AppSizes.narrowContent}）',
+    );
+    expect(body.left, greaterThan(0.0), reason: '夹紧后应居中，而不是贴左');
+  });
 
   testWidgets('选图 → add_posting_pic 的 seq/md5 与 add_posting 的 seq 一致', (tester) async {
     final adapter = _FakePostingAdapter();
