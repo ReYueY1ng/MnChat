@@ -6,6 +6,7 @@ library;
 import 'dart:async';
 import 'dart:ui' show Color;
 
+import 'package:dynamic_color/dynamic_color.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_bridge.dart';
@@ -15,6 +16,7 @@ import '../core/models/gift_catalog.dart' show GiftCatalog;
 import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
+import '../core/services/chat/message_marks.dart' show MessageMarksStore;
 import '../core/services/dynamics.dart';
 import '../core/services/emoji_store.dart';
 import '../core/services/gift_config.dart' show GiftConfigClient;

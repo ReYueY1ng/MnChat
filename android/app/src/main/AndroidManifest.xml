@@ -36,6 +36,15 @@
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
+            <!-- 深链：mnchat://friend/<uin> · mnchat://group/<id> ·
+                 mnchat://favorites · mnchat://search · mnchat://partners
+                 （解析见 lib/core/models/deep_link.dart） -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="mnchat"/>
+            </intent-filter>
         </activity>
         <!-- 前台服务：后台接收聊天推送并通知 -->
         <service

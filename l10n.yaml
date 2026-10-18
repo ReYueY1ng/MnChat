@@ -1,0 +1,7 @@
+# gen-l10n 配置：ARB 目录与输出文件名。
+# 3.47 起 synthetic-package 已失效，代码直接生成到 arb-dir（lib/l10n/）。
+arb-dir: lib/l10n
+template-arb-file: app_zh.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations
+nullable-getter: false

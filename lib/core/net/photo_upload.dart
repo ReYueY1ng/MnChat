@@ -26,6 +26,13 @@ import '../utils/log.dart' show log, redactUrl;
 /// 单片字节数（抓包实测每片 131072 = 128 KiB，multipart 开销另计）。
 const int kUploadChunkSize = 128 * 1024;
 
+/// 网关重试间隔：网关**按账号排队**，同一路径 2 秒内连发会回 `code=9/23`
+/// （`duplicate_request_monitor` 亦就此告警）。分片直传与预签名申请都踩这个坑。
+const Duration kGatewayRetryGap = Duration(milliseconds: 1200);
+
+/// 被网关排队挡掉后的重试次数（分片 / 预签名都是幂等读，重发安全）。
+const int kGatewayRetryAttempts = 3;
+
 /// 直传标签（日志用）。
 const String _logTag = 'Upload';
 
@@ -40,6 +47,7 @@ Future<String?> uploadPresignedFile(
   List<int> bytes, {
   required String fileMd5,
   required String ext,
+  Duration chunkGap = kGatewayRetryGap,
 }) async {
   if (bytes.isEmpty) return null;
   final sep = presignedUrl.contains('?') ? '&' : '?';
@@ -76,32 +84,40 @@ Future<String?> uploadPresignedFile(
     final act = index == 0 && !isLast
         ? 'upload_begin'
         : (isLast ? 'upload_end' : 'upload_step');
-    final form = FormData.fromMap({
-      'fileUpload': MultipartFile.fromBytes(
-        Uint8List.fromList(bytes.sublist(offset, end)),
-        filename: fileMd5,
-        contentType: DioMediaType('application', 'octet-stream'),
-      ),
-    });
-    try {
-      final resp = await dio.post<String>(
-        '$base&act=$act&ext=$ext',
-        data: form,
-        options: plain,
-      );
-      final body = '${resp.data}'.trim();
-      if (!body.startsWith('ok')) {
+    var attempt = 0;
+    while (true) {
+      // FormData 是一次性流，重试必须重建（复用会在第二次直接抛异常）。
+      final form = FormData.fromMap({
+        'fileUpload': MultipartFile.fromBytes(
+          Uint8List.fromList(bytes.sublist(offset, end)),
+          filename: fileMd5,
+          contentType: DioMediaType('application', 'octet-stream'),
+        ),
+      });
+      try {
+        final resp = await dio.post<String>(
+          '$base&act=$act&ext=$ext',
+          data: form,
+          options: plain,
+        );
+        final body = '${resp.data}'.trim();
+        if (body.startsWith('ok')) {
+          if (act == 'upload_end') {
+            final t = body.startsWith('ok:') ? body.substring(3).trim() : '';
+            token = t.isEmpty ? null : t;
+          }
+          break;
+        }
+        // 业务失败（多为网关排队 code=9/23）：隔一个间隔重发同一片。
         log.warn('upload $act 失败: $body', tag: _logTag);
-        return null;
+      } on DioException catch (e) {
+        log.warn('upload $act 异常: ${e.message}', tag: _logTag);
       }
-      if (act == 'upload_end') {
-        final t = body.startsWith('ok:') ? body.substring(3).trim() : '';
-        token = t.isEmpty ? null : t;
-      }
-    } on DioException catch (e) {
-      log.warn('upload $act 异常: ${e.message}', tag: _logTag);
-      return null;
+      if (++attempt > kGatewayRetryAttempts) return null;
+      await Future<void>.delayed(chunkGap);
     }
+    // 还有下一片 → 先让出间隔，避免 2 秒内的第二次同接口请求被网关排队挡掉。
+    if (!isLast) await Future<void>.delayed(chunkGap);
     offset = end;
     index++;
   }

@@ -29,7 +29,7 @@ class MainShell extends ConsumerStatefulWidget {
   ConsumerState<MainShell> createState() => _MainShellState();
 }
 
-class _MainShellState extends ConsumerState<MainShell> {
+class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
   /// 当前 tab：0 会话 / 1 好友 / 2 动态。
   int _tab = 0;
 
@@ -39,12 +39,72 @@ class _MainShellState extends ConsumerState<MainShell> {
   /// 宽屏下会话列表栏的宽度（桌面端可拖拽调整）。
   double _chatListWidth = AppSizes.chatListWidth;
 
+  /// “上次打开的会话”可恢复状态（RestorationMixin）。
+  ///
+  /// 真正的持久化由平台侧的 restoration manager 负责（Android 会跨进程保存）；
+  /// 测试里用 `tester.restartAndRestore()` 走同一套框架机制。
+  late final RestorableStringN _restorableSession = RestorableStringN(null);
+
+  /// 订阅当前会话，把它写进可恢复状态。
+  ProviderSubscription<ActiveSession?>? _activeSessionSub;
+
+  /// 待恢复的会话 key（恢复可能发生在账号就绪之前）。
+  String? _pendingRestoreKey;
+
+  @override
+  String? get restorationId => 'mnchat_shell';
+
   @override
   void initState() {
     super.initState();
     // 按设置启停后台前台服务（保活收推送），并监听设置变化即时生效
     _applyKeepAlive(ref.read(keepAliveProvider));
     ref.listenManual(keepAliveProvider, (_, next) => _applyKeepAlive(next));
+    // 记住“现在打开的是哪个会话” —— 关掉会话不清空：恢复时“上次看的会话”仍有意义。
+    _activeSessionSub = ref.listenManual(activeSessionProvider, (_, next) {
+      if (next == null) return;
+      _restorableSession.value = sessionKeyOf(next.type, next.id);
+    });
+    // 恢复发生在登录之前时，等账号就绪再打开。
+    ref.listenManual(myUinProvider, (_, next) {
+      if (next > 0) _tryRestorePendingSession();
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tryRestorePendingSession();
+    });
+  }
+
+  @override
+  void restoreState(RestorationBucket? oldBucket, bool initialRestore) {
+    registerForRestoration(_restorableSession, 'active_session');
+    final key = _restorableSession.value;
+    if (key != null && key.isNotEmpty) _pendingRestoreKey = key;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _tryRestorePendingSession();
+    });
+  }
+
+  /// 打开待恢复的会话（账号未就绪则等下一次）。
+  void _tryRestorePendingSession() {
+    final key = _pendingRestoreKey;
+    if (key == null || !mounted) return;
+    if (ref.read(myUinProvider) == 0) return;
+    final sep = key.lastIndexOf('_');
+    if (sep <= 0) return;
+    final id = int.tryParse(key.substring(sep + 1));
+    if (id == null || id == 0) return;
+    _pendingRestoreKey = null;
+    final type = key.substring(0, sep) == ChatSessionType.group.name
+        ? ChatSessionType.group
+        : ChatSessionType.friend;
+    ref.read(activeSessionProvider.notifier).open(type, id);
+  }
+
+  @override
+  void dispose() {
+    _activeSessionSub?.close();
+    _activeSessionSub = null;
+    super.dispose();
   }
 
   /// 后台保活设置变化：这里只负责「关掉时立刻停」。
@@ -121,6 +181,8 @@ class _MainShellState extends ConsumerState<MainShell> {
   Widget build(BuildContext context) {
     final active = ref.watch(activeSessionProvider);
     final sessions = ref.watch(sessionListProvider);
+    // 首屏（从未有过快照）才显示骨架屏：已有会话时后台刷新不该闪骨架。
+    final sessionsLoading = sessions.isLoading && !sessions.hasValue;
 
     final list = sessions.when(
       data: (snap) => snap.sessions,
@@ -164,6 +226,7 @@ class _MainShellState extends ConsumerState<MainShell> {
         final chatPane = _chatInstance ?? const _EmptyChatPlaceholder();
         final sessionsTab = _SessionsTab(
           sessions: _conversations(list),
+          loading: sessionsLoading,
           chatPane: chatPane,
           chatOpen: chatOpen,
           wide: wide,
@@ -314,8 +377,11 @@ class _SessionsTab extends StatelessWidget {
   final double listWidth;
   final ValueChanged<double> onListWidthChanged;
 
-  /// 点击会话卡片的回调（HomeShell 负责"再次点击当前会话关闭"的切换）。
+  /// 点击会话卡片的回调（HomeShell 负责“再次点击当前会话关闭”的切换）。
   final ValueChanged<ChatSession> onOpenSession;
+
+  /// 会话列表是否处于首屏加载中（传递给 [SessionListPage] 决定是否显示骨架屏）。
+  final bool loading;
 
   const _SessionsTab({
     required this.sessions,
@@ -325,6 +391,7 @@ class _SessionsTab extends StatelessWidget {
     required this.listWidth,
     required this.onListWidthChanged,
     required this.onOpenSession,
+    required this.loading,
   });
 
   @override
@@ -338,6 +405,7 @@ class _SessionsTab extends StatelessWidget {
             width: listWidth,
             child: SessionListPage(
               sessions: sessions,
+              loading: loading,
               onOpenChat: onOpenSession,
             ),
           ),
@@ -353,7 +421,11 @@ class _SessionsTab extends StatelessWidget {
     return IndexedStack(
       index: chatOpen ? 1 : 0,
       children: [
-        SessionListPage(sessions: sessions, onOpenChat: onOpenSession),
+        SessionListPage(
+          sessions: sessions,
+          loading: loading,
+          onOpenChat: onOpenSession,
+        ),
         chatPane,
       ],
     );

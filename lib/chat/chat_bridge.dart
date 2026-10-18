@@ -15,7 +15,9 @@ import 'dart:async';
 
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 
+import '../core/models/chat_envelope.dart';
 import '../core/models/messages.dart';
+import '../core/models/message_mark.dart' show messageMarkKey;
 import '../core/services/chat_service.dart';
 import 'message_adapter.dart';
 
@@ -158,6 +160,8 @@ List<Message> chatHistoryToMessages(
   final seen = <String>{};
   final out = <Message>[];
   for (final m in history) {
+    // 「正在输入」等临时信号不是消息：不进列表（由桥接层转成输入提示）。
+    if (isTransientSignal(m)) continue;
     final msg = chatMessageToMessage(m, type: type, sessionId: sessionId);
     if (seen.add(msg.id)) out.add(msg);
   }
@@ -172,13 +176,51 @@ List<Message> chatHistoryToMessages(
 /// - 对 [ChatService.eventStream] 只建**一个**订阅；
 /// - [controllerFor] 幂等：首次调用用当前历史初始化控制器并注册。
 class ChatBridge {
-  ChatBridge(this._service) {
+  ChatBridge(this._service, {this.hiddenKeys}) {
     _sub = _service.eventStream.listen(handleEvent);
   }
 
   final ChatService _service;
+
+  /// 「正在输入」事件流：`(会话 key, 发送方 uin)`。
+  ///
+  /// 信号消息本身在 [chatHistoryToMessages] 里被丢弃，只把"对方在打字"这件
+  /// 事广播出去；由当前打开该会话的页面自己决定怎么显示。
+  Stream<(String, int)> get typingStream => _typingCtrl.stream;
+
+  final StreamController<(String, int)> _typingCtrl =
+      StreamController<(String, int)>.broadcast();
+
+  /// 该会话里对方是否用过私有信封。
+  ///
+  /// 用过才回发「正在输入」—— 否则官方客户端用户会收到一条空消息。
+  final Map<String, bool> _envelopeCapable = <String, bool>{};
+
+  /// 对方是否用过私有信封（据此判断“也是 MNChat”）。
+  bool peerEnvelopeCapable(String sessionKey) =>
+      _envelopeCapable[sessionKey] ?? false;
+
+  /// 本机已删除（hidden 标记）消息的查询钩子：给定会话 key 返回
+  /// `<uin>_<time>` 键集合（见 `models/message_mark.dart`）。
+  ///
+  /// 传 null 表示不过滤（测试 / 未登录）。钩子读的是 `MessageMarksStore` 的
+  /// 内存镜像，所以进会话载入标记后再 [reconcile] 一次，「本机删除」立即生效。
+  final Set<String> Function(String sessionKey)? hiddenKeys;
+
   final Map<String, ChatController> _controllers = {};
   StreamSubscription<ChatEvent>? _sub;
+
+  /// 过滤掉本机已删除的消息（其余原样返回，尽量复用入参列表）。
+  List<ChatMessage> _visible(List<ChatMessage> history, String key) {
+    final hidden = hiddenKeys?.call(key);
+    if (hidden == null || hidden.isEmpty) return history;
+    final out = <ChatMessage>[];
+    for (final m in history) {
+      if (hidden.contains(messageMarkKey(m.uin, m.time))) continue;
+      out.add(m);
+    }
+    return out;
+  }
 
   /// 取（或惰性创建）指定会话的控制器。幂等：同一会话始终返回同一实例。
   ///
@@ -191,7 +233,7 @@ class ChatBridge {
 
     final controller = InMemoryChatController(
       messages: chatHistoryToMessages(
-        _service.historyOf(type, sessionId),
+        _visible(_service.historyOf(type, sessionId), key),
         type,
         sessionId,
       ),
@@ -226,12 +268,13 @@ class ChatBridge {
     int sessionId,
   ) {
     final current = List.of(controller.messages);
+    _emitTypingSignals(type, sessionId);
     // 先消除「同 id 内容变化」：否则 computeChatOps 会判成 update → SetAll，
     // 而 flutter_chat_ui 的 diff 一旦产生 change 更新就会崩（见 [stabilizeSameIds]）。
     final target = stabilizeSameIds(
       current,
       chatHistoryToMessages(
-        _service.historyOf(type, sessionId),
+        _visible(_service.historyOf(type, sessionId), sessionKey(type, sessionId)),
         type,
         sessionId,
       ),
@@ -248,9 +291,34 @@ class ChatBridge {
   }
 
   /// 取消事件订阅、释放全部控制器并清空映射。
+  /// 扫描尾部若干条历史里的「正在输入」信封并广播出去。
+  ///
+  /// 只扫尾部 3 条：信号总是最新的，而历史可能有上万条（每次事件都全扫会是
+  /// O(n) 的无线开销）。
+  void _emitTypingSignals(ChatSessionType type, int sessionId) {
+    if (_typingCtrl.isClosed) return;
+    final history = _visible(
+      _service.historyOf(type, sessionId),
+      sessionKey(type, sessionId),
+    );
+    final from = history.length - 3 < 0 ? 0 : history.length - 3;
+    for (var i = from; i < history.length; i++) {
+      final m = history[i];
+      final envelope = envelopeOf(m);
+      if (envelope == null) continue;
+      final key = sessionKey(type, sessionId);
+      // 对方用过信封 → 记下“也是 MNChat”，供发送侧决定要不要回发输入信号。
+      if (m.uin != _service.myUin) _envelopeCapable[key] = true;
+      if (envelope.kind == MnEnvelopeKind.typing) {
+        _typingCtrl.add((key, m.uin));
+      }
+    }
+  }
+
   void dispose() {
     _sub?.cancel();
     _sub = null;
+    unawaited(_typingCtrl.close());
     for (final c in _controllers.values) {
       c.dispose();
     }

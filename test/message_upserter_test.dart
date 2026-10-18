@@ -3,9 +3,9 @@ import 'package:mnchat/core/models/messages.dart';
 import 'package:mnchat/core/services/chat/message_upserter.dart'
     show mergeHistory, preserveEmojiFields;
 
-/// 历史整段替换时的表情字段回填：
-/// `chat_query` 只回 `[who, ts, text]` 三元组（没有 extend_data），
-/// 不补回来就会把收到的动态表情冲成「请升级到最新版本查看」。
+/// 历史整段替换时的扩展字段回填：
+/// `chat_query` 回的是五元组 `[who, ts, text, extend, "0"]`（第 4 位就是 extend_data），
+/// 但同一消息也可能先经推送入内存 —— 后来者没带字段时用已有的补，带了就别覆盖。
 void main() {
   ChatMessage msg({String? interCode, String? extend, int time = 100}) =>
       ChatMessage(
@@ -19,11 +19,20 @@ void main() {
   test('三元组历史缺 interCode 时，用旧消息补回', () {
     const code = '[mdemo]2&10013&ani_expression_OK[/mdemo]';
     final existing = [msg(interCode: code, extend: 'EXT')];
-    final incoming = [msg()]; // 模拟 chat_query 回的裸三元组
+    final incoming = [msg()]; // 模拟没带字段的那条
 
     final out = preserveEmojiFields(incoming, existing);
     expect(out.single.interCode, code);
     expect(out.single.extendData, 'EXT');
+  });
+
+  test('离线队列带回的 extend_data 不被旧值覆盖', () {
+    // 旧消息在内存里没带字段，新拉到的五元组带了 —— 必须保留新值。
+    final existing = [msg()];
+    final incoming = [msg(extend: 'NEW_EXT')];
+
+    final out = preserveEmojiFields(incoming, existing);
+    expect(out.single.extendData, 'NEW_EXT');
   });
 
   test('新消息自带 interCode 时不覆盖', () {

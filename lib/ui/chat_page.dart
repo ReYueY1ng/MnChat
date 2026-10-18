@@ -1,9 +1,12 @@
 import 'dart:async';
+import 'dart:typed_data';
 
-import 'package:flutter/services.dart' show Clipboard, ClipboardData;
+import 'package:flutter/services.dart'
+    show Clipboard, ClipboardData, HapticFeedback;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 import 'package:flutter_chat_ui/flutter_chat_ui.dart';
+import 'package:file_picker/file_picker.dart' show FilePicker, FileType;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../chat/chat_bridge.dart' show ChatBridge;
@@ -19,11 +22,18 @@ import '../core/models/messages.dart'
         ChatSessionType,
         decodeChatExtendData,
         emojiCodeForMessage;
+import '../core/models/chat_envelope.dart';
 import '../core/models/nickname.dart' show plainNickname;
 import '../core/models/session_key.dart' show sessionKeyOf;
 import '../core/services/chat_service.dart';
+import '../core/services/chat_image.dart'
+    show kVoiceCarrierExt, uploadChatImage, uploadChatMedia;
+import '../core/services/profile.dart' show ProfileClient;
+import '../core/services/voice_clip.dart'
+    show voiceDurationSeconds, voiceSecondsLabel;
 import '../core/services/dynamics.dart' show DynamicsClient;
 import '../core/services/rich_media.dart' show RichMedia, ShareType;
+import '../core/services/chat/message_marks.dart' show MessageMarksStore;
 import '../core/storage/settings_store.dart' show SettingsKeys, SettingsStore;
 import '../state/providers.dart';
 import 'dynamics_detail_page.dart';
@@ -32,14 +42,18 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/emoji_code_image.dart' show EmojiCodeImage;
 import 'widgets/emoji_picker.dart' show showEmojiPicker;
+import 'widgets/voice_message_bar.dart' show VoiceMessageBar;
+import 'widgets/voice_record_dialog.dart' show showVoiceRecordDialog;
 import 'widgets/floating_panel.dart' show showFloatingPanel;
 import 'widgets/gift_picker.dart' show showGiftPicker;
+import 'widgets/app_l10n.dart' show l10nOf;
 import 'widgets/rich_text_view.dart';
 import '../core/services/image_disk_cache.dart';
 
 part 'chat_page_composer.dart';
 part 'chat_page_bubbles.dart';
 part 'chat_page_message_row.dart';
+part 'chat_page_actions.dart';
 
 /// 相邻两条消息间隔超过该值时，在两条消息之间插入居中的时间分隔条。
 ///
@@ -113,6 +127,20 @@ class _ChatPageState extends ConsumerState<ChatPage>
   /// 本会话草稿的存储 key（`friend_123` / `group_456`）。
   late final String _draftKey = sessionKeyOf(widget.type, widget.sessionId);
 
+  /// 本机消息标记（收藏 / 本机删除）的会话级内存镜像。
+  late final MessageMarksStore _marks;
+
+  /// 多选模式：已选中的消息 id；null 表示未进入多选。
+  Set<String>? _selectedIds;
+
+  /// 「正在输入」接收侧：对方用过私有信封才会触发（见 [ChatBridge.typingStream]）。
+  StreamSubscription<(String, int)>? _typingSub;
+  Timer? _typingHideTimer;
+  bool _peerTyping = false;
+
+  /// 最近一次发出「正在输入」的时间（发送侧 8 秒限流）。
+  DateTime? _lastTypingSentAt;
+
   /// 草稿落盘防抖：输入停顿 600ms 才写一次库，避免每个按键一次 SQLite 写入。
   Timer? _draftTimer;
 
@@ -123,6 +151,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
 
   /// 成员选择器是否已弹出（防止刚敲下的 `@` 反复触发）。
   bool _mentionOpen = false;
+
+  /// 发图进行中：防止重复点「图片」触发第二遍上传。
+  bool _imageSending = false;
+
+  /// 引用回复的待发信封：点「引用」时记下，下一条发出的消息带上
+  /// （走 extend_data；可见前缀照旧进正文，官方客户端也读得懂）。
+  MnEnvelope? _pendingEnvelope;
+
+  /// 发语音进行中：与发图同理。
+  bool _voiceSending = false;
 
   /// 进入会话时的未读数，以及据此定位出的「第一条未读消息」id。
   ///
@@ -142,6 +180,17 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _bridge.reconcile(_controller, widget.type, widget.sessionId);
     // 提前持有：Riverpod 3.x 禁止在 dispose 中再访问 ref。
     _service = ref.read(chatServiceProvider);
+    _marks = ref.read(messageMarksStoreProvider);
+    // 「正在输入」：只对当前会话生效，6 秒内没新信号就收起（信号本身不带有效期）。
+    _typingSub = _bridge.typingStream.listen((event) {
+      if (!mounted || event.$1 != _draftKey) return;
+      if (event.$2 == ref.read(myUinProvider)) return; // 自己多端打字不提示
+      setState(() => _peerTyping = true);
+      _typingHideTimer?.cancel();
+      _typingHideTimer = Timer(const Duration(seconds: 6), () {
+        if (mounted) setState(() => _peerTyping = false);
+      });
+    });
     // 未读边界：现在取（setViewing 会把未读清零，取晚了永远是 0）。
     try {
       final snap = ref.read(sessionListProvider).asData?.value;
@@ -197,6 +246,16 @@ class _ChatPageState extends ConsumerState<ChatPage>
     } catch (_) {
       // ProviderContainer 未注入 databaseProvider（如单元测试）→ 用默认短语
     }
+    // 本机标记（收藏 / 本机删除）先载入再对账：bridge 的 hiddenKeys 钩子读的就是
+    // 这份镜像，载入完成后必须再对账一次，否则「本机已删除」的消息会在进会话时
+    // 被随历史一起重新渲染出来（服务端仍会把它推回来）。
+    unawaited(
+      _marks.ensureLoaded(_draftKey).then((_) {
+        if (!mounted) return;
+        setState(() {});
+        _bridge.reconcile(_controller, widget.type, widget.sessionId);
+      }),
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_historyLoaded) return;
       _historyLoaded = true;
@@ -262,6 +321,36 @@ class _ChatPageState extends ConsumerState<ChatPage>
         widget.type == ChatSessionType.group &&
         _composerController.text.endsWith('@')) {
       unawaited(_showMentionPicker(fromTyped: true));
+    }
+    unawaited(_maybeSendTypingSignal());
+  }
+
+  /// 回发「正在输入」信号（零宽字符隐写，可见正文为空）。
+  ///
+  /// 三个门：正文非空 → **对方用过私有信封**（说明也是 MNChat）→ 距上次 ≥8 秒。
+  /// 中间那个门很关键：官方客户端会把空正文当成一条空消息，不能打扰他们；
+  /// 限流是因为网关按账号排队，连发会回 `code=9/23`。
+  Future<void> _maybeSendTypingSignal() async {
+    if (_composerController.text.trim().isEmpty) return;
+    if (!_bridge.peerEnvelopeCapable(_draftKey)) return;
+    final now = DateTime.now();
+    final last = _lastTypingSentAt;
+    if (last != null && now.difference(last) < const Duration(seconds: 8)) {
+      return;
+    }
+    _lastTypingSentAt = now;
+    try {
+      final payload = attachMnEnvelope(
+        '',
+        const MnEnvelope(MnEnvelopeKind.typing, <String, Object?>{}),
+      );
+      if (widget.type == ChatSessionType.friend) {
+        await _service.sendFriendMessage(widget.sessionId, payload);
+      } else {
+        await _service.sendGroupMessage(widget.sessionId, payload);
+      }
+    } catch (_) {
+      // 发不出去就算了：这只是个即时提示，不重试也不打扰用户。
     }
   }
 
@@ -490,6 +579,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
     _draftTimer?.cancel();
     _saveDraft();
     _composerController.removeListener(_onComposerChanged);
+    _typingSub?.cancel();
+    _typingSub = null;
+    _typingHideTimer?.cancel();
+    _typingHideTimer = null;
     _composerController.dispose();
     _searchController.dispose();
     super.dispose();
@@ -527,7 +620,13 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   onPressed: () =>
                       ref.read(activeSessionProvider.notifier).close(),
                 ),
-          title: _searching
+          title: _selectedIds != null
+              ? Text(
+                  l10nOf(context)?.selectedCount(_selectedIds!.length) ??
+                      '已选 ${_selectedIds!.length} 条',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                )
+              : _searching
               ? TextField(
                   controller: _searchController,
                   autofocus: true,
@@ -539,14 +638,38 @@ class _ChatPageState extends ConsumerState<ChatPage>
                     isDense: true,
                   ),
                 )
-              : RichTextView(
-                  displayName,
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    RichTextView(
+                      displayName,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    // 对方正在输入：只在收到过私有信封的会话里出现。
+                    // 放在标题里（两行、min 高度）而不是 AppBar.bottom —— 后者会
+                    // 让 AppBar 内部的 Column 在无界高度下断言（见本文件的测试）。
+                    if (_peerTyping)
+                      Text(
+                        l10nOf(context)?.typingIndicator ?? '对方正在输入…',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: scheme.primary,
+                        ),
+                      ),
+                  ],
                 ),
           actions: [
-            if (widget.type == ChatSessionType.group && !_searching)
+            if (_selectedIds != null)
+              IconButton(
+                tooltip: l10nOf(context)?.commonCancel ?? '取消',
+                icon: const Icon(Icons.close),
+                onPressed: _exitSelection,
+              ),
+            if (_selectedIds == null &&
+                widget.type == ChatSessionType.group &&
+                !_searching)
               IconButton(
                 tooltip: '群详情',
                 icon: const Icon(Icons.info_outline),
@@ -561,11 +684,12 @@ class _ChatPageState extends ConsumerState<ChatPage>
                   );
                 },
               ),
-            IconButton(
-              tooltip: _searching ? '退出搜索' : '搜索消息',
-              icon: Icon(_searching ? Icons.close : Icons.search),
-              onPressed: _toggleSearch,
-            ),
+            if (_selectedIds == null)
+              IconButton(
+                tooltip: _searching ? '退出搜索' : '搜索消息',
+                icon: Icon(_searching ? Icons.close : Icons.search),
+                onPressed: _toggleSearch,
+              ),
           ],
         ),
         const Divider(height: 1),
@@ -579,6 +703,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
                 currentUserId: myUin.toString(),
                 resolveUser: _resolveUser,
                 onMessageSend: _send,
+                // 消息级操作：长按（手机）/ 右键（桌面）弹菜单；点击在多选模式下
+                // 切换选中。
+                onMessageLongPress: _onMessageLongPress,
+                onMessageTap: _onMessageTap,
                 theme: ChatTheme.fromThemeData(Theme.of(context)),
                 builders: Builders(
                   textMessageBuilder:
@@ -625,6 +753,8 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       onInsert: _insertText,
                       phrases: _phrases,
                       onImfc: _sendImfc,
+                      onPickImage: _sendImage,
+                      onSendVoice: _sendVoice,
                       // @成员只在群聊里给：好友会话没有成员可 @。
                       onMention: widget.type == ChatSessionType.group
                           ? _showMentionPicker
@@ -650,6 +780,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
                         isSentByMe: isSentByMe,
                         isRemoved: isRemoved,
                         groupStatus: groupStatus,
+                        isFavorite: _isFavorite(message),
+                        isSelected:
+                            _selectedIds?.contains(message.id) ?? false,
                         // 双方都带头像：对方在气泡左侧，自己在右侧。
                         avatar: _avatarFor(
                           message,
@@ -698,6 +831,15 @@ class _ChatPageState extends ConsumerState<ChatPage>
             ],
           ),
         ),
+        // 多选模式的操作条（选择时输入区被它顶掉：不该还能打字发消息）。
+        if (_selectedIds != null)
+          _SelectionBar(
+            count: _selectedIds!.length,
+            onFavorite: _favoriteSelected,
+            onForward: _forwardSelected,
+            onDelete: _deleteSelected,
+            onCancel: _exitSelection,
+          ),
       ],
     );
   }
@@ -821,37 +963,78 @@ class _ChatPageState extends ConsumerState<ChatPage>
     return current.difference(previous) > kChatTimeDividerGap;
   }
 
-  /// 发送消息：trim/空值守卫 → 发送 → 本地乐观回显 → 失败弹 SnackBar。
-  Future<void> _send(String text) async {
+  /// 发送消息：trim/空值守卫 → 发送 → 本地乐观回显；失败则插入一条
+  /// `is_success=0` 的本地消息（气泡带错误标记，长按可重发）。返回是否成功。
+  Future<bool> _send(String text) async {
     final trimmed = text.trim();
-    if (trimmed.isEmpty) return;
+    if (trimmed.isEmpty) return false;
+    final service = ref.read(chatServiceProvider);
+    // 引用回复的「待发信封」：可见前缀已在正文里（人人可读），结构化引用走
+    // extend_data（无正文长度约束，见 sendFriendMessageWithEnvelope）。
+    final envelope = _pendingEnvelope;
+    _pendingEnvelope = null;
+    final extend = envelope == null ? null : encodeMnExtendData(envelope);
     try {
-      final service = ref.read(chatServiceProvider);
       if (widget.type == ChatSessionType.friend) {
-        await service.sendFriendMessage(widget.sessionId, trimmed);
+        if (envelope == null) {
+          await service.sendFriendMessage(widget.sessionId, trimmed);
+        } else {
+          await service.sendFriendMessageWithEnvelope(
+            widget.sessionId,
+            trimmed,
+            envelope: envelope,
+          );
+        }
       } else {
-        await service.sendGroupMessage(widget.sessionId, trimmed);
+        if (envelope == null) {
+          await service.sendGroupMessage(widget.sessionId, trimmed);
+        } else {
+          await service.sendGroupMessageWithEnvelope(
+            widget.sessionId,
+            trimmed,
+            envelope: envelope,
+          );
+        }
       }
       // 本地乐观消息：立即回显（ChatBridge 经 eventStream 增量 reconcile 上屏，
-      // 无需在此处手动操作 controller）
-      service.addLocalMessage(widget.type, widget.sessionId, trimmed);
+      // 无需在此处手动操作 controller）；带 extend_data 才能在回显气泡里也画出引用块。
+      service.addLocalMessage(
+        widget.type,
+        widget.sessionId,
+        trimmed,
+        extendData: extend,
+      );
       // 发出去了就清掉草稿：Composer 此时已把输入框清空，这里显式写一次，
       // 避免「消息已发出、草稿还留在下一句」的错乱。
       _draftTimer?.cancel();
       _saveDraft();
+      return true;
     } catch (e) {
-      if (!mounted) return;
-      // 发送失败：Composer 在回调前已经把输入框清空了，不把内容塞回去用户就得
-      // 重新敲一遍。这里回填 + 给一个「重试」，同时把草稿存下来（万一他直接关掉
-      // 会话，内容也不丢）。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _composerController.text = trimmed;
-        _composerController.selection = TextSelection.collapsed(
-          offset: trimmed.length,
+      // 失败也要上屏：以 is_success=0 插入一条本地消息（气泡带错误状态），
+      // 用户长按即可重发 —— 早先只把内容回填进输入框，关掉会话就彻底没了。
+      try {
+        service.addLocalMessage(
+          widget.type,
+          widget.sessionId,
+          trimmed,
+          isSuccess: false,
+          extendData: extend,
         );
-        _saveDraft();
-      });
+      } catch (_) {
+        // 连本地回显都失败（未登录等）：退回「回填输入框」这条老路。
+        if (mounted) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _composerController.text = trimmed;
+            _composerController.selection = TextSelection.collapsed(
+              offset: trimmed.length,
+            );
+          });
+        }
+      }
+      _draftTimer?.cancel();
+      _saveDraft();
+      if (!mounted) return false;
       final scheme = Theme.of(context).colorScheme;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -861,16 +1044,9 @@ class _ChatPageState extends ConsumerState<ChatPage>
           ),
           backgroundColor: scheme.error,
           duration: const Duration(seconds: 6),
-          action: SnackBarAction(
-            label: '重试',
-            textColor: scheme.onError,
-            onPressed: () {
-              _composerController.clear();
-              unawaited(_send(trimmed));
-            },
-          ),
         ),
       );
+      return false;
     }
   }
 
@@ -895,6 +1071,169 @@ class _ChatPageState extends ConsumerState<ChatPage>
     }
   }
 
+  /// 发图：选图 → 预签名分片直传 → 发送「图片」分享卡。
+  ///
+  /// 好友走 [ChatService.sendImageShare]，群聊走
+  /// [ChatService.sendGroupImageShare]（群通道没有 `issys`）。
+  Future<void> _sendImage() async {
+    if (_imageSending) return;
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    final picked = await FilePicker.pickFile(
+      dialogTitle: '选择要发送的图片',
+      type: FileType.image,
+    );
+    if (picked == null || !mounted) return;
+    setState(() => _imageSending = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final url = await uploadChatImage(
+        ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t),
+        bytes: bytes,
+        fileName: picked.name,
+      );
+      if (!mounted) return;
+      if (url == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('图片上传失败，请稍后重试')),
+        );
+        return;
+      }
+      final service = ref.read(chatServiceProvider);
+      if (widget.type == ChatSessionType.group) {
+        await service.sendGroupImageShare(widget.sessionId, url: url);
+      } else {
+        await service.sendImageShare(widget.sessionId, url: url);
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _imageSending = false);
+    }
+  }
+
+  /// 发语音：先选「录音」或「选文件」，再统一走 上传 → 私有信封 发出。
+  ///
+  /// 传输与发图共用 [uploadChatMedia]（同一条预签名分片直传）；载荷走
+  /// `MnEnvelopeKind.voice` → `{url, seconds}`，所以**官方客户端看到的是**
+  /// `[语音] 3″` 这样的可读正文，只有 MNChat 之间会渲染成可点的语音条。
+  Future<void> _sendVoice() async {
+    if (_voiceSending) return;
+    if (ref.read(authProvider).auth == null) return;
+    final record = await showModalBottomSheet<bool>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              key: voiceRecordEntryKey,
+              leading: const Icon(Icons.mic),
+              title: const Text('录音'),
+              subtitle: const Text('现在用麦克风录一段'),
+              onTap: () => Navigator.of(ctx).pop(true),
+            ),
+            ListTile(
+              key: voicePickFileEntryKey,
+              leading: const Icon(Icons.folder_open),
+              title: const Text('选择音频文件'),
+              onTap: () => Navigator.of(ctx).pop(false),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (record == null || !mounted) return;
+
+    final Uint8List bytes;
+    final String fileName;
+    final String defaultExt;
+    if (record) {
+      final recorded = await showVoiceRecordDialog(context);
+      if (recorded == null || !mounted) return;
+      bytes = recorded;
+      fileName = 'voice.wav';
+      defaultExt = 'wav';
+    } else {
+      final picked = await FilePicker.pickFile(
+        dialogTitle: '选择要发送的语音文件',
+        type: FileType.audio,
+      );
+      if (picked == null || !mounted) return;
+      bytes = await picked.readAsBytes();
+      fileName = picked.name;
+      defaultExt = 'mp3';
+    }
+    await _sendVoiceBytes(bytes, fileName: fileName, defaultExt: defaultExt);
+  }
+
+  /// 上传音频并作为语音消息发出。
+  ///
+  /// 载荷走信封（`extend_data`）：**实测服务端会保留并随 live push 转发自定义键**
+  /// （2026-10-17 三发三中：自定义 `mn` 键在对端在线时原样到达；対端**离线**时
+  /// 走 `chat_query` 离线队列取回则不带 extend_data —— 与游戏自己的礼物卡同一条路）。
+  ///
+  /// 音频不按 `.wav` 上传：存储 CDN **只发布图片扩展名**（七臂实测 png/jpg/webp
+  /// 200，m4a/mp4/ogg/amr 404），所以套 [kVoiceCarrierExt]；播放靠内容嗅探不受影响。
+  Future<void> _sendVoiceBytes(
+    Uint8List bytes, {
+    required String fileName,
+    required String defaultExt,
+  }) async {
+    final auth = ref.read(authProvider).auth;
+    if (auth == null) return;
+    setState(() => _voiceSending = true);
+    try {
+      final seconds = voiceDurationSeconds(bytes);
+      final url = await uploadChatMedia(
+        ProfileClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t),
+        bytes: bytes,
+        fileName: fileName,
+        defaultExt: defaultExt,
+        // 音频没有可发布的扩展名 → 套图片扩展名上传（见 kVoiceCarrierExt）。
+        forceExt: kVoiceCarrierExt,
+      );
+      if (!mounted) return;
+      if (url == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('语音上传失败，请稍后重试')),
+        );
+        return;
+      }
+      final visible =
+          seconds > 0 ? '[语音] ${voiceSecondsLabel(seconds)}' : '[语音]';
+      // 信封走 extend_data：URL 载荷远超正文 128 字节上限（会被服务端回 13）。
+      final envelope = MnEnvelope(MnEnvelopeKind.voice, <String, Object?>{
+        'url': url,
+        'seconds': seconds,
+      });
+      final service = ref.read(chatServiceProvider);
+      if (widget.type == ChatSessionType.group) {
+        await service.sendGroupMessageWithEnvelope(
+          widget.sessionId,
+          visible,
+          envelope: envelope,
+        );
+      } else {
+        await service.sendFriendMessageWithEnvelope(
+          widget.sessionId,
+          visible,
+          envelope: envelope,
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('发送失败: $e')),
+      );
+    } finally {
+      if (mounted) setState(() => _voiceSending = false);
+    }
+  }
+
   /// 点击分享的动态卡片 → 拉取动态后打开详情页。
   Future<void> _openSharedDynamics(String pid) async {
     final auth = ref.read(chatServiceProvider).auth;
@@ -912,5 +1251,274 @@ class _ChatPageState extends ConsumerState<ChatPage>
             .showSnackBar(SnackBar(content: Text('动态加载失败: $e')));
       }
     }
+  }
+
+  // ── 消息级操作（长按菜单 / 多选）────────────────────────────────────────
+
+  /// 消息在本机标记表里的定位：与服务端存储口径一致（发送者 uin + epoch 秒）。
+  ///
+  /// `chat/message_adapter.dart` 构造 [Message] 时把 `time`（秒）乘 1000 放进
+  /// `createdAt`，所以这里除回来就是存库用的秒（毫秒时间戳与时区无关）。
+  (int, int) _markLocator(Message m) {
+    final uin = int.tryParse(m.authorId) ?? 0;
+    final ms = m.createdAt?.millisecondsSinceEpoch ?? 0;
+    return (uin, ms ~/ 1000);
+  }
+
+  bool _isFavorite(Message m) {
+    final (uin, time) = _markLocator(m);
+    return _marks.isFavorite(_draftKey, uin, time);
+  }
+
+  void _toast(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(text), duration: const Duration(seconds: 2)),
+    );
+  }
+
+  /// 长按一条消息：弹操作菜单（桌面右键走的是同一个回调）。
+  Future<void> _onMessageLongPress(
+    BuildContext context,
+    Message message, {
+    required int index,
+    required LongPressStartDetails details,
+  }) async {
+    // 触觉反馈：手机上是真震动，桌面端是 no-op。
+    unawaited(HapticFeedback.mediumImpact());
+    final action = await showMessageActionMenu(
+      context,
+      position: details.globalPosition,
+      isMine: message.authorId == ref.read(myUinProvider).toString(),
+      isSystem: message is SystemMessage,
+      hasText: _searchableText(message).trim().isNotEmpty,
+      isFavorite: _isFavorite(message),
+      canResend: message.resolvedStatus == MessageStatus.error,
+    );
+    if (!mounted || action == null) return;
+    await _runMessageAction(action, message);
+  }
+
+  /// 点消息：多选模式下切换选中；非多选模式保持原行为（什么都不做）。
+  void _onMessageTap(
+    BuildContext context,
+    Message message, {
+    required int index,
+    required TapUpDetails details,
+  }) {
+    final selected = _selectedIds;
+    if (selected == null) return;
+    setState(() {
+      if (!selected.remove(message.id)) selected.add(message.id);
+      if (selected.isEmpty) _selectedIds = null;
+    });
+  }
+
+  Future<void> _runMessageAction(MessageAction action, Message message) async {
+    switch (action) {
+      case MessageAction.copy:
+        // 跨 await 用 context 会被 use_build_context_synchronously 拦下（fatal-infos
+        // 门禁），因此文案在 await 之前取好。
+        final copiedLabel = l10nOf(context)?.toastCopied ?? '已复制';
+        await Clipboard.setData(ClipboardData(text: _searchableText(message)));
+        unawaited(HapticFeedback.selectionClick());
+        _toast(copiedLabel);
+      case MessageAction.quote:
+        // 可见前缀进输入框（官方客户端也读得懂），结构化引用等发送时走
+        // extend_data；两条载体同时给，老版本 MNChat 仍能靠隐写读出来。
+        _pendingEnvelope = MnEnvelope(MnEnvelopeKind.quote, <String, Object?>{
+          'text': _searchableText(message).trim(),
+          'uin': int.tryParse(message.authorId) ?? 0,
+        });
+        _insertText(_quotePrefixFor(message));
+      case MessageAction.forward:
+        await _forwardMessages(<Message>[message]);
+      case MessageAction.multiSelect:
+        setState(() => _selectedIds = <String>{message.id});
+      case MessageAction.favorite:
+        await _setFavorite(message, true);
+      case MessageAction.unfavorite:
+        await _setFavorite(message, false);
+      case MessageAction.resend:
+        await _resend(message);
+      case MessageAction.deleteLocal:
+        await _deleteLocal(<Message>[message]);
+    }
+  }
+
+  /// 引用回复的前缀文案 + 私有信封。
+  ///
+  /// 迷你世界聊天协议没有「引用」字段（反编译 `friendservice.lua` 里既无撤回
+  /// 也无引用类消息），所以引用只能以**可读文本**随回复一起发出：对方——包括
+  /// 官方客户端——看到的是引用块加我的回复，不依赖任何私有字段。
+  ///
+  /// 在此之上再隐写一份结构化引用（零宽字符，官方客户端看不见）：MNChat 收到后
+  /// 能把它渲染成真正的引用块。
+  String _quotePrefixFor(Message m) {
+    final mine = m.authorId == ref.read(myUinProvider).toString();
+    var body = _searchableText(m).trim();
+    if (body.length > 60) body = '${body.substring(0, 60)}…';
+    final visible = '「${mine ? '我' : _senderNameOf(m)}：$body」\n';
+    return attachMnEnvelope(
+      visible,
+      MnEnvelope(MnEnvelopeKind.quote, {
+        'text': body,
+        'uin': int.tryParse(m.authorId) ?? 0,
+      }),
+    );
+  }
+
+  /// 一条消息的发送方显示名（好友会话用会话名；群会话查成员资料，取不到回退
+  /// 迷你号）。昵称可能带富文本标记，走 [plainNickname] 清洗。
+  String _senderNameOf(Message m) {
+    final uin = int.tryParse(m.authorId) ?? 0;
+    if (widget.type == ChatSessionType.friend) {
+      return widget.name.isNotEmpty ? widget.name : '$uin';
+    }
+    final member = _service.groupMemberProfile(widget.sessionId, uin);
+    final nick = plainNickname(member?.nickname ?? '').trim();
+    return nick.isNotEmpty ? nick : '$uin';
+  }
+
+  /// 转发若干条消息到其它会话（文本转发；卡片类消息转发其正文）。
+  Future<void> _forwardMessages(List<Message> messages) async {
+    final sessions =
+        (ref.read(sessionListProvider).asData?.value.sessions ??
+                const <ChatSession>[])
+            .where((s) => !(s.type == widget.type && s.id == widget.sessionId))
+            .toList();
+    if (!mounted) return;
+    if (sessions.isEmpty) {
+      _toast(l10nOf(context)?.forwardNoTarget ?? '没有可转发的好友或群');
+      return;
+    }
+    final target = await showModalBottomSheet<ChatSession>(
+      context: context,
+      builder: (ctx) =>
+          SafeArea(child: _ForwardTargetPicker(sessions: sessions)),
+    );
+    if (!mounted || target == null) return;
+    var text = messages
+        .map(_searchableText)
+        .where((t) => t.trim().isNotEmpty)
+        .join('\n');
+    if (text.trim().isEmpty) {
+      _toast('这条消息没有可转发的文本');
+      return;
+    }
+    if (messages.length > 1) text = '转发聊天记录：\n$text';
+    final service = ref.read(chatServiceProvider);
+    try {
+      if (target.type == ChatSessionType.friend) {
+        await service.sendFriendMessage(target.id, text);
+      } else {
+        await service.sendGroupMessage(target.id, text);
+      }
+      service.addLocalMessage(target.type, target.id, text);
+      if (!mounted) return;
+      setState(() => _selectedIds = null);
+      _toast(l10nOf(context)?.toastForwarded ?? '已转发');
+    } catch (e) {
+      _toast('转发失败: $e');
+    }
+  }
+
+  Future<void> _setFavorite(Message m, bool on) async {
+    final (uin, time) = _markLocator(m);
+    await _marks.setFavorite(_draftKey, uin, time, on);
+    if (!mounted) return;
+    setState(() {});
+    final l10n = l10nOf(context);
+    _toast(
+      on
+          ? (l10n?.toastFavorited ?? '已收藏')
+          : (l10n?.toastUnfavorited ?? '已取消收藏'),
+    );
+  }
+
+  /// 本机删除（仅本机隐藏）：确认后写 hidden 标记并对账，消息立即从列表消失。
+  Future<void> _deleteLocal(List<Message> messages) async {
+    if (messages.isEmpty) return;
+    final l10n = l10nOf(context);
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(l10n?.deleteLocalConfirmTitle ?? '在本机删除消息？'),
+        content: Text(
+          l10n?.deleteLocalConfirmBody ??
+              '只影响本机记录，对方和其他设备仍能看到这条消息。',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(l10n?.commonCancel ?? '取消'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(l10n?.actionDelete ?? '删除'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    for (final m in messages) {
+      final (uin, time) = _markLocator(m);
+      await _marks.setHidden(_draftKey, uin, time, true);
+    }
+    if (!mounted) return;
+    setState(() => _selectedIds = null);
+    _bridge.reconcile(_controller, widget.type, widget.sessionId);
+    _toast(l10nOf(context)?.toastDeletedLocal ?? '已在本机删除');
+  }
+
+  /// 重发失败的消息：发成功后再把那条失败记录在本机隐藏，避免留下两条一样的。
+  Future<void> _resend(Message m) async {
+    final text = _searchableText(m).trim();
+    if (text.isEmpty) {
+      _toast('这条消息没有可重发的文本');
+      return;
+    }
+    final ok = await _send(text);
+    if (!mounted || !ok) return;
+    final (uin, time) = _markLocator(m);
+    await _marks.setHidden(_draftKey, uin, time, true);
+    if (!mounted) return;
+    _bridge.reconcile(_controller, widget.type, widget.sessionId);
+  }
+
+  void _exitSelection() => setState(() => _selectedIds = null);
+
+  /// 当前多选中的消息（按时间序）。
+  List<Message> get _selectedMessages {
+    final ids = _selectedIds;
+    if (ids == null || ids.isEmpty) return const <Message>[];
+    return [
+      for (final m in _controller.messages)
+        if (ids.contains(m.id)) m,
+    ];
+  }
+
+  Future<void> _favoriteSelected() async {
+    final picked = _selectedMessages;
+    if (picked.isEmpty) return;
+    for (final m in picked) {
+      final (uin, time) = _markLocator(m);
+      await _marks.setFavorite(_draftKey, uin, time, true);
+    }
+    if (!mounted) return;
+    setState(() => _selectedIds = null);
+    _toast(l10nOf(context)?.toastFavorited ?? '已收藏');
+  }
+
+  Future<void> _forwardSelected() async {
+    final picked = _selectedMessages;
+    if (picked.isEmpty) return;
+    await _forwardMessages(picked);
+  }
+
+  Future<void> _deleteSelected() async {
+    final picked = _selectedMessages;
+    if (picked.isEmpty) return;
+    await _deleteLocal(picked);
   }
 }

@@ -1,5 +1,9 @@
 part of 'chat_page.dart';
 
+/// 「语音」入口弹层里的两个选项（测试定位用）。
+const Key voiceRecordEntryKey = Key('voice_record_entry');
+const Key voicePickFileEntryKey = Key('voice_pick_file_entry');
+
 /// 中文空状态：覆盖 flutter_chat_ui 内置的英文 "No messages yet"。
 ///
 /// 「打个招呼」按钮只把招呼语填进输入框（同快捷短语），发送由用户自己按发送键 ——
@@ -68,11 +72,19 @@ class _ComposerBar extends ConsumerWidget {
   /// @群成员：仅群聊传入；为空时不显示「@」按钮。
   final VoidCallback? onMention;
 
+  /// 发图：选图 → 上传 → 发送「图片」分享卡。为空时不显示「图片」按钮。
+  final VoidCallback? onPickImage;
+
+  /// 发语音：选音频文件 → 上传 → 以信封发送。为空时不显示「语音」按钮。
+  final VoidCallback? onSendVoice;
+
   const _ComposerBar({
     required this.onInsert,
     required this.phrases,
     this.onImfc,
     this.onMention,
+    this.onPickImage,
+    this.onSendVoice,
   });
 
   @override
@@ -106,11 +118,23 @@ class _ComposerBar extends ConsumerWidget {
               ),
             ),
           ),
-        // 工具栏：emoji / 礼物（图片入口已移除）
+        // 工具栏：图片 / emoji / 礼物
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Row(
             children: [
+              if (onPickImage != null)
+                _ToolBtn(
+                  tooltip: '图片',
+                  icon: Icons.image_outlined,
+                  onTap: onPickImage!,
+                ),
+              if (onSendVoice != null)
+                _ToolBtn(
+                  tooltip: '语音',
+                  icon: Icons.mic_none_outlined,
+                  onTap: onSendVoice!,
+                ),
               _ToolBtn(
                 tooltip: '表情',
                 icon: Icons.emoji_emotions_outlined,

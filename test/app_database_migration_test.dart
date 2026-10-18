@@ -14,6 +14,7 @@
 import 'package:drift/drift.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mnchat/core/models/message_mark.dart' show MessageMarkKind;
 import 'package:mnchat/core/storage/app_database.dart';
 
 /// fresh 与 upgraded 都必须存在的索引 → 有序的索引列（与 CREATE INDEX 顺序一致）。
@@ -111,6 +112,41 @@ QueryExecutor _v7Executor() => NativeDatabase.memory(
       raw.execute(sql);
     }
     raw.userVersion = 7;
+  },
+);
+
+/// 用一张 v9 形状的旧库启动连接（v8 表 + v9 索引），user_version=9。
+///
+/// v9 = v8 的表结构 + 4 个热点查询索引，所以这里把 v8 的 DDL 与索引一起建。
+const _v9Indexes = [
+  'CREATE INDEX "idx_chat_messages_owner_session_time" ON "chat_messages" ("owner_uin", "session_key", "time")',
+  'CREATE INDEX "idx_chat_messages_owner_time" ON "chat_messages" ("owner_uin", "time")',
+  'CREATE INDEX "idx_chat_sessions_owner_uin" ON "chat_sessions" ("owner_uin")',
+  'CREATE INDEX "idx_friends_owner_uin" ON "friends" ("owner_uin")',
+];
+
+QueryExecutor _v9Executor() => NativeDatabase.memory(
+  setup: (raw) {
+    for (final sql in const [
+      _v8ChatMessages,
+      _v8ChatSessions,
+      _v8Friends,
+      _settingsTable,
+    ]) {
+      raw.execute(sql);
+    }
+    for (final sql in _v9Indexes) {
+      raw.execute(sql);
+    }
+    for (final sql in const [
+      ..._seedMessages,
+      ..._seedSessions,
+      ..._seedFriends,
+      ..._seedSettings,
+    ]) {
+      raw.execute(sql);
+    }
+    raw.userVersion = 9;
   },
 );
 
@@ -249,6 +285,62 @@ void main() {
       // v7→v9 路径补建的索引也必须与 fresh 完全一致。
       final indexes = await _allIndexes(db);
       expect(indexes, equals(expectedIndexes));
+    });
+  });
+
+  group('(d) v9→v10：本机标记表 + FTS5 虚表 + 历史回填', () {
+    test('升级保留数据、建好标记表与虚表/触发器、旧消息可被检索', () async {
+      final db = AppDatabase(_v9Executor());
+      addTearDown(db.close);
+      await _open(db);
+
+      // 既有数据原样保留。
+      final messages = await db.messagesOf(7, 'friend_1001');
+      expect(messages.map((m) => m.content).toList(), ['hello', 'world']);
+      expect(await db.getSetting('autologin_token'), 'secret-abc');
+
+      // v10 新建的标记表可写可读（标记的是 'world' 那条，别把下面要搜的 'hello' 遮掉）。
+      await db.setMessageMark(
+        ownerUin: 7,
+        sessionKey: 'friend_1001',
+        msgUin: 1001,
+        msgTime: 1700000100,
+        kind: MessageMarkKind.hidden,
+        on: true,
+      );
+      expect(
+        await db.messageMarkKeys(
+          7,
+          MessageMarkKind.hidden,
+          sessionKey: 'friend_1001',
+        ),
+        {'1001_1700000100'},
+      );
+
+      // 虚表与三支同步触发器都在（插入/删除/更新）。
+      final triggers = await db
+          .customSelect(
+            "SELECT name FROM sqlite_master WHERE type='trigger' "
+            "AND name LIKE 'chat_messages_fts_%' ORDER BY name",
+          )
+          .get();
+      expect(triggers, hasLength(3));
+
+      // **历史回填**：升级前就存在的消息也必须能搜到（否则老库的搜索永远是空的）。
+      expect(
+        (await db.searchMessages(7, 'hello')).map((h) => h.text),
+        contains('hello'),
+      );
+
+      // 标记与检索联动：被本机删除的那条搜不到，其余不受影响。
+      expect(await db.searchMessages(7, 'world'), isEmpty);
+      expect(
+        (await db.searchMessages(7, 'hello')).map((h) => h.text),
+        contains('hello'),
+      );
+
+      // 升级库与全新库的索引集合仍然一致。
+      expect(await _allIndexes(db), equals(expectedIndexes));
     });
   });
 }

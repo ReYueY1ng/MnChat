@@ -2144,6 +2144,435 @@ class FriendsCompanion extends UpdateCompanion<FriendRecord> {
   }
 }
 
+class $MessageMarksTable extends MessageMarks
+    with TableInfo<$MessageMarksTable, MessageMarkRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $MessageMarksTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _ownerUinMeta = const VerificationMeta(
+    'ownerUin',
+  );
+  @override
+  late final GeneratedColumn<int> ownerUin = GeneratedColumn<int>(
+    'owner_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionKeyMeta = const VerificationMeta(
+    'sessionKey',
+  );
+  @override
+  late final GeneratedColumn<String> sessionKey = GeneratedColumn<String>(
+    'session_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _msgUinMeta = const VerificationMeta('msgUin');
+  @override
+  late final GeneratedColumn<int> msgUin = GeneratedColumn<int>(
+    'msg_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _msgTimeMeta = const VerificationMeta(
+    'msgTime',
+  );
+  @override
+  late final GeneratedColumn<int> msgTime = GeneratedColumn<int>(
+    'msg_time',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _kindMeta = const VerificationMeta('kind');
+  @override
+  late final GeneratedColumn<String> kind = GeneratedColumn<String>(
+    'kind',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    ownerUin,
+    sessionKey,
+    msgUin,
+    msgTime,
+    kind,
+    createdAt,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'message_marks';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<MessageMarkRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('owner_uin')) {
+      context.handle(
+        _ownerUinMeta,
+        ownerUin.isAcceptableOrUnknown(data['owner_uin']!, _ownerUinMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerUinMeta);
+    }
+    if (data.containsKey('session_key')) {
+      context.handle(
+        _sessionKeyMeta,
+        sessionKey.isAcceptableOrUnknown(data['session_key']!, _sessionKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionKeyMeta);
+    }
+    if (data.containsKey('msg_uin')) {
+      context.handle(
+        _msgUinMeta,
+        msgUin.isAcceptableOrUnknown(data['msg_uin']!, _msgUinMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_msgUinMeta);
+    }
+    if (data.containsKey('msg_time')) {
+      context.handle(
+        _msgTimeMeta,
+        msgTime.isAcceptableOrUnknown(data['msg_time']!, _msgTimeMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_msgTimeMeta);
+    }
+    if (data.containsKey('kind')) {
+      context.handle(
+        _kindMeta,
+        kind.isAcceptableOrUnknown(data['kind']!, _kindMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_kindMeta);
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {
+    ownerUin,
+    sessionKey,
+    msgUin,
+    msgTime,
+    kind,
+  };
+  @override
+  MessageMarkRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return MessageMarkRecord(
+      ownerUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}owner_uin'],
+      )!,
+      sessionKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_key'],
+      )!,
+      msgUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}msg_uin'],
+      )!,
+      msgTime: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}msg_time'],
+      )!,
+      kind: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}kind'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+    );
+  }
+
+  @override
+  $MessageMarksTable createAlias(String alias) {
+    return $MessageMarksTable(attachedDatabase, alias);
+  }
+}
+
+class MessageMarkRecord extends DataClass
+    implements Insertable<MessageMarkRecord> {
+  /// 账号归属（多账号数据隔离）。
+  final int ownerUin;
+  final String sessionKey;
+
+  /// 消息发送者 uin（与 chat_messages.uin 一致）。
+  final int msgUin;
+
+  /// 消息时间（epoch 秒，与 chat_messages.time 一致）。
+  final int msgTime;
+
+  /// 标记类型，取值见 models/message_mark.dart 的 [MessageMarkKind]。
+  final String kind;
+
+  /// 标记发生时间（epoch 秒）；收藏夹按它倒序。
+  final int createdAt;
+  const MessageMarkRecord({
+    required this.ownerUin,
+    required this.sessionKey,
+    required this.msgUin,
+    required this.msgTime,
+    required this.kind,
+    required this.createdAt,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['owner_uin'] = Variable<int>(ownerUin);
+    map['session_key'] = Variable<String>(sessionKey);
+    map['msg_uin'] = Variable<int>(msgUin);
+    map['msg_time'] = Variable<int>(msgTime);
+    map['kind'] = Variable<String>(kind);
+    map['created_at'] = Variable<int>(createdAt);
+    return map;
+  }
+
+  MessageMarksCompanion toCompanion(bool nullToAbsent) {
+    return MessageMarksCompanion(
+      ownerUin: Value(ownerUin),
+      sessionKey: Value(sessionKey),
+      msgUin: Value(msgUin),
+      msgTime: Value(msgTime),
+      kind: Value(kind),
+      createdAt: Value(createdAt),
+    );
+  }
+
+  factory MessageMarkRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return MessageMarkRecord(
+      ownerUin: serializer.fromJson<int>(json['ownerUin']),
+      sessionKey: serializer.fromJson<String>(json['sessionKey']),
+      msgUin: serializer.fromJson<int>(json['msgUin']),
+      msgTime: serializer.fromJson<int>(json['msgTime']),
+      kind: serializer.fromJson<String>(json['kind']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'ownerUin': serializer.toJson<int>(ownerUin),
+      'sessionKey': serializer.toJson<String>(sessionKey),
+      'msgUin': serializer.toJson<int>(msgUin),
+      'msgTime': serializer.toJson<int>(msgTime),
+      'kind': serializer.toJson<String>(kind),
+      'createdAt': serializer.toJson<int>(createdAt),
+    };
+  }
+
+  MessageMarkRecord copyWith({
+    int? ownerUin,
+    String? sessionKey,
+    int? msgUin,
+    int? msgTime,
+    String? kind,
+    int? createdAt,
+  }) => MessageMarkRecord(
+    ownerUin: ownerUin ?? this.ownerUin,
+    sessionKey: sessionKey ?? this.sessionKey,
+    msgUin: msgUin ?? this.msgUin,
+    msgTime: msgTime ?? this.msgTime,
+    kind: kind ?? this.kind,
+    createdAt: createdAt ?? this.createdAt,
+  );
+  MessageMarkRecord copyWithCompanion(MessageMarksCompanion data) {
+    return MessageMarkRecord(
+      ownerUin: data.ownerUin.present ? data.ownerUin.value : this.ownerUin,
+      sessionKey: data.sessionKey.present
+          ? data.sessionKey.value
+          : this.sessionKey,
+      msgUin: data.msgUin.present ? data.msgUin.value : this.msgUin,
+      msgTime: data.msgTime.present ? data.msgTime.value : this.msgTime,
+      kind: data.kind.present ? data.kind.value : this.kind,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MessageMarkRecord(')
+          ..write('ownerUin: $ownerUin, ')
+          ..write('sessionKey: $sessionKey, ')
+          ..write('msgUin: $msgUin, ')
+          ..write('msgTime: $msgTime, ')
+          ..write('kind: $kind, ')
+          ..write('createdAt: $createdAt')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode =>
+      Object.hash(ownerUin, sessionKey, msgUin, msgTime, kind, createdAt);
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is MessageMarkRecord &&
+          other.ownerUin == this.ownerUin &&
+          other.sessionKey == this.sessionKey &&
+          other.msgUin == this.msgUin &&
+          other.msgTime == this.msgTime &&
+          other.kind == this.kind &&
+          other.createdAt == this.createdAt);
+}
+
+class MessageMarksCompanion extends UpdateCompanion<MessageMarkRecord> {
+  final Value<int> ownerUin;
+  final Value<String> sessionKey;
+  final Value<int> msgUin;
+  final Value<int> msgTime;
+  final Value<String> kind;
+  final Value<int> createdAt;
+  final Value<int> rowid;
+  const MessageMarksCompanion({
+    this.ownerUin = const Value.absent(),
+    this.sessionKey = const Value.absent(),
+    this.msgUin = const Value.absent(),
+    this.msgTime = const Value.absent(),
+    this.kind = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.rowid = const Value.absent(),
+  });
+  MessageMarksCompanion.insert({
+    required int ownerUin,
+    required String sessionKey,
+    required int msgUin,
+    required int msgTime,
+    required String kind,
+    required int createdAt,
+    this.rowid = const Value.absent(),
+  }) : ownerUin = Value(ownerUin),
+       sessionKey = Value(sessionKey),
+       msgUin = Value(msgUin),
+       msgTime = Value(msgTime),
+       kind = Value(kind),
+       createdAt = Value(createdAt);
+  static Insertable<MessageMarkRecord> custom({
+    Expression<int>? ownerUin,
+    Expression<String>? sessionKey,
+    Expression<int>? msgUin,
+    Expression<int>? msgTime,
+    Expression<String>? kind,
+    Expression<int>? createdAt,
+    Expression<int>? rowid,
+  }) {
+    return RawValuesInsertable({
+      if (ownerUin != null) 'owner_uin': ownerUin,
+      if (sessionKey != null) 'session_key': sessionKey,
+      if (msgUin != null) 'msg_uin': msgUin,
+      if (msgTime != null) 'msg_time': msgTime,
+      if (kind != null) 'kind': kind,
+      if (createdAt != null) 'created_at': createdAt,
+      if (rowid != null) 'rowid': rowid,
+    });
+  }
+
+  MessageMarksCompanion copyWith({
+    Value<int>? ownerUin,
+    Value<String>? sessionKey,
+    Value<int>? msgUin,
+    Value<int>? msgTime,
+    Value<String>? kind,
+    Value<int>? createdAt,
+    Value<int>? rowid,
+  }) {
+    return MessageMarksCompanion(
+      ownerUin: ownerUin ?? this.ownerUin,
+      sessionKey: sessionKey ?? this.sessionKey,
+      msgUin: msgUin ?? this.msgUin,
+      msgTime: msgTime ?? this.msgTime,
+      kind: kind ?? this.kind,
+      createdAt: createdAt ?? this.createdAt,
+      rowid: rowid ?? this.rowid,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (ownerUin.present) {
+      map['owner_uin'] = Variable<int>(ownerUin.value);
+    }
+    if (sessionKey.present) {
+      map['session_key'] = Variable<String>(sessionKey.value);
+    }
+    if (msgUin.present) {
+      map['msg_uin'] = Variable<int>(msgUin.value);
+    }
+    if (msgTime.present) {
+      map['msg_time'] = Variable<int>(msgTime.value);
+    }
+    if (kind.present) {
+      map['kind'] = Variable<String>(kind.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (rowid.present) {
+      map['rowid'] = Variable<int>(rowid.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('MessageMarksCompanion(')
+          ..write('ownerUin: $ownerUin, ')
+          ..write('sessionKey: $sessionKey, ')
+          ..write('msgUin: $msgUin, ')
+          ..write('msgTime: $msgTime, ')
+          ..write('kind: $kind, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('rowid: $rowid')
+          ..write(')'))
+        .toString();
+  }
+}
+
 class $SettingsTableTable extends SettingsTable
     with TableInfo<$SettingsTableTable, SettingRecord> {
   @override
@@ -2358,6 +2787,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $ChatMessagesTable chatMessages = $ChatMessagesTable(this);
   late final $ChatSessionsTable chatSessions = $ChatSessionsTable(this);
   late final $FriendsTable friends = $FriendsTable(this);
+  late final $MessageMarksTable messageMarks = $MessageMarksTable(this);
   late final $SettingsTableTable settingsTable = $SettingsTableTable(this);
   late final Index idxChatMessagesOwnerSessionTime = Index(
     'idx_chat_messages_owner_session_time',
@@ -2375,6 +2805,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_friends_owner_uin',
     'CREATE INDEX idx_friends_owner_uin ON friends (owner_uin)',
   );
+  late final Index idxMessageMarksOwnerKind = Index(
+    'idx_message_marks_owner_kind',
+    'CREATE INDEX idx_message_marks_owner_kind ON message_marks (owner_uin, kind)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2383,11 +2817,13 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     chatMessages,
     chatSessions,
     friends,
+    messageMarks,
     settingsTable,
     idxChatMessagesOwnerSessionTime,
     idxChatMessagesOwnerTime,
     idxChatSessionsOwnerUin,
     idxFriendsOwnerUin,
+    idxMessageMarksOwnerKind,
   ];
 }
 
@@ -3433,6 +3869,240 @@ typedef $$FriendsTableProcessedTableManager =
       FriendRecord,
       PrefetchHooks Function()
     >;
+typedef $$MessageMarksTableCreateCompanionBuilder =
+    MessageMarksCompanion Function({
+      required int ownerUin,
+      required String sessionKey,
+      required int msgUin,
+      required int msgTime,
+      required String kind,
+      required int createdAt,
+      Value<int> rowid,
+    });
+typedef $$MessageMarksTableUpdateCompanionBuilder =
+    MessageMarksCompanion Function({
+      Value<int> ownerUin,
+      Value<String> sessionKey,
+      Value<int> msgUin,
+      Value<int> msgTime,
+      Value<String> kind,
+      Value<int> createdAt,
+      Value<int> rowid,
+    });
+
+class $$MessageMarksTableFilterComposer
+    extends Composer<_$AppDatabase, $MessageMarksTable> {
+  $$MessageMarksTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get msgUin => $composableBuilder(
+    column: $table.msgUin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get msgTime => $composableBuilder(
+    column: $table.msgTime,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$MessageMarksTableOrderingComposer
+    extends Composer<_$AppDatabase, $MessageMarksTable> {
+  $$MessageMarksTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get msgUin => $composableBuilder(
+    column: $table.msgUin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get msgTime => $composableBuilder(
+    column: $table.msgTime,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get kind => $composableBuilder(
+    column: $table.kind,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$MessageMarksTableAnnotationComposer
+    extends Composer<_$AppDatabase, $MessageMarksTable> {
+  $$MessageMarksTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get ownerUin =>
+      $composableBuilder(column: $table.ownerUin, builder: (column) => column);
+
+  GeneratedColumn<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get msgUin =>
+      $composableBuilder(column: $table.msgUin, builder: (column) => column);
+
+  GeneratedColumn<int> get msgTime =>
+      $composableBuilder(column: $table.msgTime, builder: (column) => column);
+
+  GeneratedColumn<String> get kind =>
+      $composableBuilder(column: $table.kind, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+}
+
+class $$MessageMarksTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $MessageMarksTable,
+          MessageMarkRecord,
+          $$MessageMarksTableFilterComposer,
+          $$MessageMarksTableOrderingComposer,
+          $$MessageMarksTableAnnotationComposer,
+          $$MessageMarksTableCreateCompanionBuilder,
+          $$MessageMarksTableUpdateCompanionBuilder,
+          (
+            MessageMarkRecord,
+            BaseReferences<
+              _$AppDatabase,
+              $MessageMarksTable,
+              MessageMarkRecord
+            >,
+          ),
+          MessageMarkRecord,
+          PrefetchHooks Function()
+        > {
+  $$MessageMarksTableTableManager(_$AppDatabase db, $MessageMarksTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$MessageMarksTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$MessageMarksTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$MessageMarksTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> ownerUin = const Value.absent(),
+                Value<String> sessionKey = const Value.absent(),
+                Value<int> msgUin = const Value.absent(),
+                Value<int> msgTime = const Value.absent(),
+                Value<String> kind = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> rowid = const Value.absent(),
+              }) => MessageMarksCompanion(
+                ownerUin: ownerUin,
+                sessionKey: sessionKey,
+                msgUin: msgUin,
+                msgTime: msgTime,
+                kind: kind,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          createCompanionCallback:
+              ({
+                required int ownerUin,
+                required String sessionKey,
+                required int msgUin,
+                required int msgTime,
+                required String kind,
+                required int createdAt,
+                Value<int> rowid = const Value.absent(),
+              }) => MessageMarksCompanion.insert(
+                ownerUin: ownerUin,
+                sessionKey: sessionKey,
+                msgUin: msgUin,
+                msgTime: msgTime,
+                kind: kind,
+                createdAt: createdAt,
+                rowid: rowid,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$MessageMarksTable, MessageMarkRecord>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $MessageMarksTable,
+                    MessageMarkRecord
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$MessageMarksTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $MessageMarksTable,
+      MessageMarkRecord,
+      $$MessageMarksTableFilterComposer,
+      $$MessageMarksTableOrderingComposer,
+      $$MessageMarksTableAnnotationComposer,
+      $$MessageMarksTableCreateCompanionBuilder,
+      $$MessageMarksTableUpdateCompanionBuilder,
+      (
+        MessageMarkRecord,
+        BaseReferences<_$AppDatabase, $MessageMarksTable, MessageMarkRecord>,
+      ),
+      MessageMarkRecord,
+      PrefetchHooks Function()
+    >;
 typedef $$SettingsTableTableCreateCompanionBuilder =
     SettingsTableCompanion Function({
       required String key,
@@ -3590,6 +4260,8 @@ class $AppDatabaseManager {
       $$ChatSessionsTableTableManager(_db, _db.chatSessions);
   $$FriendsTableTableManager get friends =>
       $$FriendsTableTableManager(_db, _db.friends);
+  $$MessageMarksTableTableManager get messageMarks =>
+      $$MessageMarksTableTableManager(_db, _db.messageMarks);
   $$SettingsTableTableTableManager get settingsTable =>
       $$SettingsTableTableTableManager(_db, _db.settingsTable);
 }

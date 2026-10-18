@@ -1,0 +1,56 @@
+{
+  "@@locale": "zh",
+  "appTitle": "MnChat · 迷你世界外部聊天",
+  "menuCopy": "复制",
+  "menuQuote": "引用",
+  "menuForward": "转发",
+  "menuMultiSelect": "多选",
+  "menuFavorite": "收藏",
+  "menuUnfavorite": "取消收藏",
+  "menuDeleteLocal": "删除（仅本机）",
+  "menuResend": "重新发送",
+  "sheetMessageActions": "消息操作",
+  "favoritesTitle": "收藏",
+  "favoritesEmpty": "还没有收藏的消息",
+  "favoritesEmptyHint": "长按任意消息即可收藏",
+  "searchTitle": "搜索聊天记录",
+  "searchHint": "搜索全部会话",
+  "searchEmpty": "没有匹配的消息",
+  "searchEmptyHint": "换个关键词试试，支持单字搜索",
+  "searchCount": "找到 {count} 条",
+  "@searchCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "searchScopeAll": "全部会话",
+  "selectedCount": "已选 {count} 条",
+  "@selectedCount": {
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "actionForward": "转发",
+  "actionDelete": "删除",
+  "actionFavorite": "收藏",
+  "toastCopied": "已复制",
+  "toastFavorited": "已收藏",
+  "toastUnfavorited": "已取消收藏",
+  "toastDeletedLocal": "已在本机删除",
+  "toastForwarded": "已转发",
+  "commonCancel": "取消",
+  "commonClose": "关闭",
+  "commonConfirm": "确定",
+  "commonUndo": "撤销",
+  "forwardPickSession": "选择要转发到的会话",
+  "forwardNoTarget": "没有可转发的好友或群",
+  "deleteLocalConfirmTitle": "在本机删除消息？",
+  "deleteLocalConfirmBody": "只影响本机记录，对方和其他设备仍能看到这条消息。",
+  "quotePrefix": "引用",
+  "voiceMessage": "语音",
+  "typingIndicator": "对方正在输入…"
+}

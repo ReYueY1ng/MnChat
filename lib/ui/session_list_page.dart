@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:skeletonizer/skeletonizer.dart';
 
 import '../core/models/messages.dart';
 import '../core/services/partner.dart';
@@ -22,15 +23,82 @@ import 'widgets/session_player_info_popup.dart';
 /// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
 /// 群全部保留。顶部只保留常驻搜索框（占位「支持迷你号和昵称查找」），
 /// 在线计数 / 刷新 / 筛选 / 排序等管理操作统一由好友页提供。
+/// 会话列表骨架屏的定位 key（测试用；命名约定见 test/AGENTS.md）。
+const Key sessionsSkeletonKey = ValueKey<String>('sessions_skeleton');
+
+/// 会话列表首屏骨架屏。
+///
+/// 只画占位形状（圆头像 + 两行文字），**不伪造 [ChatSession] 数据** —— 拿假数据
+/// 渲染真卡片会去解析头像/拍档目录，既慢又会在数据未就绪时出错。Skeletonizer
+/// 会把这些占位块涂成骨色，所以占位块本身只需要有尺寸。
+class SessionListSkeleton extends StatelessWidget {
+  const SessionListSkeleton({super.key});
+
+  @override
+  Widget build(BuildContext context) => Skeletonizer(
+    enabled: true,
+    child: ListView.builder(
+      itemCount: 6,
+      physics: const NeverScrollableScrollPhysics(),
+      itemBuilder: (_, _) => const _SessionSkeletonTile(),
+    ),
+  );
+}
+
+/// 单个会话卡片占位。
+class _SessionSkeletonTile extends StatelessWidget {
+  const _SessionSkeletonTile();
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+    padding: EdgeInsets.symmetric(
+      horizontal: AppSpacing.lg,
+      vertical: AppSpacing.md,
+    ),
+    child: Row(
+      children: [
+        CircleAvatar(radius: 20),
+        SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ColoredBox(
+                color: Colors.black,
+                child: SizedBox(height: 12, width: 96),
+              ),
+              SizedBox(height: AppSpacing.sm),
+              ColoredBox(
+                color: Colors.black,
+                child: SizedBox(height: 10, width: 176),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
 class SessionListPage extends ConsumerStatefulWidget {
   final List<ChatSession> sessions;
+
+  /// 会话列表是否处于首屏加载中（还没有任何快照）：为 true 时列表区显示骨架屏。
+  ///
+  /// 只有“从未有过快照”才算 loading —— 已有数据时的增量刷新不该闪骨架。
+  final bool loading;
 
   /// 点击会话卡片的回调；为空时回退到 [activeSessionProvider].open。
   ///
   /// HomeShell 传入以实现"再次点击当前会话关闭聊天"的切换逻辑。
   final ValueChanged<ChatSession>? onOpenChat;
 
-  const SessionListPage({super.key, required this.sessions, this.onOpenChat});
+  const SessionListPage({
+    super.key,
+    required this.sessions,
+    this.onOpenChat,
+    this.loading = false,
+  });
 
   @override
   ConsumerState<SessionListPage> createState() => _SessionListPageState();
@@ -118,7 +186,9 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         children: [
           _buildToolbar(theme),
           Expanded(
-            child: sorted.isEmpty
+            child: widget.loading && sorted.isEmpty
+                ? const SessionListSkeleton(key: sessionsSkeletonKey)
+                : sorted.isEmpty
                 ? _EmptySessions(
                     onAddFriend: () => showAddFriendDialog(context, ref),
                   )

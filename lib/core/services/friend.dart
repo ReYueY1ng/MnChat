@@ -147,7 +147,21 @@ class FriendClient {
   }
 
   /// 发送好友申请 (cmd=apply_friend)。[from] 为来源统计：0=扫码/1=迷你号/5=其他。
-  /// 对齐反编译源码 friendservice.lua ReqAddFriendSync (2171+)，含 token 签名。
+  /// 对齐反编译源码 friendservice.lua ReqAddFriendSync (2282)，含 token 签名。
+  ///
+  /// **`country`/`lang`/`ver` 必须 notAuth**（照发进 query，但不进签名）：
+  /// ReqAddFriendSync 的 addparam 第 4 参对这三个都传了 `true`。
+  ///
+  /// 2026-10-17 真实账号实测（同一链路；des_uin=自己 → 服务端必回 to_self=5，
+  /// 所以探针不会产生真实申请；每臂重复 2 次、间隔 2.2s；另有一条伪造 auth 的
+  /// 对照臂回 2，证明这些 2 确实出自签名校验）：
+  /// - 照原样把三者算进签名 → `{"result":2}`（好友服务码表 2=sign_error），稳定复现；
+  /// - 三者 notAuth、其余不变 → `{"result":5}`，签名通过；
+  /// - 改用 login_v3 的 s2/s2t 仍是 2 → 与 s2 配对无关，就是签名子集；
+  /// - 三者干脆不下发（旧客户端形状）、只去掉 pushchannel/game_session_id/cid、
+  ///   或补上 `rp_ext`，都回 5；
+  /// → 服务端按「收到的参数 − 自己的 notAuth 表」算 md5：**多签名一个键就挂，
+  ///   少发一个键不挂**。
   Future<Map<String, Object?>> applyFriend({
     required Object desUin,
     String from = '5',
@@ -177,11 +191,19 @@ class FriendClient {
       path: kFriendPath,
       cmd: 'apply_friend',
       params: params,
+      // country/lang/ver 进 query 不进签名（见方法文档）。算进签名时服务端回
+      // result:2 = sign_error（好友服务自己的码表，不是网关的 UNKNOW_SERVICE）。
+      notAuthKeys: {'country', 'lang', 'ver'},
     );
     return _get(url);
   }
 
-  /// 通过好友申请 (cmd=accept_apply)。对齐 friendservice.lua ReqAgreeAddFriend (2304+)。
+  /// 通过好友申请 (cmd=accept_apply)。对齐 friendservice.lua ReqAgreeAddFriend (2366+)。
+  ///
+  /// **与 [applyFriend] 相反：`country`/`lang`/`ver` 在这个 cmd 必须参与签名**
+  /// （ReqAgreeAddFriend 的 addparam 没有 notAuth 标记）。2026-10-17 真实账号实测：
+  /// 现状签名 → `{"result":5}`（to_self，业务拒绝，说明签名已过）；把这三个排除
+  /// 出签名 → `{"result":2}`（sign_error）。别照 [applyFriend] 的 notAuth 对称改。
   Future<Map<String, Object?>> acceptApply({required Object desUin}) async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final token = md5Token(now, s2, uin);
@@ -209,7 +231,12 @@ class FriendClient {
     return _get(url);
   }
 
-  /// 拒绝好友申请 (cmd=reject_apply)。对齐 friendservice.lua ReqRejectAddFriend (2406+)。
+  /// 拒绝好友申请 (cmd=reject_apply)。对齐 friendservice.lua ReqRejectAddFriend (2477)。
+  ///
+  /// **`apiid`/`country`/`lang`/`ver` 是 notAuth**（ReqRejectAddFriend 这四个
+  /// addparam 都传了 `nil, true`）。2026-10-17 实测：算进签名时 des_uin=自己 / =1
+  /// 都回 `{"result":2}`（sign_error）；notAuth 后分别回 5（to_self）/ 12（no_apply），
+  /// 签名已过。与 [applyFriend] 同一类缺陷。
   Future<Map<String, Object?>> rejectApply({required Object desUin}) async {
     final params = <String, String>{
       'apiid': apiId,
@@ -227,6 +254,7 @@ class FriendClient {
       path: kFriendPath,
       cmd: 'reject_apply',
       params: params,
+      notAuthKeys: {'apiid', 'country', 'lang', 'ver'},
     );
     return _get(url);
   }
@@ -241,6 +269,14 @@ class FriendClient {
   Future<Map<String, Object?>> removeBlacklist(Object desUin) =>
       _handleBlack(desUin, 0);
 
+  /// `handle_black` 的签名形状。
+  ///
+  /// **`apiid`/`country`/`lang`/`ver` 是 notAuth** —— ReqAddBlacklist (2546) 这四个
+  /// addparam 都带 `nil, true`（ReqRemoveBlacklist (2556) 干脆一个都不发）。
+  /// 2026-10-17 实测（op_type=0、des_uin=1，删一条不可能存在的黑名单项，无副作用）：
+  /// 算进签名 → `{"result":2}`（sign_error）；notAuth 后 → `{"result":0}`。
+  /// 且「带上四者但 notAuth」与「完全不下发」（真实客户端 op_type=0 的形状）算出
+  /// **同一个 auth**，所以两种写法等价。
   Future<Map<String, Object?>> _handleBlack(Object desUin, int opType) async {
     final params = <String, String>{
       'apiid': apiId,
@@ -258,6 +294,7 @@ class FriendClient {
       path: kFriendPath,
       cmd: 'handle_black',
       params: params,
+      notAuthKeys: {'apiid', 'country', 'lang', 'ver'},
     );
     return _get(url);
   }

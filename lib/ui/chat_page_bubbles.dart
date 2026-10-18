@@ -2,6 +2,60 @@ part of 'chat_page.dart';
 
 /// 聊天气泡：把 `#A1xx` 表情码渲染为行内真实游戏贴图（EmoticonImage），
 /// 其余为普通文本；按是否我发出对齐并应用气泡底色。
+/// 解析“引用前缀”：`「昵称：原文」\n正文` → `(引用文案, 正文)`。
+///
+/// 迷你世界协议没有引用字段，所以引用是作为**可读文本**随消息一起发出去的
+/// （官方客户端也读得懂，见 `chat_page.dart` 的 `_quotePrefixFor`）。这里在渲染
+/// 时把它拆成引用块，避免 MNChat 里也只是一行长文本。
+/// 不是这种形态（没前缀、只有引用没正文）→ 返回 null，原样显示。
+(String, String)? parseQuotePrefix(String raw) {
+  if (!raw.startsWith('「')) return null;
+  final end = raw.indexOf('」\n');
+  if (end <= 1) return null;
+  final quoted = raw.substring(1, end).trim();
+  if (quoted.isEmpty) return null;
+  final rest = raw.substring(end + 2);
+  if (rest.trim().isEmpty) return null;
+  return (quoted, rest);
+}
+
+/// 气泡内的引用块（来源：私有信封 `metadata['mn']['text']`）。
+///
+/// 引用是 MNChat ↔ MNChat 才看得到的“漂亮版”；官方客户端看到的是发送时就带上
+/// 的可见引用文案（见 `chat_page.dart` 的 `_quotePrefixFor`），所以两边都不缺信息。
+class _BubbleQuote extends StatelessWidget {
+  final String text;
+
+  const _BubbleQuote({required this.text});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface.withValues(alpha: 0.45),
+        borderRadius: AppRadius.chipR,
+        border: Border(
+          left: BorderSide(color: theme.colorScheme.primary, width: 3),
+        ),
+      ),
+      child: Text(
+        text.length > 80 ? '${text.substring(0, 80)}…' : text,
+        maxLines: 3,
+        overflow: TextOverflow.ellipsis,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
 class _InlineEmojiBubble extends StatelessWidget {
   final Message message;
   final bool isSentByMe;
@@ -27,6 +81,27 @@ class _InlineEmojiBubble extends StatelessWidget {
       text: raw,
       interCode: message.metadata?['interCode']?.toString(),
     );
+    // 引用渲染：我们发出的引用同时带两样东西 —— 可读前缀（官方客户端也能读懂）
+    // 与私有信封里的结构化引用（MNChat 之间）。这里优先用元数据，并把可见前缀
+    // 从正文里剔掉，避免“引用块 + 前缀”重复显示。
+    final mn = message.metadata?['mn'];
+    final mnQuote = mn is Map ? mn['text']?.toString().trim() : null;
+    final parsedQuote = parseQuotePrefix(raw);
+    final quoteText = (mnQuote != null && mnQuote.isNotEmpty)
+        ? mnQuote
+        : (parsedQuote != null && parsedQuote.$1.trim().isNotEmpty
+              ? parsedQuote.$1.trim()
+              : null);
+    final bodyText = parsedQuote != null ? parsedQuote.$2 : raw;
+    // 语音消息（私有信封）：带 url 就渲染成可点的语音条，正文 `[语音] 3″` 只是
+    // 对方客户端与本端命不中时的兜底显示。
+    final mnMap = mn is Map ? mn.cast<String, Object?>() : const <String, Object?>{};
+    final isVoice = mnMap['k'] == 'voice';
+    final voiceUrl = isVoice ? mnMap['url']?.toString() : null;
+    final rawSeconds = mnMap['seconds'];
+    final voiceSeconds = rawSeconds is num
+        ? rawSeconds.toInt()
+        : int.tryParse('$rawSeconds') ?? 0;
     final maxWidth =
         MediaQuery.of(context).size.width * _kBubbleMaxWidthFactor;
     return Align(
@@ -47,8 +122,12 @@ class _InlineEmojiBubble extends StatelessWidget {
                 : CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (quoteText != null && quoteText.isNotEmpty)
+                _BubbleQuote(text: quoteText),
+              if (voiceUrl != null && voiceUrl.isNotEmpty)
+                VoiceMessageBar(url: voiceUrl, seconds: voiceSeconds)
               // 动态/互动表情：渲染成图，不显示低版本提示文案或 JSON 原文。
-              if (emojiCode != null)
+              else if (emojiCode != null)
                 _EmojiMessageBody(code: emojiCode, animate: _animateEmoji)
               else if (isDynamicEmojiHint(raw))
                 // 解不出表情代码（老数据 / 离线历史 / 素材缺失）时，也别把
@@ -60,7 +139,7 @@ class _InlineEmojiBubble extends StatelessWidget {
                 Text.rich(
                   TextSpan(
                     children: buildRichSpans(
-                      raw,
+                      bodyText,
                       context: context,
                       emojiSize: 24,
                       emojiAnimate: _animateEmoji,

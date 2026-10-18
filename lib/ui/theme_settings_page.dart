@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
+import 'widgets/settings_tiles.dart';
 
 /// 主题显示设置页：集中调整主题模式、强调色与聊天字号。
 ///
@@ -52,6 +53,8 @@ class ThemeSettingsPage extends ConsumerWidget {
               _themeModeCard(context, ref, mode),
               const SizedBox(height: AppSpacing.md),
               _accentCard(context, ref, accent),
+              const SizedBox(height: AppSpacing.md),
+              _appearanceCards(context, ref, theme.brightness),
               const SizedBox(height: AppSpacing.md),
               _fontScaleCard(context, ref, fontScale),
               const SizedBox(height: AppSpacing.md),
@@ -246,6 +249,48 @@ class ThemeSettingsPage extends ConsumerWidget {
               : null,
         ),
       ),
+    );
+  }
+
+  /// 外观增强：AMOLED 纯黑（仅深色）/ M3 高对比度 / 跟随系统取色。
+  ///
+  /// 三行都复用 `widgets/settings_tiles.dart` 的 [SettingsSwitchTile]（自带 Card），
+  /// 与其余设置子页保持同一套行样式。
+  Widget _appearanceCards(BuildContext context, WidgetRef ref, Brightness brightness) {
+    final isDark = brightness == Brightness.dark;
+    final amoled = ref.watch(appAmoledProvider);
+    final highContrast = ref.watch(appHighContrastProvider);
+    final dynamicColor = ref.watch(dynamicColorEnabledProvider);
+    return Column(
+      children: [
+        SettingsSwitchTile(
+          icon: Icons.contrast,
+          title: '纯黑模式（AMOLED）',
+          subtitle: isDark
+              ? '深色模式下背景改用纯黑，OLED 屏更省电、观感更沉'
+              : '仅深色模式生效（当前为浅色模式）',
+          value: amoled,
+          onChanged: isDark
+              ? (v) => ref.read(appAmoledProvider.notifier).set(v)
+              : null,
+        ),
+        SettingsSwitchTile(
+          icon: Icons.brightness_high_outlined,
+          title: '高对比度',
+          subtitle: '提高前景 / 背景对比（M3 高对比档），弱视或强光下更易读',
+          value: highContrast,
+          onChanged: (v) =>
+              ref.read(appHighContrastProvider.notifier).set(v),
+        ),
+        SettingsSwitchTile(
+          icon: Icons.auto_awesome_outlined,
+          title: '跟随系统取色',
+          subtitle: 'Android 跟随壁纸取色、Linux 跟随桌面主题色；开启后上面的强调色不再生效',
+          value: dynamicColor,
+          onChanged: (v) =>
+              ref.read(dynamicColorEnabledProvider.notifier).set(v),
+        ),
+      ],
     );
   }
 

@@ -1,5 +1,5 @@
 /// 聊天数据模型 —— 对齐反编译源码调研的字段结构。
-/// (friendservice.lua AddNewGroupChatMessage 归一化字段 + chat_query 三元组)
+/// (friendservice.lua AddNewGroupChatMessage 归一化字段 + chat_query 五元组)
 library;
 
 import 'dart:convert';
@@ -153,11 +153,27 @@ class ChatMessage {
     this.type = ChatMsgType.text,
   });
 
-  /// 从 chat_query 三元组 [who, ts, msg] 构造（buddymanager.lua）。
+  /// 从 chat_query 五元组 `[who, ts, msg, extendB64, "0"]` 构造（buddymanager.lua）。
+  ///
+  /// 第 4 个元素就是 `extend_data` —— **服务端在离线队列里也会带上**（仓库
+  /// 2026-10-01 真实账号实测；2026-10-17 再次验证）。第 5 个是保留位（实测恒为 "0"）。
+  ///
+  /// 早期版本只读前三个，于是**离线拉回的消息把 extend_data 丢了**：动态/互动
+  /// 表情退化成「请升级到最新版本查看」、语音/引用的元数据消失 —— 而同一账号
+  /// 在线时（走 live push）却是好的，很容易被误读成「服务端不保留」。
   factory ChatMessage.fromChatQueryTriple(List<dynamic> triple) {
     final who = triple.isNotEmpty ? (triple[0] as num).toInt() : 0;
     final ts = triple.length > 1 ? (triple[1] as num).toInt() : 0;
     final msg = triple.length > 2 ? triple[2]?.toString() ?? '' : '';
+    final rawExt = triple.length > 3 ? triple[3] : null;
+    // 该位在本协议里恒为 base64 字符串；非字符串一律当没带（脏数据不抛）。
+    final ext = rawExt is String ? rawExt.trim() : '';
+    // 动态/互动表情的真身在 `extend_data.interCode` 里 —— 离线队列同样带，
+    // 顺手解出来，免得离线拉回的消息渲染成「请升级到最新版本查看」
+    //（push_dispatcher 在推送路径上也是这么解的）。
+    final inter = ext.isEmpty ? null : decodeChatExtendData(ext)?['interCode'];
+    final interCode =
+        inter is String && inter.trim().isNotEmpty ? inter.trim() : null;
     final isSys = who == 1000;
     return ChatMessage(
       uin: who,
@@ -165,6 +181,8 @@ class ChatMessage {
       time: ts,
       isSystemMsg: isSys,
       type: isSys ? ChatMsgType.system : ChatMsgType.text,
+      extendData: ext.isEmpty ? null : ext,
+      interCode: interCode,
     );
   }
 

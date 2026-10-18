@@ -44,6 +44,22 @@ abstract final class AppColors {
   /// M3 没有 success / warning 角色，用独立 seed 派生 tonal 语义色。
   static const Color successSeed = Color(0xFF4CAF50);
   static const Color warningSeed = Color(0xFFFFA000);
+
+  /// AMOLED 纯黑表面 —— 深色模式下用它替换 `surface` 与整个 `surfaceContainer*`
+  /// 家族；OLED 屏纯黑像素不发光，省电且观感更沉。
+  static const Color amoledBlack = Color(0xFF000000);
+}
+
+/// M3 `contrastLevel` 档位 —— 传 `0.0` 时与旧输出逐位一致。
+abstract final class AppContrast {
+  /// 标准对比度（默认，与旧输出一致）。
+  static const double standard = 0.0;
+
+  /// 中等对比度（无障碍大字号下的折中档）。
+  static const double medium = 0.5;
+
+  /// 高对比度（弱视 / 强光环境）。
+  static const double high = 1.0;
 }
 
 /// M3 语义色扩展 —— success / warning 在 M3 ColorScheme 里没有对应角色，

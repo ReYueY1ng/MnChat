@@ -48,6 +48,19 @@ class ChatBackgroundService : Service() {
         /** 消息通知的聚合组名（同组的多会话通知在通知栏折叠成一堆）。 */
         private const val GROUP_KEY = "mnchat.messages"
 
+        /** 通知渠道分组：好友消息 / 群聊消息（设置里按组折叠，便于分别静音）。 */
+        private const val CHANNEL_GROUP_FRIEND = "mnchat.friends"
+        private const val CHANNEL_GROUP_CHAT = "mnchat.groups"
+
+        /** 聚合摘要通知 id（负数，避开常驻 1 与 `sessionKey.hashCode()`）。 */
+        private const val SUMMARY_NOTIFICATION_ID = -2
+
+        /** 摘要通知在同一组的最多行数。 */
+        private const val SUMMARY_MAX_LINES = 5
+
+        /** 当前有待读通知的会话：sessionKey → 标题。聚合摘要据此生成。 */
+        private val pendingSessions = linkedMapOf<String, String>()
+
         /** 已弹出的消息通知 id（用于「全部清除」；不含常驻通知）。 */
         private val messageIds = mutableSetOf<Int>()
 
@@ -122,18 +135,34 @@ class ChatBackgroundService : Service() {
             }
         }
 
-        /** 建好两个渠道（幂等；API < 26 无渠道概念）。 */
+        /** 建好渠道与渠道分组（幂等；API < 26 无渠道概念）。 */
         fun createChannels(context: Context) {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
             try {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
                     as NotificationManager
+                // 渠道分组：好友 / 群聊分开，用户可整组静音。
+                nm.createNotificationChannelGroup(
+                    android.app.NotificationChannelGroup(
+                        CHANNEL_GROUP_FRIEND,
+                        "好友消息"
+                    )
+                )
+                nm.createNotificationChannelGroup(
+                    android.app.NotificationChannelGroup(
+                        CHANNEL_GROUP_CHAT,
+                        "群聊消息"
+                    )
+                )
                 nm.createNotificationChannel(
                     NotificationChannel(
                         CHANNEL_MESSAGES,
                         "聊天消息",
                         NotificationManager.IMPORTANCE_HIGH
-                    ).apply { description = "好友 / 群聊新消息" }
+                    ).apply {
+                        description = "好友 / 群聊新消息"
+                        group = CHANNEL_GROUP_FRIEND
+                    }
                 )
                 nm.createNotificationChannel(
                     NotificationChannel(
@@ -167,26 +196,36 @@ class ChatBackgroundService : Service() {
          *
          * 两者都开时直接用默认消息渠道，保持与旧版本完全一致的行为。
          */
+        /**
+         * 按「好友 / 群聊 × 提示音 / 震动」分级选渠道（分级渠道按需创建）。
+         *
+         * 群聊渠道挂在 [CHANNEL_GROUP_CHAT] 下、好友挂在 [CHANNEL_GROUP_FRIEND]
+         * 下，用户在系统设置里可以整组静音某一类。
+         */
         private fun messageChannel(
             context: Context,
             sound: Boolean,
-            vibrate: Boolean
+            vibrate: Boolean,
+            group: Boolean
         ): String {
-            if (sound && vibrate) return CHANNEL_MESSAGES
-            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return CHANNEL_MESSAGES
+            val base = if (group) "${CHANNEL_MESSAGES}_group" else CHANNEL_MESSAGES
+            if (sound && vibrate && !group) return base
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return base
             val id = when {
-                !sound && !vibrate -> "${CHANNEL_MESSAGES}_silent"
-                !sound -> "${CHANNEL_MESSAGES}_nosound"
-                else -> "${CHANNEL_MESSAGES}_novibrate"
+                !sound && !vibrate -> "${base}_silent"
+                !sound -> "${base}_nosound"
+                !vibrate -> "${base}_novibrate"
+                else -> base
             }
             try {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
                     as NotificationManager
                 if (nm.getNotificationChannel(id) == null) {
+                    val kind = if (group) "群聊消息" else "聊天消息"
                     val name = when {
-                        !sound && !vibrate -> "聊天消息（静音）"
-                        !sound -> "聊天消息（无声）"
-                        else -> "聊天消息（不震动）"
+                        !sound && !vibrate -> "$kind（静音）"
+                        !sound -> "$kind（无声）"
+                        else -> "$kind（不震动）"
                     }
                     val ch = NotificationChannel(
                         id,
@@ -194,6 +233,7 @@ class ChatBackgroundService : Service() {
                         NotificationManager.IMPORTANCE_HIGH
                     ).apply {
                         description = "好友 / 群聊新消息"
+                        this.group = if (group) CHANNEL_GROUP_CHAT else CHANNEL_GROUP_FRIEND
                         if (!sound) setSound(null, null)
                         enableVibration(vibrate)
                     }
@@ -201,7 +241,7 @@ class ChatBackgroundService : Service() {
                 }
             } catch (e: Exception) {
                 Log.w(TAG, "创建消息渠道失败: $e")
-                return CHANNEL_MESSAGES
+                return base
             }
             return id
         }
@@ -272,7 +312,7 @@ class ChatBackgroundService : Service() {
                 val nm = context.getSystemService(Context.NOTIFICATION_SERVICE)
                     as NotificationManager
                 val id = messageIdFor(sessionKey)
-                val nb = builder(context, messageChannel(context, sound, vibrate))
+                val nb = builder(context, messageChannel(context, sound, vibrate, group))
                     .setSmallIcon(android.R.drawable.stat_notify_chat)
                     .setContentTitle(title)
                     .setContentText(text)
@@ -280,23 +320,94 @@ class ChatBackgroundService : Service() {
                     .setGroup(GROUP_KEY)
                 if (icon != null) nb.setLargeIcon(icon)
                 launchPending(context, sessionKey, id)?.let { nb.setContentIntent(it) }
-                if (lines.size > 1) {
-                    val style = Notification.InboxStyle().setBigContentTitle(title)
-                    lines.take(5).forEach { style.addLine(it.take(80)) }
-                    nb.setStyle(style)
-                } else {
-                    nb.setStyle(Notification.BigTextStyle().bigText(text))
-                }
+                nb.setStyle(messageStyle(title, lines, text))
                 nm.notify(id, nb.build())
                 synchronized(messageIds) { messageIds.add(id) }
-                if (group) {
-                    // 群聊与好友分开成两个通知栏小组，便于折叠（失败不影响通知本身）
-                    nm.createNotificationChannelGroup(
-                        android.app.NotificationChannelGroup("mnchat.groups", "群聊")
-                    )
-                }
+                synchronized(pendingSessions) { pendingSessions[sessionKey] = title }
+                postSummary(context, nm)
             } catch (e: Exception) {
                 Log.w(TAG, "弹出通知失败: $e")
+            }
+        }
+
+        /**
+         * 会话通知的样式。
+         *
+         * API 28+ 用 [Notification.MessagingStyle]：系统按「对话」渲染，每条消息
+         * 独立成行、支持气泡与内联回复（机器人 / 对话通知）。更低版本退回
+         * InboxStyle（多行）/ BigTextStyle（单行）—— `Person` 与基于 `Person` 的
+         * MessagingStyle 重载都是 API 28 起才有，不降级就得用已废弃的字符串重载。
+         *
+         * [lines] 是同一会话最近若干条正文（最新在最后）。
+         */
+        private fun messageStyle(
+            title: String,
+            lines: List<String>,
+            text: String
+        ): Notification.Style {
+            val body = if (lines.isEmpty()) listOf(text) else lines
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val style = Notification.MessagingStyle(
+                    android.app.Person.Builder().setName("我").build()
+                ).setConversationTitle(title)
+                val peer = android.app.Person.Builder().setName(title).build()
+                val now = System.currentTimeMillis()
+                body.takeLast(SUMMARY_MAX_LINES).forEach { line ->
+                    style.addMessage(line.take(200), now, peer)
+                }
+                return style
+            }
+            if (body.size > 1) {
+                val style = Notification.InboxStyle().setBigContentTitle(title)
+                body.take(SUMMARY_MAX_LINES).forEach { style.addLine(it.take(80)) }
+                return style
+            }
+            return Notification.BigTextStyle().bigText(text)
+        }
+
+        /**
+         * 跨会话聚合摘要。
+         *
+         * 多个会话同时在通知栏时补发一条 `setGroupSummary(true)` 的通知，系统会把
+         * 同组的多条会话折叠成一行「N 个会话有新消息」；只剩一个会话时撤销摘要
+         * （否则单条消息会被摘要盖住）。
+         */
+        private fun postSummary(context: Context, nm: NotificationManager) {
+            val entries = synchronized(pendingSessions) { pendingSessions.toList() }
+            if (entries.size < 2) {
+                nm.cancel(SUMMARY_NOTIFICATION_ID)
+                return
+            }
+            try {
+                val title = "${entries.size} 个会话有新消息"
+                val nb = builder(context, CHANNEL_MESSAGES)
+                    .setSmallIcon(android.R.drawable.stat_notify_chat)
+                    .setContentTitle(title)
+                    .setContentText(
+                        entries.take(SUMMARY_MAX_LINES).joinToString("、") { it.second }
+                    )
+                    .setAutoCancel(true)
+                    .setGroup(GROUP_KEY)
+                    .setGroupSummary(true)
+                val style = Notification.InboxStyle().setBigContentTitle(title)
+                entries.take(SUMMARY_MAX_LINES).forEach { style.addLine(it.second) }
+                nb.setStyle(style)
+                val launch =
+                    context.packageManager.getLaunchIntentForPackage(context.packageName)
+                if (launch != null) {
+                    nb.setContentIntent(
+                        PendingIntent.getActivity(
+                            context,
+                            0,
+                            launch,
+                            PendingIntent.FLAG_UPDATE_CURRENT or
+                                PendingIntent.FLAG_IMMUTABLE
+                        )
+                    )
+                }
+                nm.notify(SUMMARY_NOTIFICATION_ID, nb.build())
+            } catch (e: Exception) {
+                Log.w(TAG, "聚合摘要失败: $e")
             }
         }
 
@@ -355,6 +466,9 @@ class ChatBackgroundService : Service() {
                 val id = messageIdFor(sessionKey)
                 nm.cancel(id)
                 synchronized(messageIds) { messageIds.remove(id) }
+                // 会话已读：把它从聚合摘要里拿掉，必要时撤掉摘要本身。
+                synchronized(pendingSessions) { pendingSessions.remove(sessionKey) }
+                postSummary(context, nm)
             } catch (e: Exception) {
                 Log.w(TAG, "取消通知失败: $e")
             }
@@ -369,6 +483,8 @@ class ChatBackgroundService : Service() {
                     messageIds.forEach { nm.cancel(it) }
                     messageIds.clear()
                 }
+                synchronized(pendingSessions) { pendingSessions.clear() }
+                nm.cancel(SUMMARY_NOTIFICATION_ID)
             } catch (e: Exception) {
                 Log.w(TAG, "清空通知失败: $e")
             }

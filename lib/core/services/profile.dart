@@ -13,11 +13,13 @@ import '../models/skin_head_catalog.dart' show headIconAsset;
 import '../net/config.dart'
     show kApiId, kClientVersionStr, kDefaultBase, kDefaultUrls;
 import '../net/http_factory.dart';
-import '../net/photo_upload.dart' show uploadPresignedFile;
+import '../net/photo_upload.dart'
+    show kGatewayRetryAttempts, kGatewayRetryGap, uploadPresignedFile;
 import '../protocol/lua_table.dart' show decodeHttpResponse;
 import 'gateway.dart' show buildMiniwParamMd5Url;
 import 'request_errors.dart' show reportIfFailed;
 import '../utils/request_cache.dart' show RequestCache;
+import '../utils/log.dart' show log;
 
 /// 资料接口路径。
 const String kProfilePath = 'miniw/profile/';
@@ -840,6 +842,10 @@ class ProfileClient {
   /// 注意：游戏走 `ns_http.func.rpc_string`，它会再过一遍 `url_addParams`
   /// （`http.lua:891`）—— 所以真实请求必须带 `uin/apiid/ver/country/lang`。
   /// 实测缺这些参数时服务端回 **空 body**（http 200），补上才回 `ok:<url>`。
+  ///
+  /// `/miniw/profile` 是**全应用最挤的路径**（资料/头像/中心页都在打），网关按账号
+  /// 排队时它会回 `code=9/23` 而不是 `ok:` —— 实测就卡在这里导致发语音“点了没反应”。
+  /// 因此这里隔一个间隔重试（GET 幂等，重发安全）。
   Future<String?> uploadPrePhoto() async {
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
     final base = baseUrl.endsWith('/')
@@ -849,12 +855,23 @@ class ProfileClient {
     final url = '$base/miniw/profile?act=upload_pre_photo&uin=$uin'
         '&apiid=$kApiId&ver=$kClientVersionStr&country=CN&lang=0&$sign';
 
-    final resp = await _dio.get(url);
-    final text = resp.data is String ? resp.data as String : '${resp.data}';
-    final t = text.trim();
-    if (!t.startsWith('ok:')) return null;
-    final u = t.substring(3).trim();
-    return u.isEmpty ? null : u;
+    for (var attempt = 0;; attempt++) {
+      try {
+        final resp = await _dio.get(url);
+        final text = resp.data is String ? resp.data as String : '${resp.data}';
+        final t = text.trim();
+        if (t.startsWith('ok:')) {
+          final u = t.substring(3).trim();
+          return u.isEmpty ? null : u;
+        }
+        log.warn('upload_pre_photo 非 ok: ${t.length > 80 ? t.substring(0, 80) : t}',
+            tag: 'Upload');
+      } on DioException catch (e) {
+        log.warn('upload_pre_photo 异常: ${e.message}', tag: 'Upload');
+      }
+      if (attempt >= kGatewayRetryAttempts) return null;
+      await Future<void>.delayed(kGatewayRetryGap);
+    }
   }
 
   /// 上传 DIY 头像图片字节到 [uploadUrl]（[uploadPrePhoto] 的返回值）。

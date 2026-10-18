@@ -1,8 +1,12 @@
 import 'dart:async';
 
 import 'package:material_ui/material_ui.dart';
+import 'package:media_kit/media_kit.dart' show MediaKit;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:app_links/app_links.dart';
+import 'package:quick_actions/quick_actions.dart';
 
+import 'core/models/deep_link.dart';
 import 'core/models/messages.dart';
 import 'core/models/mention.dart' show textMentions;
 import 'core/models/nickname.dart' show plainNickname;
@@ -17,18 +21,30 @@ import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
 import 'core/utils/log.dart';
+import 'l10n/app_localizations.dart';
 import 'package:window_manager/window_manager.dart';
 import 'state/providers.dart';
 import 'ui/home_shell.dart' show MainShell;
+import 'ui/chat_search_page.dart' show ChatSearchPage;
+import 'ui/favorites_page.dart' show FavoritesPage;
 import 'ui/lock_page.dart';
 import 'ui/login_page.dart';
+import 'ui/partners_page.dart' show PartnersPage;
+import 'ui/video_player_page.dart' show VideoPlayerPage;
 import 'ui/theme/app_theme.dart';
+import 'ui/theme/app_tokens.dart' show AppContrast, isDesktopPlatform;
 
 /// 本模块日志标签。
 const String _logTag = 'Main';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // media_kit（视频播放，深链 `mnchat://video?url=…`）需要在建 Player 前初始化
+  // 原生内核；不初始化会在打开视频时直接报错。
+  MediaKit.ensureInitialized();
+  // 桌面端深链：命令行参数（如 `mnchat://friend/123`）。Linux/Windows 的 Flutter
+  // runner 会把 argv 交给入口函数，无需操作系统级协议注册即可打开指定会话。
+  final initialLink = parseDeepLink(args.isEmpty ? null : args.first);
   final db = AppDatabase(openAppDatabaseConnection());
   // 托盘/窗口初始化必须在 runApp **之后**、且不能 await：
   // 它要走平台通道（window_manager）与根 bundle（图标解码），这两者在
@@ -38,7 +54,7 @@ Future<void> main() async {
   runApp(
     ProviderScope(
       overrides: [databaseProvider.overrideWithValue(db)],
-      child: const MnChatApp(),
+      child: MnChatApp(initialLink: initialLink),
     ),
   );
   unawaited(_initDesktopShell(db));
@@ -127,7 +143,10 @@ class _WindowSizeKeeper with WindowListener {
 }
 
 class MnChatApp extends ConsumerStatefulWidget {
-  const MnChatApp({super.key});
+  const MnChatApp({super.key, this.initialLink});
+
+  /// 冷启动深链（桌面命令行参数，或移动端的初始 intent/短链接）。
+  final DeepLink? initialLink;
 
   @override
   ConsumerState<MnChatApp> createState() => _MnChatAppState();
@@ -168,6 +187,16 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 登录前点到通知：先记住 key，登录成功后补开。
   String? _pendingTapSessionKey;
 
+  /// 深链路由用的 Navigator key（固定页面靠它 push；会话不压栈，仍走
+  /// `activeSessionProvider`）。
+  final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
+
+  /// 待落地的深链（登录成功前先记下）。
+  DeepLink? _pendingLink;
+
+  /// 移动端深链订阅（桌面端为空）。
+  StreamSubscription<Uri>? _linkSub;
+
   /// 通知权限是否已申请过（只申请一次）。
   bool _notifyPermissionAsked = false;
 
@@ -193,6 +222,10 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         if (!next) _locked = false;
       });
     });
+    // 冷启动深链（桌面命令行 / 移动端 intent）与快捷方式：与通知点击共用同一条导航通道。
+    _pendingLink = widget.initialLink;
+    unawaited(_initDeepLinks());
+    unawaited(_initQuickActions());
     _prepareAutoLogin();
   }
 
@@ -246,6 +279,99 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     ref.read(activeSessionProvider.notifier).open(type, id);
   }
 
+  /// 深链初始化：桌面端只认命令行参数（见 [main]），移动端走 app_links。
+  ///
+  /// 桌面端刻意不调 app_links：Linux/Windows 上它没有可用实现，调用会抛；
+  /// 而命令行参数已经覆盖了“从终端/浏览器打开”的场景。
+  Future<void> _initDeepLinks() async {
+    if (isDesktopPlatform) return;
+    try {
+      final links = AppLinks();
+      final initial = await links.getInitialLink();
+      if (initial != null) _handleDeepLink(initial.toString());
+      _linkSub = links.uriLinkStream.listen(
+        (uri) => _handleDeepLink(uri.toString()),
+        onError: (Object e) => log.warn('深链条出错（已忽略）：$e', tag: _logTag),
+      );
+    } catch (e) {
+      log.warn('深链初始化失败（已忽略）：$e', tag: _logTag);
+    }
+  }
+
+  /// Android 桌面图标长按快捷方式 —— 类型就是深链字符串，与深链同一套路由。
+  Future<void> _initQuickActions() async {
+    if (isDesktopPlatform) return;
+    try {
+      const quickActions = QuickActions();
+      await quickActions.setShortcutItems(const <ShortcutItem>[
+        ShortcutItem(type: 'mnchat://search', localizedTitle: '搜索聊天记录'),
+        ShortcutItem(type: 'mnchat://favorites', localizedTitle: '收藏'),
+        ShortcutItem(type: 'mnchat://partners', localizedTitle: '我的搭子'),
+      ]);
+      // 快捷方式是回调式 API（不是 Stream）：直接接到同一套深链处理上。
+      await quickActions.initialize(_handleDeepLink);
+    } catch (e) {
+      log.warn('快捷方式初始化失败（已忽略）：$e', tag: _logTag);
+    }
+  }
+
+  /// 收到一条深链：先记下再尝试落地（未登录时留给 [_afterLogin]）。
+  void _handleDeepLink(String url) {
+    final link = parseDeepLink(url);
+    if (link == null) return;
+    _pendingLink = link;
+    _applyPendingLink();
+  }
+
+  /// 落地待处理的深链：会话交给 [_openSessionFromKey]（与通知点击完全同一条路，
+  /// 不新开页面栈），固定页面用 [_navKey] push。
+  void _applyPendingLink() {
+    final link = _pendingLink;
+    if (link == null || !mounted) return;
+    // 登录态就绪前不动：会话要等服务端会话列表，提前打开会被会话加载覆盖。
+    if (!(ref.read(authProvider).isLoggedIn || _autoLoginAvailable)) return;
+    _pendingLink = null;
+    if (link.isSession) {
+      _openSessionFromKey(link.sessionKey!);
+      return;
+    }
+    final view = link.view;
+    if (link.isVideo) {
+      final source = link.videoUrl!;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final nav = _navKey.currentState;
+        if (nav == null) {
+          _pendingLink = link;
+          return;
+        }
+        nav.push(
+          MaterialPageRoute<void>(
+            builder: (_) => VideoPlayerPage(source: source),
+          ),
+        );
+      });
+      return;
+    }
+    if (view == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final nav = _navKey.currentState;
+      if (nav == null) {
+        // 首帧还没建好 Navigator：留回待处理，下一次（登录/新深链）再试。
+        _pendingLink = link;
+        return;
+      }
+      nav.push(
+        MaterialPageRoute<void>(
+          builder: (_) => switch (view) {
+            DeepLinkView.favorites => const FavoritesPage(),
+            DeepLinkView.search => const ChatSearchPage(),
+            DeepLinkView.partners => const PartnersPage(),
+          },
+        ),
+      );
+    });
+  }
+
   /// 登录成功后的通知相关动作：申请权限 + 补开「登录前点击的通知」。
   void _afterLogin() {
     if (!_notifyPermissionAsked) {
@@ -260,6 +386,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
         (_) => _openSessionFromKey(pending),
       );
     }
+    // 登录前到的深链 / 快捷方式在这里补做。
+    _applyPendingLink();
   }
 
   /// 是否处于「用户看不到界面」的状态。
@@ -455,6 +583,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     _notifySub = null;
     _tapSub?.cancel();
     _tapSub = null;
+    _linkSub?.cancel();
+    _linkSub = null;
     _notifications?.dispose();
     _notifications = null;
     super.dispose();
@@ -486,16 +616,51 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     final auth = ref.watch(authProvider);
     final themeMode = ref.watch(appThemeModeProvider);
     final accent = ref.watch(accentColorProvider);
+    // 主题收口（AMOLED / 高对比 / 动态取色）：关掉或平台不支持时
+    // dynamicSeed 为 null → 回落到用户手选的强调色，输出与改动前逐位一致。
+    final dynamicSeed = ref.watch(dynamicColorSeedProvider).asData?.value;
+    final amoled = ref.watch(appAmoledProvider);
+    final contrast = ref.watch(appHighContrastProvider)
+        ? AppContrast.high
+        : AppContrast.standard;
     final loggedIn = auth.isLoggedIn || _autoLoginAvailable;
     final showLock = loggedIn && _lockEnabled && _locked;
 
     return MaterialApp(
-      title: 'MnChat · 迷你世界外部聊天',
+      // 窗口/任务切换器标题取自 ARB（l10n）——3.47 起用 onGenerateTitle，
+      // 因为 title 无法在无 context 时本地化。
+      onGenerateTitle: (context) => AppLocalizations.of(context).appTitle,
       debugShowCheckedModeBanner: false,
+      // 深链要 push 固定页面（收藏/搜索/搭子）：这些是真正的页面路由。
+      // 会话刻意不进路由栈，仍由 activeSessionProvider + MainShell 反应。
+      navigatorKey: _navKey,
+      // 状态恢复作用域：MainShell 用它记住“上次打开的会话”。
+      restorationScopeId: 'mnchat',
+      // 本地化：**必须用 material_ui 的 GlobalMaterialLocalizations.delegates**。
+      // Material/Cupertino 从 SDK 拆出后它们各自一套类型：挂
+      // flutter_localizations 的 delegate 不会让 material_ui 的 MaterialApp
+      // 找到自己的 MaterialLocalizations（文本框长按菜单、日期选择器、语义朗读
+      // 都会报「No MaterialLocalizations found」或回退英文）。
+      // 这一个常量已覆盖 Material + Cupertino + Widgets 三套。
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        AppLocalizations.delegate,
+        ...GlobalMaterialLocalizations.delegates,
+      ],
+      supportedLocales: AppLocalizations.supportedLocales,
       // 关闭 M3 的「拉伸」过滚指示器（见 [AppScrollBehavior]）。
       scrollBehavior: const AppScrollBehavior(),
-      theme: buildAppTheme(Brightness.light, seedColor: accent),
-      darkTheme: buildAppTheme(Brightness.dark, seedColor: accent),
+      theme: buildAppTheme(
+        Brightness.light,
+        seedColor: dynamicSeed ?? accent,
+        amoled: amoled,
+        contrastLevel: contrast,
+      ),
+      darkTheme: buildAppTheme(
+        Brightness.dark,
+        seedColor: dynamicSeed ?? accent,
+        amoled: amoled,
+        contrastLevel: contrast,
+      ),
       themeMode: switch (themeMode) {
         AppThemeMode.system => ThemeMode.system,
         AppThemeMode.light => ThemeMode.light,

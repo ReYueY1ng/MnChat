@@ -129,6 +129,7 @@ class NativeBridge {
   }
 
   /// 把应用隐藏到后台（不退出，前台服务继续收推送）。
+  /// 返回键 → 隐藏到后台（与原生侧 `moveTaskToBack` 对应）。
   static Future<bool> moveTaskToBack() async {
     try {
       return await _channel.invokeMethod<bool>('moveTaskToBack') ?? false;

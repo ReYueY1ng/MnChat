@@ -386,6 +386,78 @@ class AccentColorNotifier extends Notifier<Color> {
   }
 }
 
+/// 主题外观增强的三个开关（AMOLED 纯黑 / M3 高对比度 / 跟随系统取色）的持久化 key。
+///
+/// `SettingsKeys` 定义在 `core/storage/settings_store.dart`，本批次不改 `lib/core/**`，
+/// 因此在这里就近定义同风格的 key 常量（读写仍走同一个 [SettingsStore]）。
+abstract final class ThemeSettingsKeys {
+  static const String amoled = 'theme_amoled'; // AMOLED 纯黑模式 '1'/'0'
+  static const String highContrast = 'theme_high_contrast'; // M3 高对比度 '1'/'0'
+  static const String dynamicColor = 'theme_dynamic_color'; // 跟随系统取色 '1'/'0'
+}
+
+/// AMOLED 纯黑模式：深色模式下把表面色族换成纯黑（OLED 省电、观感更沉）。
+/// 仅深色模式生效；默认关闭，与旧输出完全一致。
+final appAmoledProvider = NotifierProvider<AppAmoledNotifier, bool>(
+  AppAmoledNotifier.new,
+);
+
+class AppAmoledNotifier extends _BoolSettingNotifier {
+  @override
+  String get key => ThemeSettingsKeys.amoled;
+  @override
+  bool get fallback => false;
+}
+
+/// M3 高对比度：开启后用 `contrastLevel: 1.0` 生成配色（弱视 / 强光下更易读）。
+/// 默认关闭 ⇒ `contrastLevel: 0.0`，与旧输出完全一致。
+final appHighContrastProvider = NotifierProvider<AppHighContrastNotifier, bool>(
+  AppHighContrastNotifier.new,
+);
+
+class AppHighContrastNotifier extends _BoolSettingNotifier {
+  @override
+  String get key => ThemeSettingsKeys.highContrast;
+  @override
+  bool get fallback => false;
+}
+
+/// 跟随系统取色（Material You）：开启后 Android 用壁纸取色、Linux 桌面用
+/// XDG/GTK 主题色，并覆盖用户在设置页手选的强调色。默认关闭。
+final dynamicColorEnabledProvider =
+    NotifierProvider<DynamicColorEnabledNotifier, bool>(
+      DynamicColorEnabledNotifier.new,
+    );
+
+class DynamicColorEnabledNotifier extends _BoolSettingNotifier {
+  @override
+  String get key => ThemeSettingsKeys.dynamicColor;
+  @override
+  bool get fallback => false;
+}
+
+/// 系统动态色的强调色 seed —— 异步取平台实现：
+/// Android 用壁纸派生的 `CorePalette` 主色（tone 40），
+/// Linux / macOS / Windows 用系统强调色（XDG Desktop Portal / GTK `@theme_selected_bg_color`）。
+///
+/// - 关闭「跟随系统取色」时**不触碰平台通道**，直接返回 null —— 用户手选的强调色继续生效；
+/// - 平台不支持（插件用 `OptionalMethodChannel`，未实现时返回 null）或读取异常
+///   也返回 null，调用方据此回退，不把异常抛给 UI（widget 测试环境同样安全）。
+final dynamicColorSeedProvider = FutureProvider<Color?>((ref) async {
+  if (!ref.watch(dynamicColorEnabledProvider)) return null;
+  try {
+    final palette = await DynamicColorPlugin.getCorePalette();
+    if (palette != null) return Color(palette.primary.get(40));
+  } catch (_) {
+    // 平台实现异常：继续尝试系统强调色
+  }
+  try {
+    return await DynamicColorPlugin.getAccentColor();
+  } catch (_) {
+    return null;
+  }
+});
+
 /// 免打扰时段：起止为当天分钟数；[start] > [end] 表示跨午夜。
 class DndWindow {
   final int start;

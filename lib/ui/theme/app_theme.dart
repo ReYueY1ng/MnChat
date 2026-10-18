@@ -1,3 +1,4 @@
+import 'package:animations/animations.dart';
 import 'package:material_ui/material_ui.dart';
 
 import 'app_tokens.dart';
@@ -29,25 +30,75 @@ class AppScrollBehavior extends MaterialScrollBehavior {
 /// - M3 没有 success / warning 角色，由 [AppSemanticColors] ThemeExtension
 ///   从各自 seed 派生 tonal 语义色（随 brightness 变化）；
 /// - 其余表面角色（surfaceContainer* 等）全部交给 `fromSeed` 生成。
-/// [seedColor] 为主题强调色（默认 [AppColors.brandSeed]）；由设置页选择。
-ThemeData buildAppTheme(Brightness brightness, {Color? seedColor}) {
+///
+/// 参数：
+/// - [seedColor] 主题强调色（默认 [AppColors.brandSeed]）；由设置页选择，或在
+///   「跟随系统取色」开启时由 `dynamicColorSeedProvider` 提供系统色（动态色作为
+///   seed 再经 `fromSeed` 派生，即 M3 的 harmonize 语义：系统色胜出）。
+/// - [contrastLevel] M3 对比度档位（[AppContrast]）；默认 [AppContrast.standard]
+///   即 `0.0`，与旧输出逐位一致。
+/// - [amoled] 纯黑模式：**仅深色模式生效**，把 `surface` 与整个 `surfaceContainer*`
+///   家族压到 [AppColors.amoledBlack]，同时把 `surfaceTint` 置透明 —— 否则 M3 会按
+///   高度叠加 primary 色调，纯黑会被染成灰色（`background` 已废弃、等价于 `surface`，
+///   不再单独设置）。
+///
+/// 手选的强调色（`SettingsKeys.seedColor`）只在「跟随系统取色」关闭时生效。
+ThemeData buildAppTheme(
+  Brightness brightness, {
+  Color? seedColor,
+  bool amoled = false,
+  double contrastLevel = AppContrast.standard,
+}) {
   final isDark = brightness == Brightness.dark;
 
-  final scheme =
+  var scheme =
       ColorScheme.fromSeed(
         seedColor: seedColor ?? AppColors.brandSeed,
         brightness: brightness,
         dynamicSchemeVariant: DynamicSchemeVariant.tonalSpot,
+        contrastLevel: contrastLevel,
       ).copyWith(
         outlineVariant: isDark
             ? const Color(0x1FFFFFFF)
             : const Color(0x1F000000),
       );
 
+  if (amoled && isDark) {
+    scheme = scheme.copyWith(
+      surface: AppColors.amoledBlack,
+      surfaceDim: AppColors.amoledBlack,
+      surfaceContainerLowest: AppColors.amoledBlack,
+      surfaceContainerLow: AppColors.amoledBlack,
+      surfaceContainer: AppColors.amoledBlack,
+      surfaceContainerHigh: AppColors.amoledBlack,
+      surfaceContainerHighest: AppColors.amoledBlack,
+      surfaceTint: Colors.transparent,
+    );
+  }
+
   final border = BorderSide(color: scheme.outlineVariant);
 
   return ThemeData(
     useMaterial3: true,
+    // 页面转场：M3 官方 animations 包的 SharedAxis 家族（横向推入，符合
+    // "同级页面前进/返回"的语义）。桌面端也走同一套：默认的 Zoom 转场在宽屏上
+    // 会整页缩放，观感突兀；iOS/macOS 保留系统式横向转场。
+    pageTransitionsTheme: const PageTransitionsTheme(
+      builders: <TargetPlatform, PageTransitionsBuilder>{
+        TargetPlatform.android: SharedAxisPageTransitionsBuilder(
+          transitionType: SharedAxisTransitionType.horizontal,
+        ),
+        TargetPlatform.linux: SharedAxisPageTransitionsBuilder(
+          transitionType: SharedAxisTransitionType.horizontal,
+        ),
+        TargetPlatform.windows: SharedAxisPageTransitionsBuilder(
+          transitionType: SharedAxisTransitionType.horizontal,
+        ),
+        TargetPlatform.fuchsia: SharedAxisPageTransitionsBuilder(
+          transitionType: SharedAxisTransitionType.horizontal,
+        ),
+      },
+    ),
     colorScheme: scheme,
     scaffoldBackgroundColor: scheme.surface,
     extensions: [AppSemanticColors.fromBrightness(brightness)],

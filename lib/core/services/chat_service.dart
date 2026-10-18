@@ -10,12 +10,14 @@ import 'dart:math' show Random;
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models/account_inventory.dart' show AccountInventory;
+import '../models/chat_envelope.dart' show MnEnvelope, encodeMnExtendData;
 import '../models/emoji_catalog.dart' show ImfcEmoji, imfcInterCode, imfcMessageText;
 import '../models/messages.dart';
 import '../models/session_key.dart' show sessionKeyOf;
 import '../net/config.dart' show kApiId, kCltVersion;
 import '../storage/app_database.dart';
 import 'auth.dart';
+import 'chat_image.dart' show buildImageShareExtend;
 import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
 import 'chat/group_name_cache.dart';
@@ -536,6 +538,48 @@ class ChatService {
   Future<Map<String, Object?>> sendFriendMessage(int desUin, String msg) =>
       _commands.sendFriendMessage(desUin, msg);
 
+  /// 发好友消息，并把私有信封放在 `extend_data`（正文只放可见文本）。
+  ///
+  /// ✅ **2026-10-17 live 实测：服务端会保留并转发自定义 `extend_data`**。
+  /// 对端**在线**时走 live push 原样到达（三发三中，自定义 `mn` 键 104 字节全回来；
+  /// 与游戏自己的礼物卡 175/176/177/180 同一路径）。
+  ///
+  /// ⚠️ 对端**离线**时走离线队列（`buddysvr.chat_query`），它回的是五元组
+  /// `[who, ts, text, extend, "0"]` —— **第 4 个元素就是 extend_data，离线也有**
+  /// （仓库 2026-10-01 实测；2026-10-17 再次验证）。本仓早期只读前三个元素，
+  /// 于是离线拉回的消息丢扩展字段（详见 [ChatMessage.fromChatQueryTriple]）。
+  ///
+  /// 正文隐写（[attachMnEnvelope]）仍是小载荷的备选（约 20 字节 JSON），但不再是
+  /// 唯一载体；大载荷（语音 URL、引用原文）走本方法即可。
+  Future<Map<String, Object?>> sendFriendMessageWithEnvelope(
+    int desUin,
+    String visible, {
+    required MnEnvelope envelope,
+  }) async {
+    final friend = _friend;
+    if (friend == null) throw StateError('not logged in');
+    return friend.sendChatMsg(
+      desUin: desUin,
+      msg: visible,
+      extendData: encodeMnExtendData(envelope),
+    );
+  }
+
+  /// 群聊版本（群通道没 `issys`，其余与好友一致）。
+  Future<Map<String, Object?>> sendGroupMessageWithEnvelope(
+    int groupId,
+    String visible, {
+    required MnEnvelope envelope,
+  }) async {
+    final group = _group;
+    if (group == null) throw StateError('not logged in');
+    return group.sendMsg(
+      groupId: groupId,
+      text: visible,
+      extendData: encodeMnExtendData(envelope),
+    );
+  }
+
   /// 发送"动态分享"卡片消息（shareType=19 DYNAMIC_NOTICE）。
   ///
   /// extend_data 对齐反编译 DYNAMIC_NOTICE 分享：`url_encode(base64(JSON{
@@ -568,6 +612,53 @@ class ChatService {
       extendData: extend,
     );
     return resp;
+  }
+
+  /// 发送「图片」分享卡（`shareType=22 customPic`）。
+  ///
+  /// [url] 由 [uploadChatImage] 产出（分片直传的 `node`/`dir` + 本地 md5 拼出）。
+  /// 形状与 [sendDynamicsShare] 完全一致，只有 `shareType`/图片字段不同。
+  Future<Map<String, Object?>> sendImageShare(
+    int desUin, {
+    required String url,
+    String content = '',
+  }) async {
+    final friend = _friend;
+    final auth = _auth;
+    if (friend == null || auth == null) throw StateError('not logged in');
+    final resp = await friend.sendChatMsg(
+      desUin: desUin,
+      msg: content.isEmpty ? '[图片]' : content,
+      msgtype: 4, // 分享类消息（对齐 ReqSendInviteChatMessage）
+      issys: 1,
+      extendData: buildImageShareExtend(
+        nickname: auth.name,
+        url: url,
+        content: content,
+      ),
+    );
+    return resp;
+  }
+
+  /// 发送群聊「图片」分享卡；群通道没有 `issys`，其余与 [sendImageShare] 同形。
+  Future<Map<String, Object?>> sendGroupImageShare(
+    int groupId, {
+    required String url,
+    String content = '',
+  }) async {
+    final group = _group;
+    final auth = _auth;
+    if (group == null || auth == null) throw StateError('not logged in');
+    return group.sendMsg(
+      groupId: groupId,
+      text: content.isEmpty ? '[图片]' : content,
+      msgtype: 4,
+      extendData: buildImageShareExtend(
+        nickname: auth.name,
+        url: url,
+        content: content,
+      ),
+    );
   }
 
   // ── 好友申请 ─────────────────────────────────────────────────────────
@@ -1231,12 +1322,21 @@ class ChatService {
   // ── 内部消息维护 ───────────────────────────────────────────────────────
 
   /// 本地乐观消息：发送成功后立即回显（不等服务端推送）。
-  void addLocalMessage(ChatSessionType type, int sessionId, String text) {
+  void addLocalMessage(
+    ChatSessionType type,
+    int sessionId,
+    String text, {
+    bool isSuccess = true,
+    String? extendData,
+  }) {
     final m = ChatMessage(
       uin: myUin,
       text: text,
       time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
-      isSuccess: true,
+      // 发送失败时以 isSuccess=false 回显（气泡上带错误标记，可长按重发）；
+      // 库里也存 is_success=0，重启后仍能看出这条没发出去。
+      isSuccess: isSuccess,
+      extendData: extendData,
       groupId: type == ChatSessionType.group ? sessionId : null,
     );
     if (type == ChatSessionType.friend) {

@@ -7,6 +7,7 @@ library;
 import 'package:flutter_chat_core/flutter_chat_core.dart';
 
 import '../core/chat_emoji.dart' show decodeEmojiCodes;
+import '../core/models/chat_envelope.dart';
 import '../core/models/messages.dart';
 import '../core/models/session_key.dart' show sessionKeyOf;
 import '../core/services/rich_media.dart' show RichMedia;
@@ -51,16 +52,21 @@ Message chatMessageToMessage(
   required ChatSessionType type,
   required int sessionId,
 }) {
+  // 私有信封：优先 `extend_data.mn`（无长度限制，引用原文/语音 URL 都装得下），
+  // 再退回正文尾部的零宽隐写（兼容早期文本载体）。可见正文用于 id 与显示。
+  final (visibleRaw, textEnvelope) = splitMnMessage(m.text);
+  final envelope =
+      envelopeFromExtendData(decodeChatExtendData(m.extendData)) ?? textEnvelope;
   final id = chatMessageId(
     type: type,
     sessionId: sessionId,
     uin: m.uin,
     timeSeconds: m.time,
-    text: m.text,
+    text: visibleRaw,
   );
   final createdAt = DateTime.fromMillisecondsSinceEpoch(m.time * 1000, isUtc: true);
-  // 显示文本：把表情码 #A1xx 解码为 Unicode 表情（id 仍用原始 text 保证稳定）。
-  final text = decodeEmojiCodes(m.text);
+  // 显示文本：把表情码 #A1xx 解码为 Unicode 表情（id 仍用可见原文保证稳定）。
+  final text = decodeEmojiCodes(visibleRaw);
   // 动态/互动表情的真身在 extend_data.interCode。**老数据行**（当时还没解析
   // interCode）只存了 extend_data，所以这里统一兜底再解一次 —— 否则那些消息会
   // 一直显示「请升级到最新版本查看」。
@@ -78,6 +84,8 @@ Message chatMessageToMessage(
         id: id,
         authorId: m.uin.toString(),
         createdAt: createdAt,
+        // 发送失败（is_success=0 的本地回显）→ 错误态：气泡带错误标记，长按可重发。
+        status: m.isSuccess ? null : MessageStatus.error,
         metadata: {
           'type': 'share',
           'text': text,
@@ -91,6 +99,7 @@ Message chatMessageToMessage(
         id: id,
         authorId: m.uin.toString(),
         createdAt: createdAt,
+        status: m.isSuccess ? null : MessageStatus.error,
         metadata: {
           'type': 'custom',
           'text': text,
@@ -111,6 +120,7 @@ Message chatMessageToMessage(
           id: id,
           authorId: m.uin.toString(),
           createdAt: createdAt,
+          status: m.isSuccess ? null : MessageStatus.error,
           metadata: {
             'type': 'custom',
             'text': text,
@@ -125,17 +135,30 @@ Message chatMessageToMessage(
         authorId: m.uin.toString(),
         createdAt: createdAt,
         text: text,
+        status: m.isSuccess ? null : MessageStatus.error,
         // 保留原始文本（含 #A1xx 表情码），供气泡行内渲染真实游戏贴图；
         // text 字段则用解码后的 Unicode（会话/通知预览友好）。
         // interCode：动态表情/互动表情的真身（此时 m.text 只是低版本提示文案）。
+        // mn：私有信封（引用/语音等元数据），官方客户端看不到（零宽字符）。
         metadata: {
-          'raw': m.text,
+          'raw': visibleRaw,
+          if (envelope != null) 'mn': envelope.toJson(),
           if (hasInterCode) 'interCode': interCode,
           if (m.isLive) 'live': true,
         },
       );
   }
 }
+
+/// 取一条消息的私有信封：优先 `extend_data.mn`，再退回正文尾部的零宽隐写。
+MnEnvelope? envelopeOf(ChatMessage m) =>
+    envelopeFromExtendData(decodeChatExtendData(m.extendData)) ??
+    splitMnMessage(m.text).$2;
+
+/// 是否是「正在输入」这类**临时信号**（私有信封）：不产生气泡，由桥接层转成
+/// 逐会话的输入提示。
+bool isTransientSignal(ChatMessage m) =>
+    envelopeOf(m)?.kind == MnEnvelopeKind.typing;
 
 /// 从 [CustomMessage.metadata] 提取原始文本（share/custom 消息的正文）。
 String customMessageText(CustomMessage message) =>

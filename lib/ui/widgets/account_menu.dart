@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/models/nickname.dart' show plainNickname;
 import '../../state/providers.dart';
 import '../family_page.dart';
+import '../chat_search_page.dart';
+import '../favorites_page.dart';
 import '../mail_page.dart';
 import '../profile_page.dart';
 import '../settings_page.dart';
@@ -18,6 +20,8 @@ enum _AccountAction {
   createGroup,
   family,
   mail,
+  favorites,
+  searchRecords,
   settings,
   switchAccount,
   logout,
@@ -54,6 +58,12 @@ Future<void> showAccountMenu(
         _AccountAction.mail,
         Icons.mark_email_unread_outlined,
         '消息中心',
+      ),
+      _menuItem(_AccountAction.favorites, Icons.star_outline, '收藏'),
+      _menuItem(
+        _AccountAction.searchRecords,
+        Icons.search,
+        '搜索聊天记录',
       ),
       _menuItem(_AccountAction.settings, Icons.settings_outlined, '设置'),
       const PopupMenuDivider(),
@@ -115,6 +125,14 @@ Future<void> _runAccountAction(
     case _AccountAction.mail:
       await Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => const MailPage()),
+      );
+    case _AccountAction.favorites:
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const FavoritesPage()),
+      );
+    case _AccountAction.searchRecords:
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const ChatSearchPage()),
       );
     case _AccountAction.settings:
       await Navigator.of(context).push(

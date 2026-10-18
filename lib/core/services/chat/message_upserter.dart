@@ -113,9 +113,9 @@ class MessageUpserter {
     if (msgs.isEmpty) return;
     final key = MessageStore.sessionKey(type, id);
     final prev = _messagesCache[key];
-    // `buddysvr.chat_query` 只回 `[who, ts, text]` 三元组，**没有 extend_data**：
-    // 直接覆盖会把已有的 interCode（动态/互动表情的真身）冲掉，表情就退化回
-    // 「请升级到最新版本查看」。所以按 (uin,time,text) 回填已丢失的字段。
+    // 离线队列**是带** `extend_data` 的（五元组第 4 个元素，见
+    // [ChatMessage.fromChatQueryTriple]）；这里只在本次消息确实没带时，才用内存里
+    // 已有的同名消息回填丢失的字段 —— 例如同一条消息先经推送、后又被离线队列带回。
     final merged = preserveEmojiFields(msgs, prev);
     final sorted = sortMessagesAscending(mergeHistory(merged, prev));
     _messagesCache[key] = sorted;
@@ -155,7 +155,8 @@ List<ChatMessage> mergeHistory(
 
 /// 用旧消息里已有的表情字段，补回新拉到的历史消息上。
 ///
-/// `buddysvr.chat_query` 只回 `[who, ts, text]` 三元组（没有 extend_data），
+/// `buddysvr.chat_query` 回的是**消费式**离线队列（`[who, ts, text, extend, "0"]`），
+/// 不含已收到的推送/更早历史，
 /// 而动态/互动表情的真身在 `extend_data.interCode` 里 —— 直接整段覆盖会让
 /// 收到的表情退化回「请升级到最新版本查看」。这里按 (uin,time,text) 匹配，
 /// 把新消息缺的 [ChatMessage.interCode] / [ChatMessage.extendData] 补回来。
@@ -177,8 +178,11 @@ List<ChatMessage> preserveEmojiFields(
   final out = <ChatMessage>[];
   for (final m in incoming) {
     final prev = prior['${m.uin}:${m.time}:${m.text}'];
-    // 新消息自己带了表情字段就别动它。
-    if (prev == null || (m.interCode ?? '').isNotEmpty) {
+    // 新消息自己带了表情/扩展字段就别动它（离线队列现在也会带 extend_data，
+    // 用旧值覆盖等于又把它抹掉）。
+    if (prev == null ||
+        (m.interCode ?? '').isNotEmpty ||
+        (m.extendData ?? '').isNotEmpty) {
       out.add(m);
       continue;
     }

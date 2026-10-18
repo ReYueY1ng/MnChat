@@ -26,6 +26,12 @@ class _ChatMessageRow extends StatelessWidget {
   /// 是否为自己发送（决定时间戳与气泡的左右对齐）。
   final bool isSentByMe;
 
+  /// 该消息是否已收藏（气泡上方标一颗星）。
+  final bool isFavorite;
+
+  /// 多选模式下是否被选中（整行底色高亮）。
+  final bool isSelected;
+
   final Widget child;
 
   const _ChatMessageRow({
@@ -39,12 +45,15 @@ class _ChatMessageRow extends StatelessWidget {
     this.avatar,
     this.showTimeDivider = false,
     this.showUnreadDivider = false,
+    this.isFavorite = false,
+    this.isSelected = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final time = message.resolvedTime;
-    return ChatMessage(
+    final scheme = Theme.of(context).colorScheme;
+    final row = ChatMessage(
       message: message,
       index: index,
       animation: animation,
@@ -54,18 +63,40 @@ class _ChatMessageRow extends StatelessWidget {
       // leadingWidget / trailingWidget，正好让两侧头像对称。
       leadingWidget: isSentByMe ? null : avatar,
       trailingWidget: isSentByMe ? avatar : null,
-      headerWidget: showUnreadDivider || (showTimeDivider && time != null)
+      headerWidget:
+          showUnreadDivider ||
+              (showTimeDivider && time != null) ||
+              isFavorite
           ? Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (showUnreadDivider) const _UnreadDivider(),
                 if (showTimeDivider && time != null) _TimeDivider(time: time),
+                // 收藏星标：靠发送方一侧，不挤占气泡内容。
+                if (isFavorite)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 2),
+                    child: Row(
+                      mainAxisAlignment: isSentByMe
+                          ? MainAxisAlignment.end
+                          : MainAxisAlignment.start,
+                      children: [
+                        Icon(Icons.star, size: 12, color: scheme.primary),
+                      ],
+                    ),
+                  ),
               ],
             )
           : null,
       // 气泡下方不再常显灰字时间戳（观感差）。跨段的时间信息仍由 headerWidget
       // 的居中时间条承载。
       child: child,
+    );
+    if (!isSelected) return row;
+    // 多选选中：整行淡主题色底，比给气泡加边框更不干扰原有圆角/阴影。
+    return ColoredBox(
+      color: scheme.primary.withValues(alpha: 0.10),
+      child: row,
     );
   }
 }
