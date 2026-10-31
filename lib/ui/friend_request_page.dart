@@ -119,6 +119,13 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
   String? _error;
   bool _loading = false;
 
+  /// 未登录：文案在 build 里取。
+  ///
+  /// [_load] 在 [initState] 里同步开跑（到第一个 `await` 之前），那时读
+  /// `l10nOf(context)` 会撞上「initState 未完成就依赖 InheritedWidget」的断言；
+  /// async 函数把这个异常收进 Future，页面只剩一个空壳/无提示。
+  bool _authMissing = false;
+
   @override
   void initState() {
     super.initState();
@@ -129,10 +136,14 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
     final service = ref.read(chatServiceProvider);
     final group = service.group;
     if (group == null) {
-      setState(() => _error = l10nOf(context)?.commonNotSignedIn ?? '未登录');
+      setState(() {
+        _authMissing = true;
+        _loading = false;
+      });
       return;
     }
     setState(() {
+      _authMissing = false;
       _loading = true;
       _error = null;
     });
@@ -194,6 +205,9 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final semantic = AppSemanticColors.of(context);
+    if (_authMissing) {
+      return Center(child: Text(l10nOf(context)?.commonNotSignedIn ?? '未登录'));
+    }
     if (_loading && _items == null) {
       return const Center(child: CircularProgressIndicator());
     }

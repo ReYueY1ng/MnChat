@@ -158,6 +158,17 @@ const Key chatHistoryLoadOlderKey = Key('chat_history_load_older');
 const Key chatHistoryJumpDateKey = Key('chat_history_jump_date');
 const Key chatHistoryLatestKey = Key('chat_history_latest');
 
+/// 列表是否已经滚到「更早」这一端（该自动补一页更早的历史）。
+///
+/// 这里自建的 [ChatAnimatedList] 没有传 `reversed`，默认是**非反向**列表：
+/// 最新消息在底部（`extentAfter == 0`），更早的消息在顶部（`extentBefore == 0`）。
+/// 首帧会直接滚到最新一页 —— 早先按 `extentAfter < 80` 判断，打开会话的瞬间
+/// 就会请求更早的历史并弹出「没有更早的聊天记录」。
+bool shouldAutoLoadOlderHistory(ScrollMetrics metrics) =>
+    metrics.axis == Axis.vertical &&
+    metrics.extentBefore < 80 &&
+    metrics.maxScrollExtent > 0;
+
 /// 聊天页顶部的历史分页条。
 ///
 /// 抽成公开 widget 便于单独做 widget 测试（ChatPage 需要完整服务/数据库，
@@ -622,7 +633,10 @@ class _ChatPageState extends ConsumerState<ChatPage>
   }
 
   /// 向上加载一页更早的历史。
-  Future<void> _loadOlder() async {
+  ///
+  /// [notify] 只给用户主动点「加载更早」用：滚动到底部时的自动续页没有更多
+  /// 是正常状态（游标就停在最早一条上），不该弹「没有更早的聊天记录」。
+  Future<void> _loadOlder({bool notify = true}) async {
     if (_loadingOlder || _historyDay != null) return;
     setState(() => _loadingOlder = true);
     final added = await _service.loadOlderHistory(widget.type, widget.sessionId);
@@ -631,13 +645,15 @@ class _ChatPageState extends ConsumerState<ChatPage>
       _loadingOlder = false;
       _hasOlder = _service.hasOlderHistory(widget.type, widget.sessionId);
     });
-    if (added == 0) _toast(l10nOf(context)?.chatNoEarlierChatHistory ?? '没有更早的聊天记录了');
+    if (added == 0 && notify) {
+      _toast(l10nOf(context)?.chatNoEarlierChatHistory ?? '没有更早的聊天记录了');
+    }
   }
 
   /// 滚动到更早一端时的自动续页（由 [_loadingOlder] 去重）。
   void _maybeLoadOlderOnScroll() {
     if (_loadingOlder || !_hasOlder || _historyDay != null) return;
-    unawaited(_loadOlder());
+    unawaited(_loadOlder(notify: false));
   }
 
   /// 跳到某一天：把那一天的消息作为独立窗口展示，退出时回到实时历史。
@@ -1092,13 +1108,11 @@ class _ChatPageState extends ConsumerState<ChatPage>
                       ),
                     ),
                     child: NotificationListener<ScrollNotification>(
-                      // ChatAnimatedList 是反向列表：更早的消息在 maxScrollExtent 方向。
+                      // 这里自建的 ChatAnimatedList 是**非反向**列表：最新消息在底部，
+                      // 更早的消息在顶部（extentBefore == 0），别拿 extentAfter 判断。
                       // 滚到接近更早那端时自动补一页（按钮仍然保留，桌面端更好发现）。
                       onNotification: (n) {
-                        final m = n.metrics;
-                        if (m.axis == Axis.vertical &&
-                            m.extentAfter < 80 &&
-                            m.maxScrollExtent > 0) {
+                        if (shouldAutoLoadOlderHistory(n.metrics)) {
                           _maybeLoadOlderOnScroll();
                         }
                         return false;

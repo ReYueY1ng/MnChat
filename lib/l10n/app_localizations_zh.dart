@@ -490,7 +490,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String chatForwardChatHistory(Object text) {
-    return '转发聊天记录：\\n$text';
+    return '转发聊天记录：\n$text';
   }
 
   @override
@@ -1202,7 +1202,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String familyRefreshHint(Object _error) {
-    return '$_error\\n\\n点击右上角刷新';
+    return '$_error\n\n点击右上角刷新';
   }
 
   @override
@@ -1424,10 +1424,13 @@ class AppLocalizationsZh extends AppLocalizations {
   String get friendsNoFriendsMatchFilters => '没有符合条件的好友';
 
   @override
-  String get friendsNoFriendsYetPull => '暂无好友\\n下拉刷新或点击右上角添加';
+  String get friendsNoFriendsYetPull => '暂无好友\n下拉刷新或点击右上角添加';
 
   @override
   String get friendsNoGroupChats => '暂无群聊';
+
+  @override
+  String get friendsNoGroupsYetPull => '暂无群聊\n下拉刷新或点击右上角创建群';
 
   @override
   String get friendsOffline => '离线';
@@ -2538,7 +2541,7 @@ class AppLocalizationsZh extends AppLocalizations {
   }
 
   @override
-  String get sessionsNoConversationsPeopleYou => '暂无会话\\n聊过天的人会出现在这里';
+  String get sessionsNoConversationsPeopleYou => '暂无会话\n聊过天的人会出现在这里';
 
   @override
   String get sessionsNoMatchingConversations => '没有匹配的会话';
@@ -2565,7 +2568,7 @@ class AppLocalizationsZh extends AppLocalizations {
 
   @override
   String settingsAboutCheckFailedYouAlso(Object p1) {
-    return '检查失败：$p1\\n\\n也可以直接到 Releases 页面查看：\\n';
+    return '检查失败：$p1\n\n也可以直接到 Releases 页面查看：\n';
   }
 
   @override
@@ -2614,7 +2617,7 @@ class AppLocalizationsZh extends AppLocalizations {
     Object p1,
     Object p2,
   ) {
-    return '发现新版本 $p1（当前 $kAppVersion）\\n\\n$p2';
+    return '发现新版本 $p1（当前 $kAppVersion）\n\n$p2';
   }
 
   @override

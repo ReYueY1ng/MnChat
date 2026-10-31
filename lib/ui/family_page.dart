@@ -40,6 +40,14 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   bool _busy = false;
   String? _error;
 
+  /// 未登录：文案在 build 里取。
+  ///
+  /// initState 阶段不能读 Localizations（`Localizations.of` 会注册
+  /// InheritedWidget 依赖，框架直接抛断言）；[initState] 里同步跑到
+  /// `_load()` 的第一个 `await` 之前也一样 —— 一旦在那里取文案，异常会让
+  /// `_load` 提前结束、`_loading` 永远是 true，页面就一直在转圈。
+  bool _authMissing = false;
+
   @override
   void initState() {
     super.initState();
@@ -53,20 +61,21 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   }
 
   void _init() {
-    final auth = ref.read(chatServiceProvider).auth;
-    if (auth == null) {
+    // 客户端统一由 provider 构造（未登录时为 null，测试可注入）。
+    final client = ref.read(familyClientProvider);
+    if (client == null) {
       setState(() {
         _loading = false;
-        _error = l10nOf(context)?.commonNotSignedIn ?? '未登录';
+        _authMissing = true;
       });
       return;
     }
-    _client = FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    _client = client;
+    _authMissing = false;
     _load();
   }
 
   Future<void> _load() async {
-    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
     setState(() {
@@ -106,7 +115,10 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       // 家族成员头像（拿不到就保持首字占位，不阻断加载）。
       await _loadAvatars(infos.expand((f) => f.members.map((m) => m.uin)));
     } catch (e) {
-      _error = l10n?.commonFailedLoad2(e) ?? '加载失败: $e';
+      // 走到这里一定已经 await 过（initState 已结束），读 context 是安全的。
+      if (mounted) {
+        _error = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e';
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -308,6 +320,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   }
 
   Widget _body() {
+    if (_authMissing) {
+      return Center(child: Text(l10nOf(context)?.commonNotSignedIn ?? '未登录'));
+    }
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
       return Center(

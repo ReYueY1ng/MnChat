@@ -416,6 +416,7 @@
   "friendsNoFriendsMatchFilters": "No friends match the filters",
   "friendsNoFriendsYetPull": "No friends yet\nPull to refresh or tap the top-right corner to add",
   "friendsNoGroupChats": "No group chats",
+  "friendsNoGroupsYetPull": "No group chats yet\nPull to refresh or create a group from the top-right menu",
   "friendsOffline": "Offline",
   "friendsOldestLoginFirst": "Oldest login first",
   "friendsOnline": "Online",

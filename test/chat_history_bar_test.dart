@@ -125,6 +125,43 @@ void main() {
     });
   });
 
+  group('自动加载更早的方向', () {
+    // ChatAnimatedList 默认非反向：最新在底部（extentAfter == 0），
+    // 更早在顶部（extentBefore == 0）。按 extentAfter 判断会在打开会话时
+    // 立即拉「更早」并弹「没有更早的聊天记录」。
+    FixedScrollMetrics metrics({
+      required double pixels,
+      double max = 1000,
+      double viewport = 600,
+      AxisDirection dir = AxisDirection.down,
+    }) => FixedScrollMetrics(
+      minScrollExtent: 0,
+      maxScrollExtent: max,
+      pixels: pixels,
+      viewportDimension: viewport,
+      axisDirection: dir,
+      devicePixelRatio: 1.0,
+    );
+
+    test('停在最新一页（底部）不补更早', () {
+      expect(shouldAutoLoadOlderHistory(metrics(pixels: 400)), isFalse);
+    });
+
+    test('滑到顶部（更早一端）才补一页', () {
+      expect(shouldAutoLoadOlderHistory(metrics(pixels: 0)), isTrue);
+    });
+
+    test('内容不足一屏或横向滚动不触发', () {
+      expect(shouldAutoLoadOlderHistory(metrics(pixels: 0, max: 0)), isFalse);
+      expect(
+        shouldAutoLoadOlderHistory(
+          metrics(pixels: 0, dir: AxisDirection.right),
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('ChatPage 接线', () {
     testWidgets('进入会话后历史条可见，点加载更早会调用服务', (tester) async {
       final service = _PagedChatService();

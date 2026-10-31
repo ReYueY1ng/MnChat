@@ -959,7 +959,7 @@ abstract class AppLocalizations {
   /// No description provided for @chatForwardChatHistory.
   ///
   /// In zh, this message translates to:
-  /// **'转发聊天记录：\\n{text}'**
+  /// **'转发聊天记录：\n{text}'**
   String chatForwardChatHistory(Object text);
 
   /// No description provided for @chatGift.
@@ -2195,7 +2195,7 @@ abstract class AppLocalizations {
   /// No description provided for @familyRefreshHint.
   ///
   /// In zh, this message translates to:
-  /// **'{_error}\\n\\n点击右上角刷新'**
+  /// **'{_error}\n\n点击右上角刷新'**
   String familyRefreshHint(Object _error);
 
   /// No description provided for @familyRejected.
@@ -2585,7 +2585,7 @@ abstract class AppLocalizations {
   /// No description provided for @friendsNoFriendsYetPull.
   ///
   /// In zh, this message translates to:
-  /// **'暂无好友\\n下拉刷新或点击右上角添加'**
+  /// **'暂无好友\n下拉刷新或点击右上角添加'**
   String get friendsNoFriendsYetPull;
 
   /// No description provided for @friendsNoGroupChats.
@@ -2593,6 +2593,12 @@ abstract class AppLocalizations {
   /// In zh, this message translates to:
   /// **'暂无群聊'**
   String get friendsNoGroupChats;
+
+  /// No description provided for @friendsNoGroupsYetPull.
+  ///
+  /// In zh, this message translates to:
+  /// **'暂无群聊\n下拉刷新或点击右上角创建群'**
+  String get friendsNoGroupsYetPull;
 
   /// No description provided for @friendsOffline.
   ///
@@ -4502,7 +4508,7 @@ abstract class AppLocalizations {
   /// No description provided for @sessionsNoConversationsPeopleYou.
   ///
   /// In zh, this message translates to:
-  /// **'暂无会话\\n聊过天的人会出现在这里'**
+  /// **'暂无会话\n聊过天的人会出现在这里'**
   String get sessionsNoConversationsPeopleYou;
 
   /// No description provided for @sessionsNoMatchingConversations.
@@ -4550,7 +4556,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAboutCheckFailedYouAlso.
   ///
   /// In zh, this message translates to:
-  /// **'检查失败：{p1}\\n\\n也可以直接到 Releases 页面查看：\\n'**
+  /// **'检查失败：{p1}\n\n也可以直接到 Releases 页面查看：\n'**
   String settingsAboutCheckFailedYouAlso(Object p1);
 
   /// No description provided for @settingsAboutCheckLatestBuildGitHub.
@@ -4628,7 +4634,7 @@ abstract class AppLocalizations {
   /// No description provided for @settingsAboutNewVersionAvailableCurrent.
   ///
   /// In zh, this message translates to:
-  /// **'发现新版本 {p1}（当前 {kAppVersion}）\\n\\n{p2}'**
+  /// **'发现新版本 {p1}（当前 {kAppVersion}）\n\n{p2}'**
   String settingsAboutNewVersionAvailableCurrent(
     Object kAppVersion,
     Object p1,

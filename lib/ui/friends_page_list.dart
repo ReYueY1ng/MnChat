@@ -234,7 +234,13 @@ class _EmptyFriends extends StatelessWidget {
               color: theme.colorScheme.outline,
             ),
             const SizedBox(height: AppSpacing.sm),
-            Text(l10nOf(context)?.friendsNoFriendsYetPull ?? '暂无好友\n下拉刷新或点击右上角添加'),
+            Text(
+              isGroup
+                  ? l10nOf(context)?.friendsNoGroupsYetPull ??
+                        '暂无群聊\n下拉刷新或点击右上角创建群'
+                  : l10nOf(context)?.friendsNoFriendsYetPull ??
+                        '暂无好友\n下拉刷新或点击右上角添加',
+            ),
             const SizedBox(height: AppSpacing.sm),
             TextButton.icon(
               onPressed: onAddFriend,

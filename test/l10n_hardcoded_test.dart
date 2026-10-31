@@ -10,6 +10,7 @@
 //   AlertDialog(...)、_toast(…)、_snack(…)、showSettingsToast(…)。
 //
 // 例外：紧跟在 `??` 之后的中文回退；日志 / assert / StateError 等非展示位。
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -130,6 +131,32 @@ void _scan(String path) {
 }
 
 void main() {
+  test('ARB 的换行必须是真换行（不能出现字面量反斜杠 n）', () {
+    // 中文 ARB 曾经写成 "\\n"（JSON 里是双反斜杠 → 运行期两个字符），
+    // 好友/群组空态、会话空态、关于页文案都直接把「\n」显示给了用户。
+    for (final path in const ['lib/l10n/app_zh.arb', 'lib/l10n/app_en.arb']) {
+      final arb =
+          jsonDecode(File(path).readAsStringSync()) as Map<String, Object?>;
+      for (final e in arb.entries) {
+        final v = e.value;
+        if (v is! String) continue;
+        expect(
+          v.contains(r'\n'),
+          isFalse,
+          reason: '$path 的 ${e.key} 含字面量反斜杠 n，界面会直接显示 "\\n"',
+        );
+      }
+    }
+    final zh =
+        jsonDecode(File('lib/l10n/app_zh.arb').readAsStringSync())
+            as Map<String, Object?>;
+    expect(
+      zh['friendsNoFriendsYetPull'],
+      contains('\n'),
+      reason: '好友/群组空态需要换行再显示下拉提示',
+    );
+  });
+
   test('lib/ui 下没有硬编码的中文展示文案', () {
     final files = Directory('lib/ui')
         .listSync(recursive: true)

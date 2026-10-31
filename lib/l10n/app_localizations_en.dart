@@ -1473,6 +1473,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get friendsNoGroupChats => 'No group chats';
 
   @override
+  String get friendsNoGroupsYetPull =>
+      'No group chats yet\nPull to refresh or create a group from the top-right menu';
+
+  @override
   String get friendsOffline => 'Offline';
 
   @override

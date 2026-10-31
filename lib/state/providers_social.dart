@@ -23,6 +23,24 @@ final dynamicsClientProvider = Provider<DynamicsClient?>((ref) {
   return DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
 });
 
+/// [DynamicsPage] 用的动态客户端构造器。
+///
+/// 页面在 `authProvider` 的监听回调里初始化：那一刻依赖 `authProvider` 的
+/// [dynamicsClientProvider] 可能还没重算（监听先于依赖失效），读它会拿到旧的
+/// null。直接拿监听里的 auth 构造就没有这个问题，测试也能注入假客户端。
+final dynamicsClientFactoryProvider =
+    Provider<DynamicsClient Function(MiniAuth)>(
+      (ref) =>
+          (auth) => DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t),
+    );
+
+/// 家族客户端（家族页用；未登录返回 null）。
+final familyClientProvider = Provider<FamilyClient?>((ref) {
+  final auth = ref.watch(authProvider).auth;
+  if (auth == null) return null;
+  return FamilyClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+});
+
 /// 资料客户端（互动通知列表头像补全；未登录返回 null）。
 ///
 /// 只 `select` 账号本身：登录/重连会连着发几个 AuthState（busy → connecting →

@@ -118,7 +118,9 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   }
 
   void _init() {
-    final auth = ref.read(chatServiceProvider).auth;
+    // auth 从 authProvider 读：监听回调里读它拿到的一定是刚更新的状态；
+    // 而依赖 authProvider 的 client provider 此刻可能还没重算（会读到旧的 null）。
+    final auth = ref.read(authProvider).auth;
     if (auth == null) {
       // initState 阶段不能读 Localizations（子树还没挂上去），先落标记，
       // 文案留到 build 里取。
@@ -128,7 +130,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       });
       return;
     }
-    _client = DynamicsClient(uin: auth.uin, s2: auth.s2, s2t: auth.s2t);
+    // 登录成功后必须把「未登录」标记清掉：本页在主壳的 IndexedStack 里，
+    // 启动时会先以未登录状态构建一次，登录完成后再跑一遍 _init —— 只设置
+    // 不清除就会永远停在「未登录」。
+    setState(() => _authMissing = false);
+    _client = ref.read(dynamicsClientFactoryProvider)(auth);
     unawaited(_loadTags());
     _load();
   }
