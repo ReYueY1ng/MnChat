@@ -32,6 +32,8 @@ import '../../state/providers.dart';
 import '../theme/app_tokens.dart';
 import 'floating_panel.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 弹出礼物面板；[uin] 为收礼好友。
 Future<void> showGiftPicker(
   BuildContext context,
@@ -115,7 +117,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
                   // 收礼人名字来自服务端昵称，可能带 `[i][color][b]` 这类标记；
                   // 这里是纯文本，不过 plainNickname 就会显示成
                   // 「赠送礼物给 [i][color][b]顾念」（真机实测踩到过）。
-                  '赠送礼物给 $_displayName',
+                  l10nOf(context)?.giftSendGift(_displayName) ?? '赠送礼物给 $_displayName',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall,
@@ -123,7 +125,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
               ),
               if (catalog.dayIntimaciesLimit > 0)
                 Text(
-                  '每日默契度上限 ${catalog.dayIntimaciesLimit}',
+                  l10nOf(context)?.giftDailyRapportCap(catalog.dayIntimaciesLimit) ?? '每日默契度上限 ${catalog.dayIntimaciesLimit}',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: theme.colorScheme.outline,
                   ),
@@ -134,7 +136,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
         const Divider(height: 1),
         Expanded(
           child: gifts.isEmpty
-              ? const Center(child: Text('取不到礼物配置（或当前无可赠送礼物）'))
+              ? Center(child: Text(l10nOf(context)?.giftCouldntLoadGiftConfig ?? '取不到礼物配置（或当前无可赠送礼物）'))
               : GridView.builder(
                   padding: const EdgeInsets.all(10),
                   gridDelegate:
@@ -177,14 +179,14 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
             const SizedBox(height: 2),
             if (owned > 0)
               Text(
-                '仓库 ×$owned',
+                l10nOf(context)?.giftInventoryX(owned) ?? '仓库 ×$owned',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.tertiary,
                 ),
               )
             else if (g.free || g.ad)
               Text(
-                g.ad ? '看广告' : '免费',
+                g.ad ? l10nOf(context)?.giftWatchAd ?? '看广告' : l10nOf(context)?.giftFree ?? '免费',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.primary,
                 ),
@@ -198,7 +200,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
               ),
             if (g.intimacies > 0)
               Text(
-                '默契度 +${g.intimacies}',
+                l10nOf(context)?.giftRapport(g.intimacies) ?? '默契度 +${g.intimacies}',
                 style: theme.textTheme.labelSmall?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -229,6 +231,7 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
 
   /// 选数量 + 赠送方式 → 确认 → 发送。
   Future<void> _confirmAndSend(GiftItem g, int owned) async {
+    final l10n = l10nOf(context);
     final picked = await showDialog<(int, _GiftPayMode)>(
       context: context,
       builder: (ctx) => _GiftCountDialog(gift: g, owned: owned),
@@ -254,10 +257,10 @@ class _GiftPickerPanelState extends ConsumerState<GiftPickerPanel> {
             buyFirst: mode == _GiftPayMode.buy,
             addValue: g.intimacies * num,
           );
-      messenger.showSnackBar(const SnackBar(content: Text('赠送成功')));
+      messenger.showSnackBar(SnackBar(content: Text(l10n?.giftGiftSent ?? '赠送成功')));
       widget.onDone();
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('赠送失败: $e')));
+      messenger.showSnackBar(SnackBar(content: Text(l10n?.giftFailedSendGift(e) ?? '赠送失败: $e')));
     } finally {
       if (mounted) setState(() => _sending = false);
     }
@@ -312,26 +315,26 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
   String _payText() {
     return switch (_mode) {
       _GiftPayMode.warehouse => widget.owned >= _num
-          ? '从仓库赠送 $_num 份（免费）'
-          : '从仓库赠送 $_num 份（仓库只有 ${widget.owned} 份，会失败）',
-      _GiftPayMode.buy => '购买 $_num 份后赠送',
-      _GiftPayMode.free => '免费赠送 $_num 份',
-      _GiftPayMode.ad => '看广告赠送 $_num 份',
+          ? l10nOf(context)?.giftSendInventoryFree(_num) ?? '从仓库赠送 $_num 份（免费）'
+          : l10nOf(context)?.giftSendInventoryInventoryFail(_num, widget.owned) ?? '从仓库赠送 $_num 份（仓库只有 ${widget.owned} 份，会失败）',
+      _GiftPayMode.buy => l10nOf(context)?.giftBuyThenSend(_num) ?? '购买 $_num 份后赠送',
+      _GiftPayMode.free => l10nOf(context)?.giftSendFree(_num) ?? '免费赠送 $_num 份',
+      _GiftPayMode.ad => l10nOf(context)?.giftWatchAdSend(_num) ?? '看广告赠送 $_num 份',
     };
   }
 
   String _titleOf(_GiftPayMode m) => switch (m) {
-    _GiftPayMode.warehouse => '从礼物仓库赠送',
-    _GiftPayMode.buy => '扣费购买赠送',
-    _GiftPayMode.free => '免费赠送',
-    _GiftPayMode.ad => '看广告赠送',
+    _GiftPayMode.warehouse => l10nOf(context)?.giftSendGiftInventory ?? '从礼物仓库赠送',
+    _GiftPayMode.buy => l10nOf(context)?.giftBuySend ?? '扣费购买赠送',
+    _GiftPayMode.free => l10nOf(context)?.giftSendFree2 ?? '免费赠送',
+    _GiftPayMode.ad => l10nOf(context)?.giftWatchAdSend2 ?? '看广告赠送',
   };
 
   String _subOf(_GiftPayMode m) => switch (m) {
-    _GiftPayMode.warehouse => '扣仓库库存，免费；仓库 ×${widget.owned}',
-    _GiftPayMode.buy => '先买进仓库再送，扣 ${_g.costNum * _num} ${_g.currency}',
-    _GiftPayMode.free => '用当日的免费赠送次数',
-    _GiftPayMode.ad => '看完广告后送出',
+    _GiftPayMode.warehouse => l10nOf(context)?.giftDeductsInventoryFreeInventory(widget.owned) ?? '扣仓库库存，免费；仓库 ×${widget.owned}',
+    _GiftPayMode.buy => l10nOf(context)?.giftBuyIntoInventoryFirst(_g.costNum * _num, _g.currency) ?? '先买进仓库再送，扣 ${_g.costNum * _num} ${_g.currency}',
+    _GiftPayMode.free => l10nOf(context)?.giftUseTodaysFreeSend ?? '用当日的免费赠送次数',
+    _GiftPayMode.ad => l10nOf(context)?.giftSendAfterWatchingAd ?? '看完广告后送出',
   };
 
   @override
@@ -347,7 +350,7 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
           children: [
             Row(
               children: [
-                const Text('数量'),
+                Text(l10nOf(context)?.giftQuantity ?? '数量'),
                 const Spacer(),
                 IconButton(
                   icon: const Icon(Icons.remove),
@@ -363,7 +366,7 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
             Text(_payText(), style: theme.textTheme.bodySmall),
             if (_g.intimacies > 0)
               Text(
-                '默契度 +${_g.intimacies * _num}',
+                l10nOf(context)?.giftRapport2(_g.intimacies * _num) ?? '默契度 +${_g.intimacies * _num}',
                 style: theme.textTheme.bodySmall,
               ),
             const Divider(height: AppSpacing.md),
@@ -389,11 +392,11 @@ class _GiftCountDialogState extends State<_GiftCountDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop((_num, _mode)),
-          child: const Text('赠送'),
+          child: Text(l10nOf(context)?.playerInfoSend ?? '赠送'),
         ),
       ],
     );

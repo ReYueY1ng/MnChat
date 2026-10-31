@@ -25,6 +25,8 @@ import 'widgets/avatar_view.dart';
 import 'widgets/partner_badges.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class PartnerPage extends ConsumerWidget {
   const PartnerPage({super.key});
 
@@ -47,13 +49,13 @@ class PartnerPage extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          '最佳拍档',
+        title: Text(
+          l10nOf(context)?.commonBestPartners ?? '最佳拍档',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         actions: [
           IconButton(
-            tooltip: '刷新',
+            tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               ref.invalidate(myPartnerListProvider);
@@ -70,17 +72,18 @@ class PartnerPage extends ConsumerWidget {
           constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
           child: Column(
             children: [
-              _buildHeader(theme, count, slot),
+              _buildHeader(context, theme, count, slot),
               const Divider(height: 1),
               Expanded(
                 child: partnersAsync.when(
                   loading: () =>
                       const Center(child: CircularProgressIndicator()),
-                  error: (e, _) => Center(child: Text('加载失败: $e')),
+                  error: (e, _) => Center(child: Text(l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e')),
                   data: (list) =>
                       (list.isEmpty && (slot?.total ?? 0) == 0)
-                      ? const Center(child: Text('暂无最佳拍档'))
+                      ? Center(child: Text(l10nOf(context)?.partnerNoBestPartnersYet ?? '暂无最佳拍档'))
                       : _buildList(
+                          context,
                           theme,
                           list,
                           levels,
@@ -98,7 +101,12 @@ class PartnerPage extends ConsumerWidget {
   }
 
   /// 头部：可建立拍档数 `<当前>/<上限>`。
-  Widget _buildHeader(ThemeData theme, int current, PartnerSlotInfo? slot) {
+  Widget _buildHeader(
+    BuildContext context,
+    ThemeData theme,
+    int current,
+    PartnerSlotInfo? slot,
+  ) {
     final total = slot?.total ?? 0;
     return Padding(
       padding: AppSpacing.pagePadding,
@@ -110,7 +118,7 @@ class PartnerPage extends ConsumerWidget {
             color: theme.colorScheme.primary,
           ),
           const SizedBox(width: AppSpacing.sm),
-          Text('可建立拍档数', style: theme.textTheme.bodyMedium),
+          Text(l10nOf(context)?.partnerPartnerSlots ?? '可建立拍档数', style: theme.textTheme.bodyMedium),
           const SizedBox(width: AppSpacing.xs),
           Text(
             '$current/$total',
@@ -125,6 +133,7 @@ class PartnerPage extends ConsumerWidget {
   }
 
   Widget _buildList(
+    BuildContext context,
     ThemeData theme,
     List<PartnerInfo> partners,
     Map<int, int> levels,
@@ -144,8 +153,11 @@ class PartnerPage extends ConsumerWidget {
       itemCount: partners.length + (remaining > 0 ? 1 : 0),
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, i) {
-        if (i >= partners.length) return _emptySlotCard(theme, remaining);
+        if (i >= partners.length) {
+          return _emptySlotCard(context, theme, remaining);
+        }
         return _partnerCard(
+          context,
           theme,
           partners[i],
           levels[partners[i].bestUin] ?? 0,
@@ -158,7 +170,11 @@ class PartnerPage extends ConsumerWidget {
   }
 
   /// 空槽位卡片（对齐游戏 cfg[0]：`icon_add_upload` + `GetS(9312030)`）。
-  Widget _emptySlotCard(ThemeData theme, int remaining) {
+  Widget _emptySlotCard(
+    BuildContext context,
+    ThemeData theme,
+    int remaining,
+  ) {
     return Container(
       padding: AppSpacing.cardPadding,
       decoration: BoxDecoration(
@@ -176,7 +192,7 @@ class PartnerPage extends ConsumerWidget {
           const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Text(
-              '最佳拍档剩余空位 x $remaining',
+              l10nOf(context)?.partnerBestPartnerSlotsLeft(remaining) ?? '最佳拍档剩余空位 x $remaining',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
               ),
@@ -189,6 +205,7 @@ class PartnerPage extends ConsumerWidget {
 
   /// 单张拍档卡片。
   Widget _partnerCard(
+    BuildContext context,
     ThemeData theme,
     PartnerInfo partner,
     int level,
@@ -265,7 +282,7 @@ class PartnerPage extends ConsumerWidget {
                 if (partner.titleId > 0) ...[
                   const SizedBox(height: 2),
                   Text(
-                    '别称 #${partner.titleId}',
+                    l10nOf(context)?.partnerAlias(partner.titleId) ?? '别称 #${partner.titleId}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                     ),
@@ -273,13 +290,13 @@ class PartnerPage extends ConsumerWidget {
                 ],
                 const SizedBox(height: 2),
                 Text(
-                  '结成关系天数：${partner.daysAt(now)}',
+                  l10nOf(context)?.partnerDaysRelation(partner.daysAt(now)) ?? '结成关系天数：${partner.daysAt(now)}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.outline,
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                _buildTacitRow(theme, partner, progress),
+                _buildTacitRow(context, theme, partner, progress),
               ],
             ),
           ),
@@ -290,6 +307,7 @@ class PartnerPage extends ConsumerWidget {
 
   /// 默契度行：数值（`<tacitnum>/<nextLevelScore>`）+ 进度条；阈值未知时只展示数值。
   Widget _buildTacitRow(
+    BuildContext context,
     ThemeData theme,
     PartnerInfo partner,
     RelationProgress progress,
@@ -298,12 +316,12 @@ class PartnerPage extends ConsumerWidget {
     final ratio = progress.ratio;
     final next = progress.next;
     final label = next == null
-        ? '默契度 ${partner.tacitnum}'
-        : '默契度 ${partner.tacitnum}/$next';
+        ? l10nOf(context)?.partnerRapport(partner.tacitnum) ?? '默契度 ${partner.tacitnum}'
+        : l10nOf(context)?.partnerRapport2(partner.tacitnum, next) ?? '默契度 ${partner.tacitnum}/$next';
     return Tooltip(
       message: next == null
-          ? '默契度 · ${partner.labName}'
-          : '默契度 · ${partner.labName}（${partner.tacitnum}/$next）',
+          ? l10nOf(context)?.partnerRapport3(partner.labName) ?? '默契度 · ${partner.labName}'
+          : l10nOf(context)?.partnerRapport4(partner.labName, partner.tacitnum, next) ?? '默契度 · ${partner.labName}（${partner.tacitnum}/$next）',
       child: Row(
         children: [
           Icon(Icons.hexagon, size: 12, color: color),

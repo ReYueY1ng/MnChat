@@ -26,31 +26,34 @@ import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 import 'widgets/settings_tiles.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 设置页：账号卡 + 分组入口（真正的内容在 5 个子页里）。
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
   /// 主题模式的中文名（顶层摘要用）。
-  static String themeModeLabel(AppThemeMode mode) => switch (mode) {
-    AppThemeMode.system => '跟随系统',
-    AppThemeMode.light => '浅色',
-    AppThemeMode.dark => '深色',
+  static String themeModeLabel(BuildContext context, AppThemeMode mode) =>
+      switch (mode) {
+    AppThemeMode.system => l10nOf(context)?.settingsFollowSystem ?? '跟随系统',
+    AppThemeMode.light => l10nOf(context)?.settingsLight ?? '浅色',
+    AppThemeMode.dark => l10nOf(context)?.settingsDark ?? '深色',
   };
 
   Future<void> _logout(BuildContext context, WidgetRef ref) async {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('退出登录'),
-        content: const Text('确定要退出当前账号吗？'),
+        title: Text(l10nOf(context)?.settingsSignOut ?? '退出登录'),
+        content: Text(l10nOf(context)?.settingsSignOutCurrentAccount ?? '确定要退出当前账号吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('退出'),
+            child: Text(l10nOf(context)?.settingsSignOut2 ?? '退出'),
           ),
         ],
       ),
@@ -72,7 +75,7 @@ class SettingsPage extends ConsumerWidget {
     final dndWindow = ref.watch(dndWindowProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('设置')),
+      appBar: AppBar(title: Text(l10nOf(context)?.settingsSettings ?? '设置')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
@@ -81,41 +84,42 @@ class SettingsPage extends ConsumerWidget {
             children: [
               _accountCard(context, ref, auth),
 
-              const SettingsSectionHeader('账号'),
+              SettingsSectionHeader(l10nOf(context)?.settingsAccount ?? '账号'),
               SettingsNavTile(
                 icon: Icons.manage_accounts_outlined,
-                title: '账号与安全',
-                subtitle: lockOn ? '应用锁已开启' : '个人资料 / 交友标签 / 自动登录',
+                title: l10nOf(context)?.settingsAccountAccountSecurity ?? '账号与安全',
+                subtitle: lockOn ? l10nOf(context)?.settingsAppLock ?? '应用锁已开启' : l10nOf(context)?.settingsProfileSocialTagsAuto ?? '个人资料 / 交友标签 / 自动登录',
                 page: const SettingsAccountPage(),
               ),
 
-              const SettingsSectionHeader('偏好'),
+              SettingsSectionHeader(l10nOf(context)?.settingsPreferences ?? '偏好'),
               SettingsNavTile(
                 icon: Icons.palette_outlined,
-                title: '通用与外观',
-                subtitle: '${themeModeLabel(mode)} · 主题 / 字号 / 气泡 / 会话排序',
+                title: l10nOf(context)?.settingsGeneralGeneralAppearance ?? '通用与外观',
+                subtitle: l10nOf(context)?.settingsThemeTextSizeBubbles(themeModeLabel(context, mode)) ??
+                    '${themeModeLabel(context, mode)} · 主题 / 字号 / 气泡 / 会话排序',
                 page: const SettingsGeneralPage(),
               ),
               SettingsNavTile(
                 icon: Icons.notifications_outlined,
-                title: '消息与通知',
+                title: l10nOf(context)?.settingsNotificationMessagesNotifications ?? '消息与通知',
                 subtitle: notifyOn
-                    ? (dndOn ? '通知开 · 免打扰 ${dndWindow.label}' : '通知开 · 未设免打扰')
-                    : '通知已关闭',
+                    ? (dndOn ? l10nOf(context)?.settingsNotificationsDoDisturb(dndWindow.label) ?? '通知开 · 免打扰 ${dndWindow.label}' : l10nOf(context)?.settingsNotificationsDoDisturb2 ?? '通知开 · 未设免打扰')
+                    : l10nOf(context)?.settingsNotificationsOff ?? '通知已关闭',
                 page: const SettingsNotificationPage(),
               ),
               SettingsNavTile(
                 icon: Icons.shield_outlined,
-                title: '隐私与数据',
-                subtitle: '加好友限制 / 访问踪迹 / 聊天记录 / 存储占用',
+                title: l10nOf(context)?.settingsPrivacyData ?? '隐私与数据',
+                subtitle: l10nOf(context)?.settingsFriendRequestLimitsVisit ?? '加好友限制 / 访问踪迹 / 聊天记录 / 存储占用',
                 page: const SettingsPrivacyPage(),
               ),
 
-              const SettingsSectionHeader('其他'),
+              SettingsSectionHeader(l10nOf(context)?.settingsAboutOther ?? '其他'),
               SettingsNavTile(
                 icon: Icons.info_outline,
-                title: '关于 MnChat',
-                subtitle: 'v$kAppVersion · 检查更新 / 开源许可 / 诊断导出',
+                title: l10nOf(context)?.settingsAboutMnChat ?? '关于 MnChat',
+                subtitle: l10nOf(context)?.settingsVCheckUpdatesOpen(kAppVersion) ?? 'v$kAppVersion · 检查更新 / 开源许可 / 诊断导出',
                 page: const SettingsAboutPage(),
               ),
 
@@ -123,7 +127,7 @@ class SettingsPage extends ConsumerWidget {
               OutlinedButton.icon(
                 onPressed: () => _logout(context, ref),
                 icon: const Icon(Icons.logout),
-                label: const Text('退出登录'),
+                label: Text(l10nOf(context)?.settingsSignOut ?? '退出登录'),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: theme.colorScheme.error,
                   minimumSize: const Size.fromHeight(48),

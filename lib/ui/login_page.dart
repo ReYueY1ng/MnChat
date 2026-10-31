@@ -8,6 +8,8 @@ import 'widgets/head_frame.dart' show kAvatarListTileDensity, headFrameSlotSize;
 import 'widgets/rich_text_view.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 登录/切换账号页：选择已保存账号一键登录；也可添加新账号。
 ///
 /// - 有已保存账号 → 默认展示账号列表，点选即登录（不再手动输入）；
@@ -97,16 +99,19 @@ class _LoginPageState extends ConsumerState<LoginPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('移除账号'),
-        content: Text('移除 ${acc.name ?? '${acc.uin}'}？\n（不影响游戏端账号）'),
+        title: Text(l10nOf(context)?.loginRemoveAccount ?? '移除账号'),
+        content: Text(
+          l10nOf(context)?.loginRemoveAccountConfirm(acc.name ?? '${acc.uin}') ??
+              '移除 ${acc.name ?? '${acc.uin}'}？\n（不影响游戏端账号）',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('移除'),
+            child: Text(l10nOf(context)?.loginRemove ?? '移除'),
           ),
         ],
       ),
@@ -153,7 +158,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                       style: theme.textTheme.headlineSmall,
                     ),
                     Text(
-                      '迷你世界外部聊天 · 选择账号登录',
+                      l10nOf(context)?.loginMiniWorldExternalChat ?? '迷你世界外部聊天 · 选择账号登录',
                       textAlign: TextAlign.center,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: theme.colorScheme.outline,
@@ -176,7 +181,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                             ? null
                             : () => setState(() => _showForm = true),
                         icon: const Icon(Icons.person_add_alt_1),
-                        label: const Text('添加账号'),
+                        label: Text(l10nOf(context)?.loginAddAccount ?? '添加账号'),
                       ),
                   ],
                 ),
@@ -196,13 +201,13 @@ class _LoginPageState extends ConsumerState<LoginPage> {
         if (_accounts.isEmpty) ...[
           const SizedBox(height: AppSpacing.sm),
           Text(
-            '还没有保存的账号',
+            l10nOf(context)?.loginNoSavedAccountsYet ?? '还没有保存的账号',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: AppSpacing.xs),
         ] else ...[
-          const Text('选择账号', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(l10nOf(context)?.loginChooseAccount ?? '选择账号', style: TextStyle(fontWeight: FontWeight.w600)),
           const SizedBox(height: AppSpacing.sm),
           ..._accounts.map((acc) {
             final name = acc.name != null && acc.name!.isNotEmpty
@@ -234,9 +239,9 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
-                subtitle: Text('迷你号 ${acc.uin}'),
+                subtitle: Text(l10nOf(context)?.loginMiniID(acc.uin) ?? '迷你号 ${acc.uin}'),
                 trailing: IconButton(
-                  tooltip: '移除',
+                  tooltip: l10nOf(context)?.loginRemove ?? '移除',
                   icon: Icon(
                     Icons.delete_outline,
                     size: 20,
@@ -266,15 +271,15 @@ class _LoginPageState extends ConsumerState<LoginPage> {
           TextFormField(
             controller: _uinCtrl,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              labelText: 'Uin / 迷你号',
+            decoration: InputDecoration(
+              labelText: l10nOf(context)?.loginUinMiniID ?? 'Uin / 迷你号',
               prefixIcon: Icon(Icons.tag),
             ),
             validator: (v) =>
                 (v == null ||
                     v.trim().isEmpty ||
                     int.tryParse(v.trim()) == null)
-                ? '请输入有效的迷你号'
+                ? l10nOf(context)?.friendRequestEnterValidMiniID ?? '请输入有效的迷你号'
                 : null,
           ),
           const SizedBox(height: AppSpacing.md),
@@ -282,14 +287,14 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             controller: _pwdCtrl,
             obscureText: !_showPwd,
             decoration: InputDecoration(
-              labelText: '密码',
+              labelText: l10nOf(context)?.loginPassword ?? '密码',
               prefixIcon: const Icon(Icons.lock_outline),
               suffixIcon: IconButton(
                 icon: Icon(_showPwd ? Icons.visibility_off : Icons.visibility),
                 onPressed: () => setState(() => _showPwd = !_showPwd),
               ),
             ),
-            validator: (v) => (v == null || v.isEmpty) ? '请输入密码' : null,
+            validator: (v) => (v == null || v.isEmpty) ? l10nOf(context)?.loginEnterPassword ?? '请输入密码' : null,
             onFieldSubmitted: (_) => _submitForm(),
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -297,7 +302,7 @@ class _LoginPageState extends ConsumerState<LoginPage> {
             contentPadding: EdgeInsets.zero,
             controlAffinity: ListTileControlAffinity.leading,
             dense: true,
-            title: const Text('下次自动登录'),
+            title: Text(l10nOf(context)?.loginSignAutomaticallyNextTime ?? '下次自动登录'),
             value: _autoLogin,
             onChanged: _autoLoginLoaded
                 ? (v) async {
@@ -320,17 +325,17 @@ class _LoginPageState extends ConsumerState<LoginPage> {
                 : const Icon(Icons.login),
             label: Text(
               _busy
-                  ? '登录中…'
+                  ? l10nOf(context)?.loginSigning ?? '登录中…'
                   // 首装（还没有任何保存的账号）时“登录并添加”读起来别扭；
                   // 只有已经有账号列表时才是“添加”。
-                  : (_accounts.isEmpty ? '登录' : '登录并添加'),
+                  : (_accounts.isEmpty ? l10nOf(context)?.loginSign ?? '登录' : l10nOf(context)?.loginSignAdd ?? '登录并添加'),
             ),
           ),
           if (_accounts.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             TextButton(
               onPressed: () => setState(() => _showForm = false),
-              child: const Text('返回账号列表'),
+              child: Text(l10nOf(context)?.loginBackAccountList ?? '返回账号列表'),
             ),
           ],
         ],

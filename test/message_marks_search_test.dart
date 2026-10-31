@@ -201,8 +201,8 @@ void main() {
     });
   });
 
-  test('schema 版本为 10 且虚表存在', () async {
-    expect(db.schemaVersion, 10);
+  test('schema 版本为 11 且虚表存在', () async {
+    expect(db.schemaVersion, 11);
     final rows = await db
         .customSelect("SELECT name FROM sqlite_master WHERE name = ?", variables: [Variable.withString(kFtsTableName)])
         .get();

@@ -8,7 +8,7 @@ mixin _ProfilePageStateActions
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('迷你号已复制')));
+    ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.profileMiniIDCopied ?? '迷你号已复制')));
   }
 
   /// 打开交友标签页，返回后刷新交友宣言（横幅 / 版块同步更新）。
@@ -69,16 +69,16 @@ mixin _ProfilePageStateActions
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('使用该头像框'),
-        content: Text('确定使用头像框 #$id 吗？'),
+        title: Text(l10nOf(context)?.profileUseAvatarFrame ?? '使用该头像框'),
+        content: Text(l10nOf(context)?.profileUseAvatarFrame2(id) ?? '确定使用头像框 #$id 吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('使用'),
+            child: Text(l10nOf(context)?.profileUse ?? '使用'),
           ),
         ],
       ),
@@ -92,15 +92,15 @@ mixin _ProfilePageStateActions
       if (ok) {
         setState(() => _frameId = id);
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('头像框已更新')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.profileAvatarFrameUpdated ?? '头像框已更新')));
       } else {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('设置失败，请稍后重试')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试')));
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e')));
     }
   }
 
@@ -113,16 +113,16 @@ mixin _ProfilePageStateActions
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('使用该头像'),
-        content: const Text('确定使用该皮肤作为头像吗？'),
+        title: Text(l10nOf(context)?.profileUseAvatar ?? '使用该头像'),
+        content: Text(l10nOf(context)?.profileUseSkinAvatar ?? '确定使用该皮肤作为头像吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('使用'),
+            child: Text(l10nOf(context)?.profileUse ?? '使用'),
           ),
         ],
       ),
@@ -139,15 +139,15 @@ mixin _ProfilePageStateActions
           _headId = skinId;
         });
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('头像已更新')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditAvatarUpdated ?? '头像已更新')));
       } else {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('设置失败，请稍后重试')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试')));
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e')));
     }
   }
 
@@ -160,16 +160,16 @@ mixin _ProfilePageStateActions
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('使用该立绘'),
-        content: const Text('确定使用该立绘作为头像吗？'),
+        title: Text(l10nOf(context)?.profileUseArtwork ?? '使用该立绘'),
+        content: Text(l10nOf(context)?.profileUseArtworkAvatar ?? '确定使用该立绘作为头像吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('使用'),
+            child: Text(l10nOf(context)?.profileUse ?? '使用'),
           ),
         ],
       ),
@@ -186,15 +186,15 @@ mixin _ProfilePageStateActions
           _headId = p.id;
         });
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('头像已更新')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditAvatarUpdated ?? '头像已更新')));
       } else {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('设置失败，请稍后重试')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试')));
       }
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('设置失败：$e')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e')));
     }
   }
 

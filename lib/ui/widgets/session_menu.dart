@@ -18,6 +18,8 @@ import '../../state/providers.dart';
 import 'friend_tag_dialog.dart' show showFriendTagDialog;
 import '../theme/app_tokens.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 会话菜单操作项。
 enum _SessionMenuAction {
   notify,
@@ -73,41 +75,41 @@ Future<void> showSessionMenu(
         _menuItem(
           _SessionMenuAction.notify,
           notifyOn ? Icons.notifications_active : Icons.notifications_none,
-          notifyOn ? '取消上线通知' : '上线通知',
+          notifyOn ? l10nOf(context)?.sessionMenuCancelOnlineNotification ?? '取消上线通知' : l10nOf(context)?.friendsOnlineNotifications ?? '上线通知',
           color: notifyOn ? theme.colorScheme.primary : null,
         ),
       // 置顶
       _menuItem(
         _SessionMenuAction.pin,
         pinned ? Icons.push_pin : Icons.push_pin_outlined,
-        pinned ? '取消置顶' : '置顶',
+        pinned ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶',
         color: pinned ? theme.colorScheme.primary : null,
       ),
       // 免打扰
       _menuItem(
         _SessionMenuAction.mute,
         muted ? Icons.notifications_off : Icons.notifications_outlined,
-        muted ? '取消免打扰' : '免打扰',
+        muted ? l10nOf(context)?.sessionMenuCancelDoDisturb ?? '取消免打扰' : l10nOf(context)?.sessionMenuDoDisturb ?? '免打扰',
         color: muted ? theme.colorScheme.error : null,
       ),
       // 以下仅好友会话
       if (isFriend) ...[
         const PopupMenuDivider(),
-        _menuItem(_SessionMenuAction.pat, Icons.touch_app_outlined, '拍一拍'),
-        _menuItem(_SessionMenuAction.tag, Icons.label_outline, '标签'),
-        _menuItem(_SessionMenuAction.note, Icons.edit_note, '备注'),
+        _menuItem(_SessionMenuAction.pat, Icons.touch_app_outlined, l10nOf(context)?.sessionMenuNudge ?? '拍一拍'),
+        _menuItem(_SessionMenuAction.tag, Icons.label_outline, l10nOf(context)?.friendFilterTags ?? '标签'),
+        _menuItem(_SessionMenuAction.note, Icons.edit_note, l10nOf(context)?.sessionMenuNote ?? '备注'),
       ],
       // 「移除会话」只在宿主能真的把它从列表里撤掉时才有意义
       //（好友页是按好友维度列人，不是会话列表 → 不传 onRemoved）。
       if (onRemoved != null) ...[
         const PopupMenuDivider(),
-        _menuItem(_SessionMenuAction.remove, Icons.delete_outline, '移除会话'),
+        _menuItem(_SessionMenuAction.remove, Icons.delete_outline, l10nOf(context)?.sessionMenuRemoveConversation ?? '移除会话'),
       ],
       if (isFriend)
         _menuItem(
           _SessionMenuAction.deleteFriend,
           Icons.person_remove_outlined,
-          '删除好友',
+          l10nOf(context)?.sessionMenuDeleteFriend ?? '删除好友',
           color: errorColor,
         ),
     ],
@@ -118,17 +120,17 @@ Future<void> showSessionMenu(
     case _SessionMenuAction.notify:
       await settings.setFriendOnlineNotify(uin, !notifyOn);
       if (context.mounted) {
-        _toast(context, notifyOn ? '已关闭上线通知' : '已开启上线通知');
+        _toast(context, notifyOn ? l10nOf(context)?.sessionMenuOnlineNotificationOff ?? '已关闭上线通知' : l10nOf(context)?.sessionMenuOnlineNotification ?? '已开启上线通知');
       }
     case _SessionMenuAction.pin:
       await settings.setPinned(sessionKey2, !pinned);
       if (context.mounted) {
-        _toast(context, pinned ? '已取消置顶' : '已置顶');
+        _toast(context, pinned ? l10nOf(context)?.commonUnpinned ?? '已取消置顶' : l10nOf(context)?.commonPinned ?? '已置顶');
       }
     case _SessionMenuAction.mute:
       await settings.setMuted(sessionKey2, !muted);
       if (context.mounted) {
-        _toast(context, muted ? '已取消免打扰' : '已开启免打扰');
+        _toast(context, muted ? l10nOf(context)?.sessionMenuDoDisturbOff ?? '已取消免打扰' : l10nOf(context)?.sessionMenuDoDisturb2 ?? '已开启免打扰');
       }
     case _SessionMenuAction.pat:
       var ok = false;
@@ -137,7 +139,7 @@ Future<void> showSessionMenu(
       } catch (_) {
         ok = false;
       }
-      if (context.mounted) _toast(context, ok ? '已拍一拍' : '拍一拍失败');
+      if (context.mounted) _toast(context, ok ? l10nOf(context)?.sessionMenuNudged ?? '已拍一拍' : l10nOf(context)?.sessionMenuFailedNudge ?? '拍一拍失败');
     case _SessionMenuAction.tag:
       await showFriendTagDialog(context, ref, uins: [uin]);
     case _SessionMenuAction.note:
@@ -188,24 +190,24 @@ Future<void> _editFriendNote(
   final ok = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('备注'),
+      title: Text(l10nOf(context)?.sessionMenuNote ?? '备注'),
       content: TextField(
         controller: ctrl,
         maxLength: 20,
         autofocus: true,
-        decoration: const InputDecoration(
-          labelText: '备注名',
-          hintText: '输入备注名，留空则清除',
+        decoration: InputDecoration(
+          labelText: l10nOf(context)?.sessionMenuNoteName ?? '备注名',
+          hintText: l10nOf(context)?.sessionMenuEnterNoteNameLeave ?? '输入备注名，留空则清除',
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('确定'),
+          child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
         ),
       ],
     ),
@@ -213,7 +215,7 @@ Future<void> _editFriendNote(
   if (ok == true) {
     await settings.setFriendNote(uin, ctrl.text);
     if (context.mounted) {
-      _toast(context, '备注已保存');
+      _toast(context, l10nOf(context)?.sessionMenuNoteSaved ?? '备注已保存');
     }
   }
   ctrl.dispose();
@@ -231,12 +233,12 @@ Future<void> _confirmRemoveFriend(
     builder: (ctx) {
       final theme = Theme.of(ctx);
       return AlertDialog(
-        title: const Text('删除好友'),
-        content: Text('确定删除好友「${plainNickname(name)}」吗？'),
+        title: Text(l10nOf(context)?.sessionMenuDeleteFriend ?? '删除好友'),
+        content: Text(l10nOf(context)?.sessionMenuDeleteFriend2(plainNickname(name)) ?? '确定删除好友「${plainNickname(name)}」吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             style: FilledButton.styleFrom(
@@ -244,7 +246,7 @@ Future<void> _confirmRemoveFriend(
               foregroundColor: theme.colorScheme.onError,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('删除'),
+            child: Text(l10nOf(context)?.actionDelete ?? '删除'),
           ),
         ],
       );
@@ -253,6 +255,6 @@ Future<void> _confirmRemoveFriend(
   if (ok != true || !context.mounted) return;
   final removed = await ref.read(chatServiceProvider).removeFriend(uin);
   if (context.mounted) {
-    _toast(context, removed ? '已删除好友' : '删除失败');
+    _toast(context, removed ? l10nOf(context)?.sessionMenuFriendDeleted ?? '已删除好友' : l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
   }
 }

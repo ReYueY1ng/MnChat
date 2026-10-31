@@ -16,7 +16,7 @@ mixin _AvatarEditStateData
         ok = await injected();
       } else {
         final picked = await FilePicker.pickFile(
-          dialogTitle: '选择自定义头像',
+          dialogTitle: l10nOf(context)?.avatarEditChooseCustomAvatar ?? '选择自定义头像',
           type: FileType.custom,
           allowedExtensions: const ['png', 'jpg', 'jpeg'],
         );
@@ -36,13 +36,13 @@ mixin _AvatarEditStateData
       }
       if (!mounted) return;
       if (ok) {
-        _toast('上传成功，等待审核');
+        _toast(l10nOf(context)?.avatarEditUploadedPendingReview ?? '上传成功，等待审核');
         await _loadDiy();
       } else {
-        _toast('上传失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditUploadFailedTryAgain ?? '上传失败，请稍后重试');
       }
     } catch (e) {
-      if (mounted) _toast('上传失败：$e');
+      if (mounted) _toast(l10nOf(context)?.avatarEditUploadFailed(e) ?? '上传失败：$e');
     } finally {
       if (mounted) setState(() => _diyUploading = false);
     }
@@ -53,7 +53,7 @@ mixin _AvatarEditStateData
     final head = _diyHead;
     if (head == null) return;
     if (head.auditState == DiyAuditState.failed) {
-      _toast('当前图片违规无法使用');
+      _toast(l10nOf(context)?.avatarEditThisImageViolatesRules ?? '当前图片违规无法使用');
       return;
     }
     if (_useDiy) return;
@@ -62,7 +62,7 @@ mixin _AvatarEditStateData
     final type = head.type ?? _headType ?? 1;
     final id = head.id ?? _headId ?? 0;
     if (id <= 0) {
-      _toast('头像信息缺失，请稍后重试');
+      _toast(l10nOf(context)?.avatarEditAvatarInfoMissingTry ?? '头像信息缺失，请稍后重试');
       return;
     }
     try {
@@ -76,15 +76,15 @@ mixin _AvatarEditStateData
         });
         _toast(
           head.auditState == DiyAuditState.pending
-              ? '已使用，审核通过后自动替换'
-              : '头像已更新',
+              ? l10nOf(context)?.avatarEditSelectedSwitchAutomaticallyAfter ?? '已使用，审核通过后自动替换'
+              : l10nOf(context)?.avatarEditAvatarUpdated ?? '头像已更新',
         );
       } else {
-        _toast('设置失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('设置失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e');
     }
   }
 
@@ -103,13 +103,13 @@ mixin _AvatarEditStateData
           _wornTitleId = titleId;
           _changed = true;
         });
-        _toast('称号已佩戴');
+        _toast(l10nOf(context)?.avatarEditTitleEquipped ?? '称号已佩戴');
       } else {
-        _toast('佩戴失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedEquipTryAgain ?? '佩戴失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('佩戴失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedEquip(e) ?? '佩戴失败：$e');
     }
   }
 
@@ -150,13 +150,13 @@ mixin _AvatarEditStateData
           _useDiy = false;
           _changed = true;
         });
-        _toast('头像已更新');
+        _toast(l10nOf(context)?.avatarEditAvatarUpdated ?? '头像已更新');
       } else {
-        _toast('设置失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('设置失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e');
     }
   }
 
@@ -180,13 +180,13 @@ mixin _AvatarEditStateData
           _useDiy = false;
           _changed = true;
         });
-        _toast('头像已更新');
+        _toast(l10nOf(context)?.avatarEditAvatarUpdated ?? '头像已更新');
       } else {
-        _toast('设置失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('设置失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e');
     }
   }
 
@@ -204,13 +204,13 @@ mixin _AvatarEditStateData
           _frameId = id;
           _changed = true;
         });
-        _toast('头像框已更新');
+        _toast(l10nOf(context)?.profileAvatarFrameUpdated ?? '头像框已更新');
       } else {
-        _toast('设置失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedSetTryAgain ?? '设置失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('设置失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedSet(e) ?? '设置失败：$e');
     }
   }
 
@@ -232,13 +232,13 @@ mixin _AvatarEditStateData
           _changed = true;
         });
         _nicknameController.clear();
-        _toast('改名成功');
+        _toast(l10nOf(context)?.avatarEditNameChanged ?? '改名成功');
       } else {
         _toast(renameErrorText(code));
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('改名失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedChangeName(e) ?? '改名失败：$e');
     } finally {
       if (mounted) setState(() => _nicknameBusy = false);
     }
@@ -258,13 +258,13 @@ mixin _AvatarEditStateData
           _showFamilyId = family.familyId;
           _changed = true;
         });
-        _toast('展示家族已更新');
+        _toast(l10nOf(context)?.avatarEditDisplayedFamilyUpdated ?? '展示家族已更新');
       } else {
-        _toast('切换失败，请稍后重试');
+        _toast(l10nOf(context)?.avatarEditFailedSwitchTryAgain ?? '切换失败，请稍后重试');
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('切换失败：$e');
+      _toast(l10nOf(context)?.avatarEditFailedSwitch(e) ?? '切换失败：$e');
     }
   }
 

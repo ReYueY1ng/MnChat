@@ -5,9 +5,38 @@
 /// 不该在没人看的时候自己去外网拉东西。
 library;
 
+import 'dart:io';
+
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:dio/dio.dart';
 
 import '../net/http_factory.dart' show createDio;
+
+/// 一个发布产物。
+class UpdateAsset {
+  const UpdateAsset({required this.name, required this.url, this.sha256});
+
+  final String name;
+  final String url;
+
+  /// GitHub `digest` 字段里的 sha256（小写十六进制）；缺失为 null。
+  final String? sha256;
+
+  /// 扩展名（含点，小写）。
+  String get extension {
+    final i = name.lastIndexOf('.');
+    return i < 0 ? '' : name.substring(i).toLowerCase();
+  }
+}
+
+/// 下载/校验失败。
+class UpdateDownloadException implements Exception {
+  const UpdateDownloadException(this.message);
+  final String message;
+
+  @override
+  String toString() => message;
+}
 
 /// 一次检查的结果。
 class UpdateCheckResult {
@@ -16,6 +45,7 @@ class UpdateCheckResult {
     this.latest,
     this.url,
     this.error,
+    this.assets = const <UpdateAsset>[],
   });
 
   /// 当前版本（`core/app_info.dart` 的 `kAppVersion`）。
@@ -29,6 +59,18 @@ class UpdateCheckResult {
 
   /// 失败原因（网络不通 / 限流 / 返回格式异常）；成功时为 null。
   final String? error;
+
+  /// 该 Release 的产物列表（可能为空：老 Release 没上传资产）。
+  final List<UpdateAsset> assets;
+
+  /// 按扩展名挑一个产物（如 `.apk` / `.tar.gz` / `.zip`）。
+  UpdateAsset? assetForExtension(String ext) {
+    final e = ext.toLowerCase();
+    for (final a in assets) {
+      if (a.extension == e) return a;
+    }
+    return null;
+  }
 
   bool get ok => error == null && latest != null;
 
@@ -114,15 +156,90 @@ class AppUpdateClient {
       if (data is! Map) {
         return UpdateCheckResult(current: current, error: '返回格式异常');
       }
-      final tag = '${data['tag_name'] ?? ''}';
-      final url = '${data['html_url'] ?? releasesPage}';
-      final version = tag.startsWith('v') ? tag.substring(1) : tag;
-      if (version.isEmpty) {
-        return UpdateCheckResult(current: current, error: 'Release 里没有版本号');
-      }
-      return UpdateCheckResult(current: current, latest: version, url: url);
+      return parseLatestRelease(data, current: current);
     } catch (e) {
       return UpdateCheckResult(current: current, error: '$e');
     }
+  }
+
+  /// 解析 GitHub `releases/latest` 的 JSON（纯函数，便于单测）。
+  static UpdateCheckResult parseLatestRelease(
+    Map<Object?, Object?> data, {
+    required String current,
+  }) {
+    final tag = '${data['tag_name'] ?? ''}';
+    final url = '${data['html_url'] ?? releasesPage}';
+    final version = tag.startsWith('v') ? tag.substring(1) : tag;
+    if (version.isEmpty) {
+      return UpdateCheckResult(current: current, error: 'Release 里没有版本号');
+    }
+    final assets = <UpdateAsset>[];
+    final rawAssets = data['assets'];
+    if (rawAssets is List) {
+      for (final raw in rawAssets) {
+        if (raw is! Map) continue;
+        final name = '${raw['name'] ?? ''}';
+        final assetUrl = '${raw['browser_download_url'] ?? ''}';
+        if (name.isEmpty || assetUrl.isEmpty) continue;
+        final digest = '${raw['digest'] ?? ''}';
+        final sha = digest.startsWith('sha256:')
+            ? digest.substring('sha256:'.length).toLowerCase()
+            : null;
+        assets.add(UpdateAsset(name: name, url: assetUrl, sha256: sha));
+      }
+    }
+    return UpdateCheckResult(
+      current: current,
+      latest: version,
+      url: url,
+      assets: assets,
+    );
+  }
+
+  /// 只允许从 https 下载；http 仅限本机回环（测试 / 本地镜像）。
+  static bool isAllowedDownloadUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null) return false;
+    if (uri.scheme == 'https') return true;
+    if (uri.scheme == 'http') {
+      final host = uri.host;
+      return host == '127.0.0.1' || host == 'localhost' || host == '::1';
+    }
+    return false;
+  }
+
+  /// 下载产物到 [directory]，可选校验 SHA-256。
+  ///
+  /// - 非 https（本机回环除外）直接拒绝，避免把更新通道降级成明文；
+  /// - 校验失败删除已下载文件并抛 [UpdateDownloadException]；
+  /// - [onProgress] 透传 dio 的接收字节数（total 可能为 null）。
+  Future<File> downloadAsset(
+    UpdateAsset asset, {
+    required Directory directory,
+    void Function(int received, int? total)? onProgress,
+    CancelToken? cancelToken,
+  }) async {
+    if (!isAllowedDownloadUrl(asset.url)) {
+      throw const UpdateDownloadException('下载地址不是 https，已拒绝');
+    }
+    final safeName = asset.name.replaceAll(RegExp(r'[^A-Za-z0-9._-]'), '_');
+    final file = File('${directory.path}/$safeName');
+    await directory.create(recursive: true);
+    await _dio.download(
+      asset.url,
+      file.path,
+      onReceiveProgress: onProgress,
+      cancelToken: cancelToken,
+      deleteOnError: true,
+    );
+    final expected = asset.sha256;
+    if (expected != null && expected.isNotEmpty) {
+      final digest = await sha256.bind(file.openRead()).first;
+      if (digest.toString().toLowerCase() != expected.toLowerCase()) {
+        await file.delete();
+        throw const UpdateDownloadException('SHA-256 校验失败，已删除下载文件');
+      }
+    }
+    return file;
   }
 }

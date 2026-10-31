@@ -29,6 +29,8 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import '../core/services/image_disk_cache.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+import 'mail_navigation_controller.dart' show MailNavigationController;
 part 'mail_page_state.dart';
 part 'mail_page_widgets.dart';
 part 'mail_page_detail.dart';
@@ -78,22 +80,22 @@ class MailPage extends ConsumerStatefulWidget {
 }
 
 /// 相对时间（对齐 messagecenterdatamgr.lua convertTime）。
-String fmtMsgTime(int ts) {
+String fmtMsgTime(BuildContext context, int ts) {
   if (ts <= 0) return '';
   final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
   final sub = now - ts;
-  if (sub <= 60) return '刚刚';
-  if (sub <= 3600) return '${sub ~/ 60}分钟前';
-  if (sub <= 86400) return '${sub ~/ 3600}小时前';
-  if (sub <= 2592000) return '${sub ~/ 86400}天前';
+  if (sub <= 60) return l10nOf(context)?.dynamicsDetailJustNow ?? '刚刚';
+  if (sub <= 3600) return l10nOf(context)?.mailMinAgo(sub ~/ 60) ?? '${sub ~/ 60}分钟前';
+  if (sub <= 86400) return l10nOf(context)?.mailHrAgo(sub ~/ 3600) ?? '${sub ~/ 3600}小时前';
+  if (sub <= 2592000) return l10nOf(context)?.mailDAgo(sub ~/ 86400) ?? '${sub ~/ 86400}天前';
   final d = DateTime.fromMillisecondsSinceEpoch(ts * 1000);
   String p(int n) => n.toString().padLeft(2, '0');
   return '${d.year}-${p(d.month)}-${p(d.day)} ${p(d.hour)}:${p(d.minute)}';
 }
 
 /// `N小时前 IP 省`（互动通知时间行；location 为空时只显示相对时间）。
-String fmtMsgTimeIp(int ts, String location) {
-  final t = fmtMsgTime(ts);
+String fmtMsgTimeIp(BuildContext context, int ts, String location) {
+  final t = fmtMsgTime(context, ts);
   if (location.isEmpty) return t;
   return t.isEmpty ? 'IP $location' : '$t IP $location';
 }

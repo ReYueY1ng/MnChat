@@ -56,6 +56,16 @@ class Log {
   /// 供测试注入以断言级别门限，业务代码不要设置。
   static LogSink? sink;
 
+  /// 附加接收器（例如轮转文件）。即使 [sink] 已接管控制台输出，
+  /// 这些接收器仍会收到每一行——诊断日志不能因为测试替换了 sink 就丢掉。
+  static final List<LogSink> extraSinks = <LogSink>[];
+
+  /// 追加一个附加接收器。
+  static void addSink(LogSink sink) => extraSinks.add(sink);
+
+  /// 移除附加接收器（测试收尾 / 运行时切档）。
+  static void removeSink(LogSink sink) => extraSinks.remove(sink);
+
   /// 最低级别：细粒度流程跟踪，仅排障时使用。
   void trace(String message, {String tag = _defaultTag}) =>
       _write(LogLevel.trace, tag, message);
@@ -87,9 +97,16 @@ void _write(LogLevel level, String tag, String message) {
   final sink = Log.sink;
   if (sink != null) {
     sink(line);
-    return;
+  } else {
+    debugPrint(line);
   }
-  debugPrint(line);
+  for (final extra in Log.extraSinks) {
+    try {
+      extra(line);
+    } catch (_) {
+      // 附加接收器失败不能影响日志调用方。
+    }
+  }
 }
 
 /// 查询串中需要脱敏的参数名（小写比较）。

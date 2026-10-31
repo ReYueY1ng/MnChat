@@ -31,6 +31,8 @@ import '../core/services/dynamics.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 选中的本地图片（[bytes] 为原始字节，[name] 用于取扩展名）。
 typedef DynamicsPickedImage = ({String name, List<int> bytes});
 
@@ -173,11 +175,12 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
   // ── 图片 ────────────────────────────────────────────────────────────────
 
   Future<void> _pickImages() async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null || _imageBusy) return;
     final remaining = _maxPics - _pics.length;
     if (remaining <= 0) {
-      _toast('最多只能上传 $_maxPics 张图片');
+      _toast(l10nOf(context)?.publishDynamicsYouUploadMostImages(_maxPics) ?? '最多只能上传 $_maxPics 张图片');
       return;
     }
     List<DynamicsPickedImage> picked;
@@ -186,7 +189,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
           ? await widget.imagePicker!(remaining)
           : await _pickViaFilePicker();
     } catch (e) {
-      _toast('选择图片失败：$e');
+      _toast(l10n?.publishDynamicsFailedChooseImage(e) ?? '选择图片失败：$e');
       return;
     }
     if (picked.isEmpty || !mounted) return;
@@ -207,7 +210,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
 
   Future<List<DynamicsPickedImage>> _pickViaFilePicker() async {
     final files = await FilePicker.pickFiles(
-      dialogTitle: '选择图片',
+      dialogTitle: l10nOf(context)?.publishDynamicsChooseImage ?? '选择图片',
       type: FileType.image,
     );
     final out = <DynamicsPickedImage>[];
@@ -229,12 +232,12 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
       );
       if (!mounted) return;
       if (url == null) {
-        _toast('图片上传失败：${pic.name}');
+        _toast(l10nOf(context)?.publishDynamicsImageUploadFailed(pic.name) ?? '图片上传失败：${pic.name}');
         return;
       }
       setState(() => pic.url = url);
     } catch (e) {
-      if (mounted) _toast('图片上传失败：$e');
+      if (mounted) _toast(l10nOf(context)?.publishDynamicsImageUploadFailed2(e) ?? '图片上传失败：$e');
     }
   }
 
@@ -246,7 +249,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
     try {
       await client.deletePostingPic(pic.seq);
     } catch (e) {
-      if (mounted) _toast('图片删除失败：$e');
+      if (mounted) _toast(l10nOf(context)?.publishDynamicsFailedDeleteImage(e) ?? '图片删除失败：$e');
     }
   }
 
@@ -274,7 +277,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
         (a, b) => a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()),
       );
     if (friends.isEmpty) {
-      _toast('暂无好友可 @');
+      _toast(l10nOf(context)?.publishDynamicsNoFriends ?? '暂无好友可 @');
       return;
     }
     final selected = <int>{..._noticeUins};
@@ -282,7 +285,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          title: const Text('@好友'),
+          title: Text(l10nOf(context)?.publishDynamicsFriends ?? '@好友'),
           content: SizedBox(
             width: dialogContentWidth(ctx, 420),
             child: ListView(
@@ -298,7 +301,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                           ? '${c.uin}'
                           : plainNickname(c.nickname),
                     ),
-                    subtitle: Text('迷你号 ${c.uin}'),
+                    subtitle: Text(l10nOf(context)?.commonMiniID(c.uin) ?? '迷你号 ${c.uin}'),
                     onChanged: (v) => setDialogState(() {
                       if (v == true) {
                         selected.add(c.uin);
@@ -313,11 +316,11 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('取消'),
+              child: Text(l10nOf(context)?.commonCancel ?? '取消'),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(ctx, true),
-              child: const Text('确定'),
+              child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
             ),
           ],
         ),
@@ -351,7 +354,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
       time.minute,
     );
     if (!end.isAfter(earliest)) {
-      _toast('截止时间需晚于当前时间 30 分钟');
+      _toast(l10nOf(context)?.publishDynamicsDeadlineMustLeast30 ?? '截止时间需晚于当前时间 30 分钟');
       return;
     }
     setState(() => _voteEnd = end);
@@ -360,19 +363,20 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
   // ── 发布 ────────────────────────────────────────────────────────────────
 
   Future<void> _publish() async {
+    final l10n = l10nOf(context);
     final client = _client;
     final text = _textCtrl.text.trim();
     if (client == null) return;
     if (_imageBusy) {
-      _toast('图片上传中，请稍候');
+      _toast(l10nOf(context)?.publishDynamicsUploadingImagesWait ?? '图片上传中，请稍候');
       return;
     }
     if (text.isEmpty && _pics.isEmpty) {
-      _toast('请输入内容');
+      _toast(l10nOf(context)?.publishDynamicsEnterSomeContent ?? '请输入内容');
       return;
     }
     if (_pics.any((p) => p.url == null)) {
-      _toast('有图片尚未上传成功');
+      _toast(l10nOf(context)?.publishDynamicsSomeImagesHaventFinished ?? '有图片尚未上传成功');
       return;
     }
     if (_withVote) {
@@ -382,7 +386,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
           .where((s) => s.isNotEmpty)
           .toList();
       if (title.isEmpty || opts.length < 2) {
-        _toast('投票需要标题和至少 2 个选项');
+        _toast(l10nOf(context)?.publishDynamicsAVoteNeedsTitle ?? '投票需要标题和至少 2 个选项');
         return;
       }
     }
@@ -402,7 +406,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
         );
         voteId = voteResp.voteInfo?.voteId;
         if (voteId == null || voteId.isEmpty || voteId == 'null') {
-          _toast('投票创建失败');
+          _toast(l10n?.publishDynamicsFailedCreateVote ?? '投票创建失败');
           return;
         }
       }
@@ -430,13 +434,13 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
       final resp = await client.addPostingRaw(params);
       if (!mounted) return;
       if (resp.code != 0) {
-        _toast('发布失败: ret=${resp.code} ${resp.message}');
+        _toast(l10nOf(context)?.publishDynamicsFailedPublishRet(resp.code, resp.message) ?? '发布失败: ret=${resp.code} ${resp.message}');
         return;
       }
-      _toast('发布成功');
+      _toast(l10nOf(context)?.publishDynamicsPublished ?? '发布成功');
       Navigator.of(context).pop(true);
     } catch (e) {
-      _toast('发布失败: $e');
+      _toast(l10nOf(context)?.dynamicsDetailFailedPublish2(e) ?? '发布失败: $e');
     } finally {
       if (mounted) setState(() => _publishing = false);
     }
@@ -455,12 +459,12 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
     final contacts = ref.watch(contactsProvider).value ?? const <Contact>[];
     return Scaffold(
       appBar: AppBar(
-        title: const Text('发布动态'),
+        title: Text(l10nOf(context)?.dynamicsPostMoment ?? '发布动态'),
         actions: [
           TextButton(
             key: publishDynamicsSubmitKey,
             onPressed: _publishing ? null : _publish,
-            child: const Text('发布'),
+            child: Text(l10nOf(context)?.dynamicsDetailPublish ?? '发布'),
           ),
         ],
       ),
@@ -477,8 +481,8 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                       controller: _textCtrl,
                       maxLines: 6,
                       maxLength: 500,
-                      decoration: const InputDecoration(
-                        hintText: '分享新鲜事…',
+                      decoration: InputDecoration(
+                        hintText: l10nOf(context)?.publishDynamicsShareSomethingNew ?? '分享新鲜事…',
                         border: OutlineInputBorder(),
                       ),
                     ),
@@ -487,7 +491,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                     _buildPicSection(theme),
                     const SizedBox(height: AppSpacing.md),
                     // 可见范围（auth_see）
-                    Text('可见范围', style: theme.textTheme.titleSmall),
+                    Text(l10nOf(context)?.publishDynamicsVisibility ?? '可见范围', style: theme.textTheme.titleSmall),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
                       spacing: AppSpacing.sm,
@@ -506,13 +510,13 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                     // @好友（notice_uins）
                     Row(
                       children: [
-                        Text('@好友', style: theme.textTheme.titleSmall),
+                        Text(l10nOf(context)?.publishDynamicsFriends ?? '@好友', style: theme.textTheme.titleSmall),
                         const SizedBox(width: AppSpacing.sm),
                         OutlinedButton.icon(
                           key: publishDynamicsNoticeUinsKey,
                           onPressed: () => _pickNoticeUins(contacts),
                           icon: const Icon(Icons.alternate_email, size: 18),
-                          label: const Text('选择好友'),
+                          label: Text(l10nOf(context)?.publishDynamicsChooseFriends ?? '选择好友'),
                         ),
                       ],
                     ),
@@ -534,16 +538,16 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                       ),
                     const SizedBox(height: AppSpacing.md),
                     // 话题选择
-                    Text('话题（可选）', style: theme.textTheme.titleSmall),
+                    Text(l10nOf(context)?.publishDynamicsTopicOptional ?? '话题（可选）', style: theme.textTheme.titleSmall),
                     const SizedBox(height: AppSpacing.sm),
                     Row(
                       children: [
                         Expanded(
                           child: TextField(
                             controller: _topicCtrl,
-                            decoration: const InputDecoration(
+                            decoration: InputDecoration(
                               isDense: true,
-                              hintText: '搜索话题',
+                              hintText: l10nOf(context)?.publishDynamicsSearchTopics ?? '搜索话题',
                               prefixText: '# ',
                             ),
                             onSubmitted: (_) => _searchTopic(),
@@ -551,7 +555,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                         ),
                         const SizedBox(width: AppSpacing.sm),
                         IconButton(
-                          tooltip: '搜索',
+                          tooltip: l10nOf(context)?.friendsSearch ?? '搜索',
                           icon: const Icon(Icons.search),
                           onPressed: _searchTopic,
                         ),
@@ -583,16 +587,16 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                     const Divider(height: 24),
                     // 投票开关
                     SwitchListTile(
-                      title: const Text('附带投票'),
-                      subtitle: const Text('发布后可让好友投票'),
+                      title: Text(l10nOf(context)?.publishDynamicsAttachVote ?? '附带投票'),
+                      subtitle: Text(l10nOf(context)?.publishDynamicsFriendsVoteAfterYou ?? '发布后可让好友投票'),
                       value: _withVote,
                       onChanged: (v) => setState(() => _withVote = v),
                     ),
                     if (_withVote) ...[
                       TextField(
                         controller: _voteTitleCtrl,
-                        decoration: const InputDecoration(
-                          labelText: '投票标题',
+                        decoration: InputDecoration(
+                          labelText: l10nOf(context)?.publishDynamicsVoteTitle ?? '投票标题',
                           isDense: true,
                         ),
                       ),
@@ -603,20 +607,20 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                           child: TextField(
                             controller: _voteOptCtrls[i],
                             decoration: InputDecoration(
-                              labelText: '选项 ${i + 1}',
+                              labelText: l10nOf(context)?.publishDynamicsOption(i + 1) ?? '选项 ${i + 1}',
                               isDense: true,
                             ),
                           ),
                         ),
                       SwitchListTile(
-                        title: const Text('允许多选'),
+                        title: Text(l10nOf(context)?.publishDynamicsAllowMultipleChoice ?? '允许多选'),
                         value: _voteMulti,
                         onChanged: (v) => setState(() => _voteMulti = v),
                       ),
                       ListTile(
                         key: publishDynamicsVoteEndKey,
                         contentPadding: EdgeInsets.zero,
-                        title: const Text('截止时间'),
+                        title: Text(l10nOf(context)?.publishDynamicsDeadline ?? '截止时间'),
                         subtitle: Text(_formatVoteEnd(_voteEnd)),
                         trailing: const Icon(Icons.schedule),
                         onTap: _pickVoteEnd,
@@ -637,7 +641,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
         Row(
           children: [
             Text(
-              '图片（${_pics.length}/$_maxPics）',
+              l10nOf(context)?.publishDynamicsImages(_pics.length, _maxPics) ?? '图片（${_pics.length}/$_maxPics）',
               style: theme.textTheme.titleSmall,
             ),
             const SizedBox(width: AppSpacing.sm),
@@ -687,7 +691,7 @@ class _PublishDynamicsPageState extends ConsumerState<PublishDynamicsPage> {
                     Align(
                       alignment: Alignment.topRight,
                       child: IconButton(
-                        tooltip: '删除图片',
+                        tooltip: l10nOf(context)?.publishDynamicsDeleteImage ?? '删除图片',
                         visualDensity: VisualDensity.compact,
                         iconSize: 18,
                         icon: const Icon(Icons.cancel),

@@ -18,15 +18,25 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/models/friend_tag.dart';
 import '../theme/app_tokens.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 通用筛选条件（id 对齐游戏 `def_commonFilterType`：1/2/3/4）。
 enum FriendFilterCommon {
-  online('在线好友'),
-  partner('最佳拍档'),
-  onlineNotify('上线通知'),
-  invitedMe('邀请一起玩的好友');
+  online,
+  partner,
+  onlineNotify,
+  invitedMe;
 
-  const FriendFilterCommon(this.label);
-  final String label;
+  String labelOf(BuildContext context) => switch (this) {
+    FriendFilterCommon.online =>
+      l10nOf(context)?.friendFilterOnlineFriends ?? '在线好友',
+    FriendFilterCommon.partner =>
+      l10nOf(context)?.commonBestPartners ?? '最佳拍档',
+    FriendFilterCommon.onlineNotify =>
+      l10nOf(context)?.friendsOnlineNotifications ?? '上线通知',
+    FriendFilterCommon.invitedMe =>
+      l10nOf(context)?.friendFilterFriendsInvite ?? '邀请一起玩的好友',
+  };
 }
 
 /// 一次筛选的选中状态。
@@ -87,7 +97,7 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('筛选'),
+      title: Text(l10nOf(context)?.friendFilterFilter ?? '筛选'),
       contentPadding: const EdgeInsets.fromLTRB(
         AppSpacing.xl,
         AppSpacing.md,
@@ -101,7 +111,7 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text('通用', style: theme.textTheme.titleSmall),
+              Text(l10nOf(context)?.friendFilterGeneral ?? '通用', style: theme.textTheme.titleSmall),
               const SizedBox(height: AppSpacing.xs),
               Wrap(
                 spacing: AppSpacing.sm,
@@ -109,7 +119,7 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
                 children: [
                   for (final c in FriendFilterCommon.values)
                     FilterChip(
-                      label: Text(c.label),
+                      label: Text(c.labelOf(context)),
                       selected: _common.contains(c),
                       onSelected: (v) => setState(() {
                         v ? _common.add(c) : _common.remove(c);
@@ -118,13 +128,13 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
                 ],
               ),
               const SizedBox(height: AppSpacing.lg),
-              Text('标签', style: theme.textTheme.titleSmall),
+              Text(l10nOf(context)?.friendFilterTags ?? '标签', style: theme.textTheme.titleSmall),
               const SizedBox(height: AppSpacing.xs),
               if (widget.tags.isEmpty)
                 Padding(
                   padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
                   child: Text(
-                    '你还未创建标签',
+                    l10nOf(context)?.friendFilterYouHaventCreatedAny ?? '你还未创建标签',
                     style: theme.textTheme.bodyMedium?.copyWith(
                       color: theme.colorScheme.outline,
                     ),
@@ -151,7 +161,7 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
                   child: TextButton.icon(
                     onPressed: widget.onCreateTag,
                     icon: const Icon(Icons.add, size: 16),
-                    label: const Text('新建标签'),
+                    label: Text(l10nOf(context)?.friendFilterNewTag ?? '新建标签'),
                   ),
                 ),
             ],
@@ -164,13 +174,13 @@ class _FriendFilterDialogState extends State<_FriendFilterDialog> {
             _common = <FriendFilterCommon>{};
             _tags = <int>{};
           }),
-          child: const Text('重置'),
+          child: Text(l10nOf(context)?.friendFilterReset ?? '重置'),
         ),
         FilledButton(
           onPressed: () => Navigator.of(context).pop(
             FriendFilterState(common: _common, tagIds: _tags),
           ),
-          child: const Text('筛选'),
+          child: Text(l10nOf(context)?.friendFilterFilter ?? '筛选'),
         ),
       ],
     );
@@ -183,24 +193,24 @@ Future<String?> showCreateFriendTagDialog(BuildContext context) {
   return showDialog<String>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('新建标签'),
+      title: Text(l10nOf(context)?.friendFilterNewTag ?? '新建标签'),
       content: TextField(
         controller: controller,
         autofocus: true,
         maxLength: kFriendTagMaxLength,
-        decoration: const InputDecoration(hintText: '标签名（最多 5 个字）'),
+        decoration: InputDecoration(hintText: l10nOf(context)?.friendFilterTagNameMax5 ?? '标签名（最多 5 个字）'),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(ctx).pop(),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: () {
             final v = controller.text.trim();
             Navigator.of(ctx).pop(v.isEmpty ? null : v);
           },
-          child: const Text('创建'),
+          child: Text(l10nOf(context)?.accountMenuCreate ?? '创建'),
         ),
       ],
     ),

@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Generated:** 2026-10-14T15:35:47Z
-**Commit:** 2e70ab7
+**Generated:** 2026-10-31T09:00:00Z
+**Commit:** 8ce6e00 (working tree includes the 2026-10-31 repair program)
 **Branch:** main
 
 ## OVERVIEW
@@ -11,11 +11,12 @@ MNChat — a Flutter/Dart cross-platform chat client (Mini World social app). Fl
 ```
 MNChat/
 ├── lib/main.dart         # entry; wires AppDatabase, SettingsStore, all service clients
-├── lib/ui/               # MainShell + 32 *_page.dart libraries (48 files / 17,698 LOC) + widgets/ + theme/
+├── lib/app/              # desktop shell + deep-link coordinators (tray/window size/links)
+├── lib/ui/               # MainShell + 32 *_page.dart libraries (88 files / 30,044 LOC) + widgets/ + theme/
 ├── lib/core/             # framework leaf: net/, protocol/, utils/, services/ (+chat/), models/, storage/, crypto/
 ├── lib/state/            # Riverpod graph: 7 files / 1,273 LOC / 56 providers; one import surface
 ├── lib/chat/             # 2 files / 417 LOC; sessionKey adapter, forwards to core/models/session_key.dart
-├── test/                 # 94 self-contained test files / 16,074 LOC, no shared harness/fixtures
+├── test/                 # 132 test files / 21,410 LOC + test/support/harness.dart (DB/clock/mount)
 ├── tool/                 # 4 live-server Dart CLIs; emoji_anim/ Spine→webp pipeline; mitm/ capture addon
 ├── assets/               # 5,226 webp (headframes, emoticon anim); every path declared in pubspec.yaml
 ├── design/logo/          # 5 SVGs, viewBox-scaled, brand fill #108850
@@ -32,12 +33,15 @@ MNChat/
 | HTTP services | lib/core/services/ (33 clients) | all via `createDio()` in net/http_factory.dart; no inline `Dio()` |
 | WS chat pipeline | lib/core/services/chat/ | push dispatch, lifecycle, reconnect, caches |
 | Data models + parsers | lib/core/models/ | lenient: skip dirty data, never throw |
-| DB schema | lib/core/storage/ (Drift v9) | generated `app_database.g.dart` is committed; rebuild with `fvm dart run build_runner build` |
+| DB schema | lib/core/storage/ (Drift v11) | generated `app_database.g.dart` is committed; rebuild with `fvm dart run build_runner build` |
 | Crypto / signing | lib/core/crypto/ | sign chain (md5_sign), XXTEA, chatpush cipher, Lua encodings |
 | Riverpod graph | lib/state/providers.dart + 6 parts | 56 providers; imported by 66 files repo-wide (46 inside lib/) |
 | Theme tokens | lib/ui/theme/app_tokens.dart + app_theme.dart | AppSpacing/AppRadius/AppColors/AppSizes/AppSemanticColors; extend semantic colors, never raw `Color()`/magic spacing in pages |
 | Reusable UI widgets | lib/ui/widgets/ (26 modules / 7,785 LOC) | no barrel; consumers import per-file with `show` |
 | Chat message adapter | lib/chat/message_adapter.dart | `sessionKey` forwards to `models/session_key.dart` — the one definition |
+| Chat history paging | lib/core/services/chat/history_pager.dart | cursor `(time,id)`, load-older, day windows; UI bar in `ui/chat_page.dart` |
+| Failed-send retry | lib/core/services/chat/outbox.dart | persisted outbox, backoff+jitter, flush on reconnect |
+| Diagnostics / logs | lib/core/services/diagnostics.dart + utils/rotating_log.dart | rotating log, crash hooks, export from About |
 | Android native bridge | android/.../MainActivity.kt + lib/core/services/native_bridge.dart | MethodChannel `mnchat/native`, 1:1 with the Dart side |
 | Acceptance / smoke tests | tool/*.dart | 4 live-server CLI scripts; creds from `MNC_UIN`/`MNC_PASSWD` env or local MNClient config |
 

@@ -207,7 +207,7 @@ class _Highlighted extends StatelessWidget {
     final theme = Theme.of(context);
     final base = theme.textTheme.bodyMedium;
     if (text.isEmpty) {
-      return Text('（无文本内容）', style: base);
+      return Text(l10nOf(context)?.chatNoTextContent ?? '（无文本内容）', style: base);
     }
     final at = query.isEmpty ? -1 : text.toLowerCase().indexOf(query);
     if (at < 0) {

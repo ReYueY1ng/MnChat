@@ -8,6 +8,8 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 家族页 —— 我的家族信息 + 成员列表 + 家族消息。
 class FamilyPage extends ConsumerStatefulWidget {
   const FamilyPage({super.key});
@@ -55,7 +57,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     if (auth == null) {
       setState(() {
         _loading = false;
-        _error = '未登录';
+        _error = l10nOf(context)?.commonNotSignedIn ?? '未登录';
       });
       return;
     }
@@ -64,6 +66,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   }
 
   Future<void> _load() async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
     setState(() {
@@ -103,7 +106,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
       // 家族成员头像（拿不到就保持首字占位，不阻断加载）。
       await _loadAvatars(infos.expand((f) => f.members.map((m) => m.uin)));
     } catch (e) {
-      _error = '加载失败: $e';
+      _error = l10n?.commonFailedLoad2(e) ?? '加载失败: $e';
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -140,7 +143,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('发送失败: $e')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.chatFailedSend(e) ?? '发送失败: $e')));
       }
     }
   }
@@ -152,16 +155,16 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('退出家族'),
-        content: Text('确定退出「${family.name}」吗？'),
+        title: Text(l10nOf(context)?.familyLeaveFamily ?? '退出家族'),
+        content: Text(l10nOf(context)?.familyLeave(family.name) ?? '确定退出「${family.name}」吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -174,7 +177,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('退出失败: $e')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.familyFailedLeave(e) ?? '退出失败: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -185,15 +188,15 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('家族'),
+        title: Text(l10nOf(context)?.commonFamily ?? '家族'),
         actions: [
           IconButton(
-            tooltip: '入族申请',
+            tooltip: l10nOf(context)?.familyFamilyJoinRequests ?? '入族申请',
             icon: const Icon(Icons.person_add_alt_1_outlined),
             onPressed: _loading ? null : _showApplyList,
           ),
           IconButton(
-            tooltip: '刷新',
+            tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _load,
           ),
@@ -210,6 +213,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
 
   /// 入族申请列表（仅族长可见审批按钮）。
   Future<void> _showApplyList() async {
+    final l10n = l10nOf(context);
     final client = _client;
     final family = _family;
     if (client == null || family == null) return;
@@ -218,7 +222,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     final applies = detail.applies;
     if (applies.isEmpty) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('暂无入族申请')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.familyNoFamilyJoinRequests ?? '暂无入族申请')));
       return;
     }
     await _loadAvatars(applies.map((a) => a.uin));
@@ -231,9 +235,9 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
-                '入族申请',
+                l10nOf(context)?.familyFamilyJoinRequests ?? '入族申请',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -251,13 +255,13 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                   frameId: _avatars[uin]?.headFrameId,
                 ),
                 title: Text(name),
-                subtitle: Text('迷你号 $uin'),
+                subtitle: Text(l10nOf(context)?.commonMiniID2(uin) ?? '迷你号 $uin'),
                 trailing: isLeader
                     ? Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           IconButton(
-                            tooltip: '通过',
+                            tooltip: l10nOf(context)?.familyApprove ?? '通过',
                             icon: Icon(
                               Icons.check,
                               color: AppSemanticColors.of(ctx).success,
@@ -268,11 +272,11 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                                 familyId: family.familyId,
                               );
                               if (ctx.mounted) Navigator.of(ctx).pop();
-                              _toast('已通过');
+                              _toast(l10n?.familyApproved ?? '已通过');
                             },
                           ),
                           IconButton(
-                            tooltip: '拒绝',
+                            tooltip: l10nOf(context)?.friendRequestReject ?? '拒绝',
                             icon: Icon(
                               Icons.close,
                               color: Theme.of(ctx).colorScheme.error,
@@ -284,7 +288,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                                 reject: true,
                               );
                               if (ctx.mounted) Navigator.of(ctx).pop();
-                              _toast('已拒绝');
+                              _toast(l10n?.familyRejected ?? '已拒绝');
                             },
                           ),
                         ],
@@ -307,11 +311,11 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
     if (_loading) return const Center(child: CircularProgressIndicator());
     if (_error != null) {
       return Center(
-        child: Text('$_error\n\n点击右上角刷新', textAlign: TextAlign.center),
+        child: Text(l10nOf(context)?.familyRefreshHint(_error.toString()) ?? '$_error\n\n点击右上角刷新', textAlign: TextAlign.center),
       );
     }
     final family = _family;
-    if (family == null) return const Center(child: Text('你尚未加入任何家族'));
+    if (family == null) return Center(child: Text(l10nOf(context)?.familyYouHaventJoinedAny ?? '你尚未加入任何家族'));
     final myUin = ref.watch(myUinProvider);
     final isLeader = family.leaderUin == myUin;
     final scheme = Theme.of(context).colorScheme;
@@ -330,7 +334,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                     AppSpacing.xs,
                   ),
                   child: Text(
-                    '已加入 ${_families.length} 个家族',
+                    l10nOf(context)?.familyJoinedFamilies(_families.length) ?? '已加入 ${_families.length} 个家族',
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -356,29 +360,29 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                 ),
                 const Divider(),
               ],
-              _InfoTile(icon: Icons.home, label: '家族', value: family.name),
+              _InfoTile(icon: Icons.home, label: l10nOf(context)?.commonFamily ?? '家族', value: family.name),
               _InfoTile(
                 icon: Icons.star,
-                label: '族长',
+                label: l10nOf(context)?.familyLeader ?? '族长',
                 value: '${family.leaderUin}',
               ),
               _InfoTile(
                 icon: Icons.groups,
-                label: '成员数',
+                label: l10nOf(context)?.familyMembers ?? '成员数',
                 value: '${family.memberCount}',
               ),
               if (family.notice != null && family.notice!.isNotEmpty)
                 ListTile(
                   leading: const Icon(Icons.campaign),
-                  title: const Text('公告'),
+                  title: Text(l10nOf(context)?.familyAnnouncement ?? '公告'),
                   subtitle: Text(family.notice!),
                 ),
               const Divider(),
               if (family.members.isNotEmpty) ...[
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
                   child: Text(
-                    '成员',
+                    l10nOf(context)?.familyMembers2 ?? '成员',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -396,7 +400,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                     ),
                     trailing: m.isLeader
                         ? Chip(
-                            label: const Text('族长'),
+                            label: Text(l10nOf(context)?.familyLeader ?? '族长'),
                             visualDensity: adaptiveDensity(context),
                           )
                         : null,
@@ -405,10 +409,10 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
               ],
               const Divider(),
               // 家族消息
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.sm, AppSpacing.lg, AppSpacing.xs),
                 child: Text(
-                  '家族消息',
+                  l10nOf(context)?.familyFamilyMessages ?? '家族消息',
                   style: TextStyle(fontWeight: FontWeight.w600),
                 ),
               ),
@@ -416,7 +420,7 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                 Padding(
                   padding: AppSpacing.listTilePadding,
                   child: Text(
-                    '暂无家族消息',
+                    l10nOf(context)?.familyNoFamilyMessages ?? '暂无家族消息',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                 )
@@ -444,8 +448,8 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                     Expanded(
                       child: TextField(
                         controller: _msgController,
-                        decoration: const InputDecoration(
-                          hintText: '发家族消息…',
+                        decoration: InputDecoration(
+                          hintText: l10nOf(context)?.familyMessageFamily ?? '发家族消息…',
                           isDense: true,
                           border: OutlineInputBorder(),
                         ),
@@ -465,13 +469,13 @@ class _FamilyPageState extends ConsumerState<FamilyPage> {
                 children: [
                   TextButton(
                     onPressed: _busy ? null : _quitFamily,
-                    child: const Text('退出家族'),
+                    child: Text(l10nOf(context)?.familyLeaveFamily ?? '退出家族'),
                   ),
                   if (isLeader) ...[
                     const SizedBox(width: AppSpacing.sm),
                     TextButton(
                       onPressed: _busy ? null : () {},
-                      child: const Text('转让族长'),
+                      child: Text(l10nOf(context)?.familyTransferLeadership ?? '转让族长'),
                     ),
                   ],
                   const Spacer(),

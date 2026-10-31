@@ -17,6 +17,15 @@ part 'app_database.g.dart';
 )
 /// 单账号全量消息按 time 排序（启动恢复）。
 @TableIndex(name: 'idx_chat_messages_owner_time', columns: {#ownerUin, #time})
+/// 逻辑消息去重：同一发送者在同一秒发出同样正文只允许一行。
+///
+/// 推送重放、历史合并、重启恢复都会再次到达同一条消息；以前靠内存去重，
+/// 内存被裁剪或进程重启后就会写出重复行。这个唯一索引把幂等性交给数据库。
+@TableIndex(
+  name: 'idx_chat_messages_dedupe',
+  columns: {#ownerUin, #sessionKey, #uin, #time, #content},
+  unique: true,
+)
 @DataClassName('ChatMessageRecord')
 class ChatMessages extends Table {
   IntColumn get id => integer().autoIncrement()();
@@ -121,8 +130,63 @@ class SettingsTable extends Table {
   Set<Column> get primaryKey => {key};
 }
 
+/// 待发送队列（发件箱）：网络失败的消息落在这里，恢复后按退避重发。
+///
+/// 消息本体只存发送所需的最小字段；`(owner_uin, session_key, text)` 不作为
+/// 唯一键 —— 同一句话可以合法地发两次，去重只在入队时按未发送行判断。
+@TableIndex(
+  name: 'idx_chat_outbox_owner_next',
+  columns: {#ownerUin, #nextAttemptAt},
+)
+@DataClassName('ChatOutboxRecord')
+class ChatOutbox extends Table {
+  IntColumn get id => integer().autoIncrement()();
+
+  /// 账号归属（多账号隔离）。
+  IntColumn get ownerUin => integer()();
+
+  /// 会话 key（`friend_123` / `group_456`）。
+  TextColumn get sessionKey => text()();
+
+  /// 会话类型（1=好友，2=群；与 `ChatSessionType.index + 1` 对应）。
+  IntColumn get typeId => integer()();
+
+  /// 好友 uin 或群 id。
+  IntColumn get sessionId => integer()();
+
+  /// 消息正文（列名不能叫 `text`：与 drift `Table.text` 方法冲突）。
+  TextColumn get content => text()();
+
+  /// 私有信封（引用/输入状态）的 extend_data；普通文本为空。
+  TextColumn get extendData => text().nullable()();
+
+  /// 服务端消息类型（1=普通文本，3/4=卡片）。
+  IntColumn get msgType => integer().withDefault(const Constant(1))();
+
+  IntColumn get createdAt => integer()();
+
+  /// 已尝试次数（0 = 还没重试过）。
+  IntColumn get attempts => integer().withDefault(const Constant(0))();
+
+  /// 下一次可重试的时间（epoch 秒）。
+  IntColumn get nextAttemptAt => integer()();
+
+  /// 最近一次失败原因，供 UI 显示。
+  TextColumn get lastError => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {id};
+}
+
 @DriftDatabase(
-  tables: [ChatMessages, ChatSessions, Friends, MessageMarks, SettingsTable],
+  tables: [
+    ChatMessages,
+    ChatSessions,
+    Friends,
+    MessageMarks,
+    SettingsTable,
+    ChatOutbox,
+  ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
@@ -134,7 +198,7 @@ class AppDatabase extends _$AppDatabase {
   bool _ftsAvailable = true;
 
   @override
-  int get schemaVersion => 10;
+  int get schemaVersion => 11;
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -211,6 +275,19 @@ class AppDatabase extends _$AppDatabase {
         await m.createIndex(idxMessageMarksOwnerKind);
         await _createFullTextSearch();
       }
+      if (from < 11) {
+        // v10→v11: 消息幂等 + 发件箱。
+        // 1) 全量同步/重放可能在旧库里留下重复行，先清理再建唯一索引，
+        //    否则 createIndex 会直接失败（整次迁移中断）。保留 id 最小的一行。
+        await customStatement(
+          'DELETE FROM chat_messages WHERE id NOT IN ('
+          'SELECT MIN(id) FROM chat_messages '
+          'GROUP BY owner_uin, session_key, uin, time, content)',
+        );
+        await m.createIndex(idxChatMessagesDedupe);
+        await m.createTable(chatOutbox);
+        await m.createIndex(idxChatOutboxOwnerNext);
+      }
     },
   );
 
@@ -237,6 +314,11 @@ class AppDatabase extends _$AppDatabase {
   Future<void> insertMessage(ChatMessagesCompanion row) =>
       into(chatMessages).insert(row);
 
+  /// 幂等写入：逻辑消息已存在时静默跳过（返回 0），依靠
+  /// `idx_chat_messages_dedupe` 唯一索引。推送重放/历史合并依赖它。
+  Future<int> insertMessageIdempotent(ChatMessagesCompanion row) =>
+      into(chatMessages).insert(row, mode: InsertMode.insertOrIgnore);
+
   /// 查询某会话消息（按账号隔离）。
   Future<List<ChatMessageRecord>> messagesOf(
     int ownerUin,
@@ -260,6 +342,96 @@ class AppDatabase extends _$AppDatabase {
     return query.get();
   }
 
+  /// 启动恢复用：账号下**最新**的 [limit] 行（time 降序，id 降序）。
+  ///
+  /// 与 [allMessages] 的区别是「取哪一端」：历史只增不减，取最早的一批会让
+  /// 数据量大的账号永远看不到最近的消息。调用方按会话分组后取每会话前 N 条，
+  /// 再反转成升序渲染。
+  Future<List<ChatMessageRecord>> newestMessages(
+    int ownerUin, {
+    int limit = 10000,
+  }) {
+    final query = select(chatMessages)
+      ..where((t) => t.ownerUin.equals(ownerUin))
+      ..orderBy([
+        (t) => OrderingTerm.desc(t.time),
+        (t) => OrderingTerm.desc(t.id),
+      ])
+      ..limit(limit);
+    return query.get();
+  }
+
+  /// 某会话最新 [limit] 条，升序返回（可直接渲染）。
+  Future<List<ChatMessageRecord>> latestMessages(
+    int ownerUin,
+    String key, {
+    int limit = 50,
+  }) async {
+    final rows = await (select(chatMessages)
+          ..where(
+            (t) => t.ownerUin.equals(ownerUin) & t.sessionKey.equals(key),
+          )
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.time),
+            (t) => OrderingTerm.desc(t.id),
+          ])
+          ..limit(limit))
+        .get();
+    return rows.reversed.toList(growable: false);
+  }
+
+  /// 更早一页：以 `(beforeTime, beforeId)` 为游标（keyset 分页）。
+  ///
+  /// 用 `(time, id)` 而不是只按 time 比较，保证同一秒内的多条消息不会在分页
+  /// 边界上被跳过或重复。返回升序。
+  Future<List<ChatMessageRecord>> messagesBefore(
+    int ownerUin,
+    String key, {
+    required int beforeTime,
+    required int beforeId,
+    int limit = 50,
+  }) async {
+    final rows = await (select(chatMessages)
+          ..where(
+            (t) =>
+                t.ownerUin.equals(ownerUin) &
+                t.sessionKey.equals(key) &
+                (t.time.isSmallerThanValue(beforeTime) |
+                    (t.time.equals(beforeTime) & t.id.isSmallerThanValue(beforeId))),
+          )
+          ..orderBy([
+            (t) => OrderingTerm.desc(t.time),
+            (t) => OrderingTerm.desc(t.id),
+          ])
+          ..limit(limit))
+        .get();
+    return rows.reversed.toList(growable: false);
+  }
+
+  /// 时间区间内的消息（含端点），升序；用于「跳到某一天」。
+  Future<List<ChatMessageRecord>> messagesInRange(
+    int ownerUin,
+    String key, {
+    required int from,
+    required int to,
+    int limit = 300,
+  }) {
+    return (select(chatMessages)
+          ..where(
+            (t) =>
+                t.ownerUin.equals(ownerUin) &
+                t.sessionKey.equals(key) &
+                t.time.isBiggerOrEqualValue(from) &
+                t.time.isSmallerOrEqualValue(to),
+          )
+          ..orderBy([
+            (t) => OrderingTerm.asc(t.time),
+            (t) => OrderingTerm.asc(t.id),
+          ])
+          ..limit(limit))
+        .get();
+  }
+
   /// 原子替换某会话的整段历史（按账号隔离，清空 + 批量写入一个事务）。
   Future<void> replaceMessages(
     int ownerUin,
@@ -272,6 +444,60 @@ class AppDatabase extends _$AppDatabase {
           .go();
       await batch((b) => b.insertAll(chatMessages, rows));
     });
+  }
+
+  /// 增量合并某会话历史：插入缺的行、删掉已不在 incoming 里的旧行。
+  ///
+  /// 与 [replaceMessages] 的区别：不再「先全删再全插」。历史同步一次会重写
+  /// 整会话（每次插入都触发 FTS 触发器），在几千条的会话上是明显的写放大。
+  /// 这里只动差异行，且插入是幂等的（`insertOrIgnore`）。
+  Future<void> mergeMessages(
+    int ownerUin,
+    String key,
+    List<ChatMessagesCompanion> rows,
+  ) async {
+    final incoming = <String>{
+      for (final r in rows) '${r.uin.value}:${r.time.value}:${r.content.value}',
+    };
+    final existing = await (select(
+      chatMessages,
+    )..where((t) => t.ownerUin.equals(ownerUin) & t.sessionKey.equals(key)))
+        .get();
+    final stale = <int>[
+      for (final r in existing)
+        if (!incoming.contains('${r.uin}:${r.time}:${r.content}')) r.id,
+    ];
+    await transaction(() async {
+      if (stale.isNotEmpty) {
+        await (delete(chatMessages)..where((t) => t.id.isIn(stale))).go();
+      }
+      if (rows.isNotEmpty) {
+        await batch(
+          (b) => b.insertAll(chatMessages, rows, mode: InsertMode.insertOrIgnore),
+        );
+      }
+    });
+  }
+
+  /// 按逻辑身份找消息行 id（历史游标用）：找不到返回 null。
+  Future<int?> messageRowId(
+    int ownerUin,
+    String key, {
+    required int uin,
+    required int time,
+    required String content,
+  }) async {
+    final row =
+        await (select(chatMessages)..where(
+              (t) =>
+                  t.ownerUin.equals(ownerUin) &
+                  t.sessionKey.equals(key) &
+                  t.uin.equals(uin) &
+                  t.time.equals(time) &
+                  t.content.equals(content),
+            ))
+            .getSingleOrNull();
+    return row?.id;
   }
 
   Future<void> clearMessages(int ownerUin, String key) => (delete(chatMessages)
@@ -304,6 +530,25 @@ class AppDatabase extends _$AppDatabase {
             ))
           .write(const ChatSessionsCompanion(unreadCount: Value(0)));
 
+  /// 把一条本地失败回显标回成功（发件箱重试成功后调用）。
+  Future<void> markMessageSuccess(
+    int ownerUin,
+    String key, {
+    required int uin,
+    required int time,
+    required String content,
+  }) {
+    return (update(chatMessages)..where(
+          (t) =>
+              t.ownerUin.equals(ownerUin) &
+              t.sessionKey.equals(key) &
+              t.uin.equals(uin) &
+              t.time.equals(time) &
+              t.content.equals(content),
+        ))
+        .write(const ChatMessagesCompanion(isSuccess: Value(true)));
+  }
+
   /// 好友信息缓存：全量覆盖保存（按账号隔离）。
   Future<void> replaceFriends(int ownerUin, List<FriendRecord> records) async {
     await transaction(() async {
@@ -328,6 +573,137 @@ class AppDatabase extends _$AppDatabase {
       await (update(friends)..where((t) => t.ownerUin.equals(0)))
           .write(FriendsCompanion(ownerUin: Value(ownerUin)));
     });
+  }
+
+  // ── 发件箱（失败消息重试）──────────────────────────────────────────
+
+  /// 入队一条待发送消息，返回 outbox 行 id。
+  Future<int> enqueueOutbox(ChatOutboxCompanion row) =>
+      into(chatOutbox).insert(row);
+
+  /// 已到重试时间的消息（按 nextAttemptAt 升序）。
+  Future<List<ChatOutboxRecord>> dueOutbox(
+    int ownerUin,
+    int now, {
+    int limit = 20,
+  }) {
+    return (select(chatOutbox)
+          ..where(
+            (t) =>
+                t.ownerUin.equals(ownerUin) &
+                t.nextAttemptAt.isSmallerOrEqualValue(now),
+          )
+          ..orderBy([(t) => OrderingTerm.asc(t.nextAttemptAt)])
+          ..limit(limit))
+        .get();
+  }
+
+  /// 某账号全部待发送消息（UI 展示 / 手动重试）。
+  Future<List<ChatOutboxRecord>> allOutbox(int ownerUin) =>
+      (select(chatOutbox)
+            ..where((t) => t.ownerUin.equals(ownerUin))
+            ..orderBy([(t) => OrderingTerm.asc(t.createdAt)]))
+          .get();
+
+  Future<int> outboxCount(int ownerUin) async {
+    final c = countAll();
+    final row = await (selectOnly(chatOutbox)
+          ..addColumns([c])
+          ..where(chatOutbox.ownerUin.equals(ownerUin)))
+        .getSingle();
+    return row.read(c) ?? 0;
+  }
+
+  /// 记录一次失败：次数 +1、设定下次重试时间与原因。
+  Future<void> markOutboxRetry(
+    int id, {
+    required int attempts,
+    required int nextAttemptAt,
+    String? lastError,
+  }) {
+    return (update(chatOutbox)..where((t) => t.id.equals(id))).write(
+      ChatOutboxCompanion(
+        attempts: Value(attempts),
+        nextAttemptAt: Value(nextAttemptAt),
+        lastError: Value(lastError),
+      ),
+    );
+  }
+
+  Future<void> deleteOutbox(int id) =>
+      (delete(chatOutbox)..where((t) => t.id.equals(id))).go();
+
+  Future<void> clearOutbox(int ownerUin) =>
+      (delete(chatOutbox)..where((t) => t.ownerUin.equals(ownerUin))).go();
+
+  // ── 存储维护（设置页）─────────────────────────────────────────────
+
+  Future<int> countMessages(int ownerUin) async {
+    final c = countAll();
+    final row = await (selectOnly(chatMessages)
+          ..addColumns([c])
+          ..where(chatMessages.ownerUin.equals(ownerUin)))
+        .getSingle();
+    return row.read(c) ?? 0;
+  }
+
+  /// 删除 [cutoff]（epoch 秒）之前的消息；[sessionKey] 非空时只删该会话。
+  /// 返回删除行数。
+  Future<int> deleteMessagesBefore(
+    int ownerUin,
+    int cutoff, {
+    String? sessionKey,
+  }) {
+    return (delete(chatMessages)..where(
+          (t) =>
+              t.ownerUin.equals(ownerUin) &
+              t.time.isSmallerThanValue(cutoff) &
+              (sessionKey == null
+                  ? const Constant(true)
+                  : t.sessionKey.equals(sessionKey)),
+        ))
+        .go();
+  }
+
+  Future<void> deleteSessionMessages(int ownerUin, String key) =>
+      (delete(chatMessages)..where(
+            (t) => t.ownerUin.equals(ownerUin) & t.sessionKey.equals(key),
+          ))
+          .go();
+
+  /// 每个会话的消息条数（降序），存储管理页用。
+  Future<List<({String sessionKey, int count})>> messageCountsBySession(
+    int ownerUin,
+  ) async {
+    final rows = await customSelect(
+      'SELECT session_key, COUNT(*) AS c FROM chat_messages '
+      'WHERE owner_uin = ? GROUP BY session_key ORDER BY c DESC',
+      variables: [Variable.withInt(ownerUin)],
+      readsFrom: {chatMessages},
+    ).get();
+    return [
+      for (final r in rows)
+        (sessionKey: r.read<String>('session_key'), count: r.read<int>('c')),
+    ];
+  }
+
+  /// 回收已删页占用的磁盘空间（SQLite 不会自动归还）。
+  Future<void> vacuum() => customStatement('VACUUM');
+
+  /// SQLite 页级统计：已用页 × 页大小 = 数据库主体大小。
+  Future<({int pageCount, int pageSize, int freePages})> storageStats() async {
+    Future<int> pragma(String name) async {
+      final row = await customSelect(
+        'PRAGMA $name',
+      ).getSingle();
+      return row.data.values.first as int;
+    }
+
+    return (
+      pageCount: await pragma('page_count'),
+      pageSize: await pragma('page_size'),
+      freePages: await pragma('freelist_count'),
+    );
   }
 
   // ── 本机消息标记（收藏 / 本机删除）────────────────────────────────────

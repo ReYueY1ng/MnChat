@@ -63,7 +63,7 @@ mixin _AvatarEditStateViewsExt
           : CrossAxisAlignment.end,
       mainAxisSize: MainAxisSize.min,
       children: [
-        FilledButton(onPressed: null, child: const Text('使用中')),
+        FilledButton(onPressed: null, child: Text(l10nOf(context)?.avatarEditInUse ?? '使用中')),
         const SizedBox(height: AppSpacing.sm),
         FilledButton.icon(
           style: FilledButton.styleFrom(
@@ -79,7 +79,7 @@ mixin _AvatarEditStateViewsExt
             pinned ? Icons.arrow_downward : Icons.arrow_upward,
             size: 16,
           ),
-          label: Text(pinned ? '取消置顶' : '置顶'),
+          label: Text(pinned ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶'),
         ),
       ],
     );
@@ -153,8 +153,8 @@ mixin _AvatarEditStateViewsExt
                 inputFormatters: [
                   LengthLimitingTextInputFormatter(kNicknameMaxLen),
                 ],
-                decoration: const InputDecoration(
-                  hintText: '输入修改的名字',
+                decoration: InputDecoration(
+                  hintText: l10nOf(context)?.avatarEditEnterNewName ?? '输入修改的名字',
                   isDense: true,
                 ),
               ),
@@ -162,7 +162,7 @@ mixin _AvatarEditStateViewsExt
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text('消耗', style: theme.textTheme.bodyMedium),
+                  Text(l10nOf(context)?.avatarEditCost ?? '消耗', style: theme.textTheme.bodyMedium),
                   const SizedBox(width: AppSpacing.xs),
                   Icon(
                     Icons.monetization_on_outlined,
@@ -176,11 +176,11 @@ mixin _AvatarEditStateViewsExt
               const SizedBox(height: AppSpacing.md),
               FilledButton(
                 onPressed: valid && !_nicknameBusy ? _submitNickname : null,
-                child: const Text('确认修改'),
+                child: Text(l10nOf(context)?.avatarEditConfirmChange ?? '确认修改'),
               ),
               const SizedBox(height: AppSpacing.sm),
               Text(
-                '改名消耗与审核由服务端裁决',
+                l10nOf(context)?.avatarEditRenameCostReviewDecided ?? '改名消耗与审核由服务端裁决',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.outline,
                 ),
@@ -218,9 +218,9 @@ mixin _AvatarEditStateViewsExt
         children: [
           tabs,
           const SizedBox(height: AppSpacing.md),
-          const Expanded(
+          Expanded(
             child: Center(
-              child: _EmptyHint('称号分类配置未获取，暂无法按分类筛选', center: true),
+              child: _EmptyHint(l10nOf(context)?.avatarEditTitleCategoryConfigFetched ?? '称号分类配置未获取，暂无法按分类筛选', center: true),
             ),
           ),
         ],
@@ -240,7 +240,7 @@ mixin _AvatarEditStateViewsExt
         const SizedBox(height: AppSpacing.md),
         Expanded(
           child: titles.isEmpty
-              ? const Center(child: _EmptyHint('该分类下暂无称号', center: true))
+              ? Center(child: _EmptyHint(l10nOf(context)?.avatarEditNoTitlesCategory ?? '该分类下暂无称号', center: true))
               : GridView(
                   padding: EdgeInsets.zero,
                   gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
@@ -279,7 +279,7 @@ mixin _AvatarEditStateViewsExt
       return Center(child: _EmptyHint(error, center: true));
     }
     if (_families.isEmpty) {
-      return const Center(child: _EmptyHint('你尚未加入任何家族', center: true));
+      return Center(child: _EmptyHint(l10nOf(context)?.familyYouHaventJoinedAny ?? '你尚未加入任何家族', center: true));
     }
     // 同上：窄屏 2 列 + 格子高度跟随字号，宽屏保持 3 列 / 1.7。
     final compact = isCompactWidth(context);

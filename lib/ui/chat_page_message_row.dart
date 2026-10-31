@@ -149,7 +149,7 @@ class _UnreadDivider extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
             child: Text(
-              '以下为新消息',
+              l10nOf(context)?.chatNewMessagesBelow ?? '以下为新消息',
               style: theme.textTheme.labelSmall?.copyWith(color: color),
             ),
           ),
@@ -183,7 +183,7 @@ class _SearchHitTile extends StatelessWidget {
     final text = _ChatPageState._searchableText(message);
     final createdAt = message.createdAt?.toLocal();
     final time = createdAt == null ? '' : _fmtDividerTime(createdAt);
-    final who = isMine ? '我' : '对方';
+    final who = isMine ? l10nOf(context)?.chatMe ?? '我' : l10nOf(context)?.chatThem ?? '对方';
     return ListTile(
       dense: true,
       onTap: onTap,
@@ -203,7 +203,7 @@ class _SearchHitTile extends StatelessWidget {
     final base = theme.textTheme.bodyMedium;
     if (text.isEmpty) {
       return Text(
-        '（无文本内容）',
+        l10nOf(context)?.chatNoTextContent ?? '（无文本内容）',
         style: base,
         maxLines: 2,
         overflow: TextOverflow.ellipsis,

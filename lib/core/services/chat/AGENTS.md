@@ -12,13 +12,17 @@ WebSocket side of chat: push dispatch, WS lifecycle, reconnect backoff/catch-up,
 | WS lifecycle | connection_manager.dart (187) — `ChatConnectionManager`; channel config in ../chatpush.dart |
 | Backoff | reconnect_policy.dart (72) — pure; `ReconnectPolicy`, RNG constructor-injected |
 | Reconnect catch-up | reconnect_history.dart (54) — pure `reconnectHistoryTargets`（只挑掉线窗口内有动静/未读的会话） |
-| Persist & reload | message_store.dart (95), message_upserter.dart (190), session_loader.dart (340), offline_cache.dart (159) |
+| Persist & reload | message_store.dart (write queue + idempotent insert), message_upserter.dart, offline_cache.dart (restores NEWEST 200/session), history_pager.dart (cursors, load-older, day windows, collapse) |
+| Retry queue | outbox.dart (persisted failed sends, exponential backoff + jitter, flush on reconnect) |
 | Display caches | profile_cache.dart (236), group_name_cache.dart (79) |
 | Commands | command_client.dart (219) — `ChatCommandClient` |
+| Admin collaborators | group_admin_ops.dart (member/apply/group settings), friend_admin_ops.dart (apply/blacklist/follow) |
 | Online state | online_notify.dart (17) — pure `onlineFriendUins`, `newlyOnlineFriends` |
 
 ## CONVENTIONS
 - Persistence goes through `../../storage/chat_mapper.dart` + `app_database.dart`; never touch drift tables directly from here.
+- `MessageStore` serializes every write on one Future chain (`flush()` awaits it) and inserts idempotently; `persistSession` snapshots inside the queue so an older row cannot overwrite a newer one.
+- Local history paging lives in `HistoryPager`; ChatService only forwards. Live pushes must not be mixed into a day window (`ChatBridge` skips windowed sessions).
 - Session data shape comes from `../../models/messages.dart` (7 of 11 files import it); the `SessionSnapshot` type is defined in ../chat_service.dart, not here.
 - Cross-account isolation follows the storage convention: every key carries ownerUin.
 - Pure-logic modules stay pure on purpose: reconnect_policy.dart, online_notify.dart and reconnect_history.dart exist so unit tests can run without a socket.

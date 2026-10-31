@@ -17,6 +17,8 @@ import 'theme/app_tokens.dart';
 import 'theme_settings_page.dart';
 import 'widgets/settings_tiles.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class SettingsGeneralPage extends ConsumerWidget {
   const SettingsGeneralPage({super.key});
 
@@ -30,7 +32,7 @@ class SettingsGeneralPage extends ConsumerWidget {
     final picked = await showDialog<SessionSortMode>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('会话排序'),
+        title: Text(l10nOf(context)?.settingsGeneralConversationOrder ?? '会话排序'),
         children: [
           for (final m in SessionSortMode.values)
             SimpleDialogOption(
@@ -60,7 +62,7 @@ class SettingsGeneralPage extends ConsumerWidget {
     if (context.mounted) {
       showSettingsToast(
         context,
-        value ? '关闭窗口时将最小化到托盘' : '关闭窗口时将直接退出',
+        value ? l10nOf(context)?.settingsGeneralMinimizeTrayWhenClosing ?? '关闭窗口时将最小化到托盘' : l10nOf(context)?.settingsGeneralQuitWhenClosingWindow ?? '关闭窗口时将直接退出',
       );
     }
   }
@@ -68,53 +70,53 @@ class SettingsGeneralPage extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return Scaffold(
-      appBar: AppBar(title: const Text('通用与外观')),
+      appBar: AppBar(title: Text(l10nOf(context)?.settingsGeneralGeneralAppearance ?? '通用与外观')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
           child: ListView(
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              const SettingsSectionHeader('外观'),
+              SettingsSectionHeader(l10nOf(context)?.settingsGeneralAppearance ?? '外观'),
               SettingsNavTile(
                 icon: Icons.palette_outlined,
-                title: '主题显示设置',
-                subtitle: '明暗模式 / 强调色 / 聊天字号',
+                title: l10nOf(context)?.settingsGeneralThemeDisplaySettings ?? '主题显示设置',
+                subtitle: l10nOf(context)?.settingsGeneralLightDarkModeAccent ?? '明暗模式 / 强调色 / 聊天字号',
                 page: const ThemeSettingsPage(),
               ),
               SettingsNavTile(
                 icon: Icons.chat_bubble_outline,
-                title: '聊天气泡',
-                subtitle: '切换已拥有的聊天气泡',
+                title: l10nOf(context)?.bubbleChatBubble ?? '聊天气泡',
+                subtitle: l10nOf(context)?.settingsGeneralSwitchBetweenOwnedChat ?? '切换已拥有的聊天气泡',
                 page: const BubblePage(),
               ),
               SettingsSwitchTile(
                 icon: Icons.animation,
-                title: '头像框动画',
-                subtitle: '关闭后仅显示静态头像框，省电省流',
+                title: l10nOf(context)?.settingsGeneralAvatarFrameAnimation ?? '头像框动画',
+                subtitle: l10nOf(context)?.settingsGeneralWhenOffStaticAvatar ?? '关闭后仅显示静态头像框，省电省流',
                 value: ref.watch(animatedFramesProvider),
                 onChanged: (v) =>
                     ref.read(animatedFramesProvider.notifier).set(v),
               ),
 
-              const SettingsSectionHeader('会话'),
+              SettingsSectionHeader(l10nOf(context)?.commonConversations ?? '会话'),
               SettingsNavTile(
                 icon: Icons.sort,
-                title: '会话排序',
+                title: l10nOf(context)?.settingsGeneralConversationOrder ?? '会话排序',
                 subtitle: ref.watch(sessionSortModeProvider).label,
                 onTap: () => _pickSortMode(context, ref),
               ),
 
               if (_isDesktop) ...[
-                const SettingsSectionHeader('桌面'),
+                SettingsSectionHeader(l10nOf(context)?.settingsGeneralDesktop ?? '桌面'),
                 SettingsSwitchTile(
                   icon: Icons.close_fullscreen_outlined,
-                  title: '关闭到托盘',
+                  title: l10nOf(context)?.settingsGeneralCloseTray ?? '关闭到托盘',
                   // 托盘注册失败时（Linux 上没跑 StatusNotifierWatcher）启动阶段已
                   // 自动关掉它；这里把原因写出来，否则用户会以为是设置没保存。
                   subtitle: TrayService.trayAvailable
-                      ? '关闭窗口时最小化到系统托盘而非退出'
-                      : '当前桌面没有可用的系统托盘，关闭窗口会直接退出（已自动关闭）',
+                      ? l10nOf(context)?.settingsGeneralMinimizeSystemTrayInstead ?? '关闭窗口时最小化到系统托盘而非退出'
+                      : l10nOf(context)?.settingsGeneralNoSystemTrayAvailable ?? '当前桌面没有可用的系统托盘，关闭窗口会直接退出（已自动关闭）',
                   value: ref.watch(closeToTrayProvider),
                   // 没有托盘就不允许打开：否则关窗后应用既不可见也召不回来。
                   onChanged: TrayService.trayAvailable

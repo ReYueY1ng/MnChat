@@ -11,6 +11,8 @@ import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart' show kAvatarListTileDensity, headFrameSlotSize;
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 附近的人（`cmd=get_nearby` / `report_location`，对齐 nearbyfriendserver.lua）。
 ///
 /// 说明：外部客户端没有接入系统定位，需**手动填入经纬度**上报后再查询。
@@ -75,11 +77,12 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
   }
 
   Future<void> _toggleAllowAdd(bool v) async {
+    final l10n = l10nOf(context);
     setState(() => _allowAdd = v);
     try {
       await ref.read(chatServiceProvider).friend?.allowAddByNearby(allow: v);
     } catch (e) {
-      _toast('设置失败: $e');
+      _toast(l10n?.nearbyFailedSave(e) ?? '设置失败: $e');
     }
   }
 
@@ -87,12 +90,12 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
     final lat = double.tryParse(_latCtrl.text.trim());
     final lon = double.tryParse(_lonCtrl.text.trim());
     if (lat == null || lon == null) {
-      _toast('请先填写有效的经纬度');
+      _toast(l10nOf(context)?.nearbyEnterValidLatitudeLongitude ?? '请先填写有效的经纬度');
       return;
     }
     final friend = ref.read(chatServiceProvider).friend;
     if (friend == null) {
-      _toast('未登录');
+      _toast(l10nOf(context)?.commonNotSignedIn ?? '未登录');
       return;
     }
     setState(() {
@@ -218,17 +221,17 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
   }
 
   String _distText(double? km) {
-    if (km == null) return '距离未知';
-    if (km < 1) return '${(km * 1000).round()} 米';
-    if (km < 10) return '${km.toStringAsFixed(1)} 公里';
-    return '${km.round()} 公里';
+    if (km == null) return l10nOf(context)?.nearbyDistanceUnknown ?? '距离未知';
+    if (km < 1) return l10nOf(context)?.nearbyMeters((km * 1000).round()) ?? '${(km * 1000).round()} 米';
+    if (km < 10) return l10nOf(context)?.nearbyKilometers(km.toStringAsFixed(1)) ?? '${km.toStringAsFixed(1)} 公里';
+    return l10nOf(context)?.nearbyKilometersRounded(km.round()) ?? '${km.round()} 公里';
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('附近的人')),
+      appBar: AppBar(title: Text(l10nOf(context)?.friendsPeopleNearby ?? '附近的人')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
@@ -236,7 +239,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
               Text(
-                '外部客户端未接入系统定位，请手动填写经纬度后再查询。',
+                l10nOf(context)?.nearbyThisExternalClientSystem ?? '外部客户端未接入系统定位，请手动填写经纬度后再查询。',
                 style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -249,9 +252,9 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                         decimal: true,
                         signed: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: '纬度 latitude',
-                        hintText: '如 39.9042',
+                      decoration: InputDecoration(
+                        labelText: l10nOf(context)?.nearbyLatitudeLabel ?? '纬度 latitude',
+                        hintText: l10nOf(context)?.nearbyLatitudeExample ?? '如 39.9042',
                       ),
                     ),
                   ),
@@ -263,9 +266,9 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                         decimal: true,
                         signed: true,
                       ),
-                      decoration: const InputDecoration(
-                        labelText: '经度 longitude',
-                        hintText: '如 116.4074',
+                      decoration: InputDecoration(
+                        labelText: l10nOf(context)?.nearbyLongitudeLabel ?? '经度 longitude',
+                        hintText: l10nOf(context)?.nearbyLongitudeExample ?? '如 116.4074',
                       ),
                     ),
                   ),
@@ -281,15 +284,15 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.near_me_outlined),
-                label: const Text('上报位置并查找附近的人'),
+                label: Text(l10nOf(context)?.nearbyReportLocationFindPeople ?? '上报位置并查找附近的人'),
               ),
               const SizedBox(height: AppSpacing.sm),
               Card(
                 child: ListTile(
                   leading: const Icon(Icons.person_add_alt),
-                  title: const Text('允许附近的人加我'),
+                  title: Text(l10nOf(context)?.nearbyLetPeopleNearbyAdd ?? '允许附近的人加我'),
                   subtitle: Text(
-                    _allowAddLoaded ? '开启后附近的人可搜索到我并加好友' : '读取中…',
+                    _allowAddLoaded ? l10nOf(context)?.nearbyWhenEnabledPeopleNearby ?? '开启后附近的人可搜索到我并加好友' : l10nOf(context)?.nearbyReading ?? '读取中…',
                   ),
                   trailing: Switch(
                     value: _allowAdd,
@@ -302,7 +305,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                 Padding(
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Text(
-                    '查询失败：$_error',
+                    l10nOf(context)?.nearbyQueryFailed(_error.toString()) ?? '查询失败：$_error',
                     style: TextStyle(color: scheme.error),
                   ),
                 )
@@ -311,7 +314,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                   padding: const EdgeInsets.all(AppSpacing.xl),
                   child: Center(
                     child: Text(
-                      '附近没有找到人',
+                      l10nOf(context)?.nearbyNoOneFoundNearby ?? '附近没有找到人',
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ),
@@ -339,7 +342,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    subtitle: Text('迷你号 ${u.uin} · ${_distText(u.distanceKm)}'),
+                    subtitle: Text(l10nOf(context)?.nearbyMiniID(u.uin, _distText(u.distanceKm)) ?? '迷你号 ${u.uin} · ${_distText(u.distanceKm)}'),
                     trailing: const Icon(Icons.chevron_right),
                     onTap: () => Navigator.of(context).push(
                       MaterialPageRoute(
@@ -351,7 +354,7 @@ class _NearbyPageState extends ConsumerState<NearbyPage> {
               if (_loaded && _users.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.sm),
                 Text(
-                  '共 ${_users.length} 人（仅显示第 1 页）',
+                  l10nOf(context)?.nearbyPeopleFirstPage(_users.length) ?? '共 ${_users.length} 人（仅显示第 1 页）',
                   style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
                 ),
               ],

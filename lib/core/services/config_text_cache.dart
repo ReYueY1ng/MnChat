@@ -21,6 +21,14 @@ import 'package:crypto/crypto.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/log.dart';
+import '../utils/lru_cache.dart' show LruTtlCache;
+
+/// 进程内层条目上限：配置 URL 数量天然有限，这里只防长跑无界增长。
+const int _kMemoryMaxEntries = 256;
+
+/// 进程内层有效期：配置文件内容不可变（名字就是 md5），过期只是回落读盘，
+/// 不会影响返回内容。
+const Duration _kMemoryTtl = Duration(days: 365);
 
 /// 配置文本磁盘缓存（进程内单例）。
 class ConfigTextCache {
@@ -31,14 +39,17 @@ class ConfigTextCache {
   ConfigTextCache._();
 
   /// 进程内层：URL → 文本（避免同一次会话反复读盘）。
-  final Map<String, String> _memory = <String, String>{};
+  final LruTtlCache<String, String> _memory = LruTtlCache<String, String>(
+    maxEntries: _kMemoryMaxEntries,
+    ttl: _kMemoryTtl,
+  );
 
   Directory? _dir;
   bool _resolved = false;
 
   /// 读取缓存；未命中返回 null（**不抛异常**）。
   Future<String?> get(String url) async {
-    final hit = _memory[url];
+    final hit = _memory.get(url);
     if (hit != null) return hit;
     final dir = await _cacheDir();
     if (dir == null) return null;
@@ -47,7 +58,7 @@ class ConfigTextCache {
       if (!file.existsSync()) return null;
       final text = await file.readAsString();
       if (text.isEmpty) return null;
-      _memory[url] = text;
+      _memory.put(url, text);
       return text;
     } catch (e) {
       log.warn('读取配置缓存失败: $e', tag: _tag);
@@ -58,7 +69,7 @@ class ConfigTextCache {
   /// 写入缓存（失败忽略）。
   Future<void> put(String url, String text) async {
     if (text.isEmpty) return;
-    _memory[url] = text;
+    _memory.put(url, text);
     final dir = await _cacheDir();
     if (dir == null) return;
     try {

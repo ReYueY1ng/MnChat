@@ -9,18 +9,20 @@ import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 视频播放页的测试定位 key（保持名字稳定）。
 const Key videoPlayerPageKey = Key('video_player_page');
 
 /// 全屏播放一个视频地址。
 class VideoPlayerPage extends StatefulWidget {
-  const VideoPlayerPage({super.key, required this.source, this.title = '视频'});
+  const VideoPlayerPage({super.key, required this.source, this.title});
 
   /// 本地文件路径或 http(s) URL。
   final String source;
 
   /// 标题栏文案。
-  final String title;
+  final String? title;
 
   @override
   State<VideoPlayerPage> createState() => _VideoPlayerPageState();
@@ -59,14 +61,16 @@ class _VideoPlayerPageState extends State<VideoPlayerPage> {
     final error = _error;
     return Scaffold(
       key: videoPlayerPageKey,
-      appBar: AppBar(title: Text(widget.title)),
+      appBar: AppBar(
+        title: Text(widget.title ?? l10nOf(context)?.videoVideo ?? '视频'),
+      ),
       backgroundColor: Colors.black,
       body: Center(
         child: error != null
             ? Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  '无法播放：$error',
+                  l10nOf(context)?.videoUnablePlay(error) ?? '无法播放：$error',
                   style: const TextStyle(color: Colors.white),
                   textAlign: TextAlign.center,
                 ),

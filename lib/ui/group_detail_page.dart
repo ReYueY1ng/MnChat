@@ -8,6 +8,8 @@ import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 群详情页 —— 成员列表 + 群主/管理操作（退出/解散/转让）。
 class GroupDetailPage extends ConsumerStatefulWidget {
   final int groupId;
@@ -54,35 +56,35 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: RichTextView(widget.name.isEmpty ? '群详情' : widget.name),
+        title: RichTextView(widget.name.isEmpty ? l10nOf(context)?.chatGroupDetails ?? '群详情' : widget.name),
       ),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
           child: ListView(
             children: [
-              _InfoTile(icon: Icons.group, label: '群号', value: '${widget.groupId}'),
+              _InfoTile(icon: Icons.group, label: l10nOf(context)?.groupDetailGroupID ?? '群号', value: '${widget.groupId}'),
               _InfoTile(
                 icon: Icons.person,
-                label: '成员数',
+                label: l10nOf(context)?.familyMembers ?? '成员数',
                 value: members.isEmpty ? '—' : '${members.length}',
               ),
               if (creatorUin != 0)
                 _InfoTile(
                   icon: Icons.star,
-                  label: '群主',
+                  label: l10nOf(context)?.groupDetailGroupOwner ?? '群主',
                   value: _displayName(creatorUin, service),
                 ),
     
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.lg, AppSpacing.lg, AppSpacing.sm),
-                child: Text('成员', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: Text(l10nOf(context)?.familyMembers2 ?? '成员', style: TextStyle(fontWeight: FontWeight.w600)),
               ),
               if (members.isEmpty)
                 Padding(
                   padding: AppSpacing.listTilePadding,
                   child: Text(
-                    '暂无成员信息（可能未拉取到）',
+                    l10nOf(context)?.groupDetailNoMemberInfoYet ?? '暂无成员信息（可能未拉取到）',
                     style: TextStyle(color: scheme.onSurfaceVariant),
                   ),
                 )
@@ -133,13 +135,13 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
           FilledButton.tonalIcon(
             onPressed: _busy ? null : () => _showInviteDialog(service),
             icon: const Icon(Icons.person_add_alt),
-            label: const Text('邀请好友入群'),
+            label: Text(l10nOf(context)?.groupDetailInviteFriendsGroup ?? '邀请好友入群'),
           ),
           const SizedBox(height: AppSpacing.sm),
           FilledButton.tonalIcon(
             onPressed: _busy ? null : _toggleGroupTop,
             icon: Icon(_groupTop ? Icons.push_pin : Icons.push_pin_outlined),
-            label: Text(_groupTop ? '取消群置顶' : '群置顶'),
+            label: Text(_groupTop ? l10nOf(context)?.groupDetailUnpinGroup ?? '取消群置顶' : l10nOf(context)?.groupDetailPinGroup ?? '群置顶'),
           ),
           const SizedBox(height: AppSpacing.sm),
           FilledButton.tonalIcon(
@@ -149,20 +151,20 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                   ? Icons.notifications_off
                   : Icons.notifications_off_outlined,
             ),
-            label: Text(_groupIgnored ? '取消群免打扰' : '群消息免打扰'),
+            label: Text(_groupIgnored ? l10nOf(context)?.groupDetailUnmuteGroup ?? '取消群免打扰' : l10nOf(context)?.groupDetailMuteGroupNotifications ?? '群消息免打扰'),
           ),
           const SizedBox(height: AppSpacing.sm),
           if (isOwner) ...[
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _editGroupName,
               icon: const Icon(Icons.edit_outlined),
-              label: const Text('修改群名'),
+              label: Text(l10nOf(context)?.groupDetailEditGroupName ?? '修改群名'),
             ),
             const SizedBox(height: AppSpacing.sm),
             FilledButton.tonalIcon(
               onPressed: _busy ? null : _rejectAllGroupApplies,
               icon: const Icon(Icons.clear_all),
-              label: const Text('一键拒绝入群申请'),
+              label: Text(l10nOf(context)?.groupDetailRejectJoinRequests ?? '一键拒绝入群申请'),
             ),
             const SizedBox(height: AppSpacing.sm),
             FilledButton.icon(
@@ -170,13 +172,13 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                   ? null
                   : () => _showTransferDialog(members, creatorUin),
               icon: const Icon(Icons.admin_panel_settings),
-              label: const Text('转让群主'),
+              label: Text(l10nOf(context)?.groupDetailTransferGroupOwnership ?? '转让群主'),
             ),
             const SizedBox(height: AppSpacing.sm),
             FilledButton.tonalIcon(
               onPressed: _busy ? null : () => _confirmDissolve(service),
               icon: const Icon(Icons.delete_forever),
-              label: const Text('解散群'),
+              label: Text(l10nOf(context)?.groupDetailDisbandGroup ?? '解散群'),
               style: FilledButton.styleFrom(
                 backgroundColor: scheme.error,
                 foregroundColor: scheme.onError,
@@ -186,7 +188,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             FilledButton.tonalIcon(
               onPressed: _busy ? null : () => _confirmQuit(service),
               icon: const Icon(Icons.exit_to_app),
-              label: const Text('退出群'),
+              label: Text(l10nOf(context)?.groupDetailLeaveGroup ?? '退出群'),
             ),
         ],
       ),
@@ -195,13 +197,14 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 邀请好友入群：好友选择器（仅双向好友）→ join_group(op_uin)。
   Future<void> _showInviteDialog(dynamic service) async {
+    final l10n = l10nOf(context);
     final contacts =
         service.contacts.where((c) => (c.relation & 8) != 0).toList()..sort(
           (a, b) =>
               a.nickname.toLowerCase().compareTo(b.nickname.toLowerCase()),
         );
     if (contacts.isEmpty) {
-      _toast('暂无好友可邀请');
+      _toast(l10nOf(context)?.groupDetailNoFriendsInvite ?? '暂无好友可邀请');
       return;
     }
     final selected = <int>{};
@@ -214,9 +217,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             height: MediaQuery.of(ctx).size.height * 0.7,
             child: Column(
               children: [
-                const ListTile(
+                ListTile(
                   title: Text(
-                    '选择要邀请的好友',
+                    l10nOf(context)?.groupDetailChooseFriendsInvite ?? '选择要邀请的好友',
                     style: TextStyle(fontWeight: FontWeight.w600),
                   ),
                 ),
@@ -232,7 +235,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                       return CheckboxListTile(
                         value: checked,
                         title: Text(name),
-                        subtitle: Text('迷你号 ${c.uin}'),
+                        subtitle: Text(l10nOf(context)?.commonMiniID(c.uin) ?? '迷你号 ${c.uin}'),
                         // secondary 同样受 ListTile 密度钳制（桌面紧凑密度下 48），
                         // 会把有框槽位（radius * 2 / 0.76 ≈ 52.6）压成非正方形并
                         // 裁掉框外圈；抬高纵向密度解决（见 [kAvatarListTileDensity]）。
@@ -262,17 +265,17 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
-                      Expanded(child: Text('已选 ${selected.length} 人')),
+                      Expanded(child: Text(l10nOf(context)?.groupDetailSelected(selected.length) ?? '已选 ${selected.length} 人')),
                       TextButton(
                         onPressed: () => Navigator.pop(ctx, false),
-                        child: const Text('取消'),
+                        child: Text(l10nOf(context)?.commonCancel ?? '取消'),
                       ),
                       const SizedBox(width: AppSpacing.sm),
                       FilledButton(
                         onPressed: selected.isEmpty
                             ? null
                             : () => Navigator.pop(ctx, true),
-                        child: const Text('邀请'),
+                        child: Text(l10nOf(context)?.groupDetailInvite ?? '邀请'),
                       ),
                     ],
                   ),
@@ -297,9 +300,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             lord: info?.creatorUin ?? 0,
             isAllowMemberInvite: 0,
           );
-      _toast('已发送邀请');
+      _toast(l10n?.groupDetailInvitationSent ?? '已发送邀请');
     } catch (e) {
-      _toast('邀请失败: $e');
+      _toast(l10n?.groupDetailFailedInvite(e) ?? '邀请失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -318,43 +321,46 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
   }
 
   Future<void> _confirmQuit(dynamic service) async {
-    final ok = await _confirm('退出群', '确定退出该群吗？');
+    final l10n = l10nOf(context);
+    final ok = await _confirm(l10nOf(context)?.groupDetailLeaveGroup ?? '退出群', l10nOf(context)?.groupDetailLeaveGroup2 ?? '确定退出该群吗？');
     if (!ok || _busy) return;
     setState(() => _busy = true);
     try {
       await service.quitGroup(widget.groupId);
       if (mounted) {
         Navigator.of(context).pop();
-        _toast('已退出群');
+        _toast(l10nOf(context)?.groupDetailLeftGroup ?? '已退出群');
       }
     } catch (e) {
-      _toast('退出失败: $e');
+      _toast(l10n?.familyFailedLeave(e) ?? '退出失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _confirmDissolve(dynamic service) async {
-    final ok = await _confirm('解散群', '解散后群内数据将不可恢复，确定解散？');
+    final l10n = l10nOf(context);
+    final ok = await _confirm(l10nOf(context)?.groupDetailDisbandGroup ?? '解散群', l10nOf(context)?.groupDetailGroupDataCannotRecovered ?? '解散后群内数据将不可恢复，确定解散？');
     if (!ok || _busy) return;
     setState(() => _busy = true);
     try {
       await service.dissolveGroup(widget.groupId);
       if (mounted) {
         Navigator.of(context).pop();
-        _toast('群已解散');
+        _toast(l10nOf(context)?.groupDetailGroupDisbanded ?? '群已解散');
       }
     } catch (e) {
-      _toast('解散失败: $e');
+      _toast(l10n?.groupDetailFailedDisband(e) ?? '解散失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _showTransferDialog(List<int> members, int creatorUin) async {
+    final l10n = l10nOf(context);
     final targets = members.where((u) => u != creatorUin).toList();
     if (targets.isEmpty) {
-      _toast('没有可转让的成员');
+      _toast(l10nOf(context)?.groupDetailNoMembersTransfer ?? '没有可转让的成员');
       return;
     }
     final picked = await showModalBottomSheet<int>(
@@ -363,9 +369,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
-                '选择新群主',
+                l10nOf(context)?.groupDetailChooseNewGroupOwner ?? '选择新群主',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -382,16 +388,16 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
     );
     if (picked == null || _busy) return;
     final ok = await _confirm(
-      '转让群主',
-      '确认将群主转给 ${_displayName(picked, ref.read(chatServiceProvider))}？',
+      l10n?.groupDetailTransferGroupOwnership ?? '转让群主',
+      l10n?.groupDetailTransferGroupOwnership2(_displayName(picked, ref.read(chatServiceProvider))) ?? '确认将群主转给 ${_displayName(picked, ref.read(chatServiceProvider))}？',
     );
     if (!ok) return;
     setState(() => _busy = true);
     try {
       await ref.read(chatServiceProvider).transferGroup(widget.groupId, picked);
-      _toast('已转让');
+      _toast(l10n?.groupDetailTransferred ?? '已转让');
     } catch (e) {
-      _toast('转让失败: $e');
+      _toast(l10n?.groupDetailFailedTransfer(e) ?? '转让失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -399,6 +405,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 群置顶开关（服务端 act=set_group_top，本地乐观记录文案）。
   Future<void> _toggleGroupTop() async {
+    final l10n = l10nOf(context);
     final target = !_groupTop;
     setState(() => _busy = true);
     try {
@@ -407,9 +414,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             top: target,
           );
       if (mounted) setState(() => _groupTop = target);
-      _toast(target ? '已置顶群' : '已取消置顶');
+      _toast(target ? l10n?.groupDetailGroupPinned ?? '已置顶群' : l10n?.commonUnpinned ?? '已取消置顶');
     } catch (e) {
-      _toast('置顶失败: $e');
+      _toast(l10n?.groupDetailFailedPin(e) ?? '置顶失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -417,14 +424,15 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 一键拒绝全部入群申请（act=reject_group_apply_all，仅群主）。
   Future<void> _rejectAllGroupApplies() async {
-    final ok = await _confirm('一键拒绝', '拒绝本群全部待处理的入群申请？');
+    final l10n = l10nOf(context);
+    final ok = await _confirm(l10nOf(context)?.groupDetailReject ?? '一键拒绝', l10nOf(context)?.groupDetailRejectPendingJoinRequests ?? '拒绝本群全部待处理的入群申请？');
     if (!ok || _busy) return;
     setState(() => _busy = true);
     try {
       await ref.read(chatServiceProvider).rejectAllGroupApplies(widget.groupId);
-      _toast('已全部拒绝');
+      _toast(l10n?.groupDetailAllRejected ?? '已全部拒绝');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -432,6 +440,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 群消息免打扰开关（服务端 act=set_slient_group，本地乐观记录文案）。
   Future<void> _toggleGroupIgnore() async {
+    final l10n = l10nOf(context);
     final target = !_groupIgnored;
     setState(() => _busy = true);
     try {
@@ -439,9 +448,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
           .read(chatServiceProvider)
           .setGroupIgnore(widget.groupId, ignore: target);
       if (mounted) setState(() => _groupIgnored = target);
-      _toast(target ? '已开启群免打扰' : '已关闭群免打扰');
+      _toast(target ? l10n?.groupDetailGroupNotificationsMuted ?? '已开启群免打扰' : l10n?.groupDetailGroupNotificationsUnmuted ?? '已关闭群免打扰');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -449,29 +458,30 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 修改群名（act=update_group；头像 id/type 原样回传，避免被重置）。
   Future<void> _editGroupName() async {
+    final l10n = l10nOf(context);
     final info = ref.read(chatServiceProvider).groupInfo(widget.groupId);
     final ctrl = TextEditingController(text: info?.name ?? widget.name);
     final name = await showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('修改群名'),
+        title: Text(l10nOf(context)?.groupDetailEditGroupName ?? '修改群名'),
         content: TextField(
           controller: ctrl,
           autofocus: true,
           maxLength: 20,
-          decoration: const InputDecoration(
-            hintText: '群名称',
+          decoration: InputDecoration(
+            hintText: l10nOf(context)?.groupDetailGroupName ?? '群名称',
             counterText: '',
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
-            child: const Text('保存'),
+            child: Text(l10nOf(context)?.groupDetailSave ?? '保存'),
           ),
         ],
       ),
@@ -486,9 +496,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
             iconId: info?.iconId ?? 0,
             iconType: info?.iconType ?? 0,
           );
-      _toast('已更新群名');
+      _toast(l10n?.groupDetailGroupNameUpdated ?? '已更新群名');
     } catch (e) {
-      _toast('更新失败: $e');
+      _toast(l10n?.groupDetailFailedUpdate(e) ?? '更新失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -496,6 +506,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
   /// 成员操作：禁言/解除、屏蔽/解除、移出该群（仅群主）、举报。
   Future<void> _showMemberActions(int uin, {required bool isOwner}) async {
+    final l10n = l10nOf(context);
     final name = _displayName(uin, ref.read(chatServiceProvider));
     final silenced = _silenced.contains(uin);
     final banned = _banned.contains(uin);
@@ -515,23 +526,23 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
               if (isOwner)
                 ListTile(
                   leading: const Icon(Icons.volume_off_outlined),
-                  title: Text(silenced ? '解除该成员禁言' : '禁言该成员'),
+                  title: Text(silenced ? l10nOf(context)?.groupDetailUnmuteMember ?? '解除该成员禁言' : l10nOf(context)?.groupDetailMuteMember ?? '禁言该成员'),
                   onTap: () => Navigator.pop(ctx, 'silent'),
                 ),
               ListTile(
                 leading: const Icon(Icons.visibility_off_outlined),
-                title: Text(banned ? '解除屏蔽该成员' : '屏蔽该成员消息'),
+                title: Text(banned ? l10nOf(context)?.groupDetailUnblockMember ?? '解除屏蔽该成员' : l10nOf(context)?.groupDetailBlockMembersMessages ?? '屏蔽该成员消息'),
                 onTap: () => Navigator.pop(ctx, 'ban'),
               ),
               if (isOwner)
                 ListTile(
                   leading: const Icon(Icons.person_remove_outlined),
-                  title: const Text('移出该群'),
+                  title: Text(l10nOf(context)?.groupDetailRemoveGroup ?? '移出该群'),
                   onTap: () => Navigator.pop(ctx, 'kick'),
                 ),
               ListTile(
                 leading: const Icon(Icons.flag_outlined),
-                title: const Text('举报该成员'),
+                title: Text(l10nOf(context)?.groupDetailReportMember ?? '举报该成员'),
                 onTap: () => Navigator.pop(ctx, 'report'),
               ),
             ],
@@ -545,7 +556,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
 
     if (action == 'kick') {
       final info = svc.groupInfo(widget.groupId);
-      final ok = await _confirm('移出群成员', '确定将 ${plainNickname(name)} 移出本群？');
+      final ok = await _confirm(l10n?.groupDetailRemoveGroupMember ?? '移出群成员', l10n?.groupDetailRemoveGroup2(plainNickname(name)) ?? '确定将 ${plainNickname(name)} 移出本群？');
       if (!ok || _busy) return;
       setState(() => _busy = true);
       try {
@@ -555,9 +566,9 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
           groupCreator: info?.creatorUin ?? 0,
           groupName: info?.name ?? widget.name,
         );
-        _toast('已移出该成员');
+        _toast(l10n?.groupDetailMemberRemoved ?? '已移出该成员');
       } catch (e) {
-        _toast('操作失败: $e');
+        _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
       } finally {
         if (mounted) setState(() => _busy = false);
       }
@@ -583,7 +594,7 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
               }
             });
           }
-          _toast(target ? '已禁言' : '已解除禁言');
+          _toast(target ? l10n?.groupDetailMuted ?? '已禁言' : l10n?.groupDetailUnmuted ?? '已解除禁言');
         case 'ban':
           final target = !banned;
           await svc.setGroupMemberBanned(
@@ -600,13 +611,13 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
               }
             });
           }
-          _toast(target ? '已屏蔽该成员消息' : '已解除屏蔽');
+          _toast(target ? l10n?.groupDetailMembersMessagesBlocked ?? '已屏蔽该成员消息' : l10n?.groupDetailUnblocked ?? '已解除屏蔽');
         case 'report':
           await svc.reportGroupMember(widget.groupId, opUin: uin);
-          _toast('已提交举报');
+          _toast(l10n?.groupDetailReportSubmitted ?? '已提交举报');
       }
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -621,11 +632,11 @@ class _GroupDetailPageState extends ConsumerState<GroupDetailPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -704,10 +715,10 @@ class _MemberTile extends StatelessWidget {
         headId: headId,
         frameId: headFrameId,
       ),
-      title: RichTextView(isSelf ? '$name（我）' : name),
+      title: RichTextView(isSelf ? l10nOf(context)?.groupDetailNameWithMe(name) ?? '$name（我）' : name),
       trailing: isOwner
           ? Chip(
-              label: const Text('群主'),
+              label: Text(l10nOf(context)?.groupDetailGroupOwner ?? '群主'),
               visualDensity: adaptiveDensity(context),
             )
           : null,

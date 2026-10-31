@@ -25,6 +25,7 @@ import 'gift_picker.dart' show showGiftPicker;
 import 'player_info_common.dart';
 import 'session_menu.dart' show showSessionMenu;
 
+import 'app_l10n.dart' show l10nOf;
 export 'player_info_common.dart' show SessionPlayerInfo;
 
 /// 玩家卡的入口来源 —— 决定底部按钮。
@@ -238,7 +239,7 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
     if (!mounted) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(SnackBar(content: Text(next ? '已置顶' : '已取消置顶')));
+    ).showSnackBar(SnackBar(content: Text(next ? l10nOf(context)?.commonPinned ?? '已置顶' : l10nOf(context)?.commonUnpinned ?? '已取消置顶')));
   }
 
   /// 是不是「我自己」——决定动作行内容与「个人主页」的去向。
@@ -272,12 +273,12 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
       setState(() => _friendRequestedLocal = true);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('已发送好友申请')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.playerInfoFriendRequestSent ?? '已发送好友申请')));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('申请失败，请稍后重试')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.playerInfoRequestFailedTryAgain ?? '申请失败，请稍后重试')));
     }
   }
 
@@ -291,12 +292,12 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
       setState(() => _followedLocal = true);
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('已关注')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.commonFollowed ?? '已关注')));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('关注失败')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.mailFailedFollow ?? '关注失败')));
     }
   }
 
@@ -309,24 +310,24 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
       return [
         PlayerCircleAction(
           icon: Icons.person_outline,
-          label: '个人中心',
+          label: l10nOf(context)?.playerInfoMyProfile ?? '个人中心',
           onTap: _openHomePage,
         ),
         if (!_alreadyFriend && !_friendRequestedLocal)
           PlayerCircleAction(
             icon: Icons.person_add_alt_1_outlined,
-            label: '加好友',
+            label: l10nOf(context)?.playerInfoAddFriend ?? '加好友',
             onTap: () => unawaited(_addFriend()),
           ),
         PlayerCircleAction(
           icon: Icons.card_giftcard,
-          label: '赠送',
+          label: l10nOf(context)?.playerInfoSend ?? '赠送',
           onTap: _gift,
         ),
         if (!_alreadyFollowing)
           PlayerCircleAction(
             icon: Icons.favorite_border,
-            label: '关注',
+            label: l10nOf(context)?.commonFollowing ?? '关注',
             onTap: () => unawaited(_follow()),
           ),
       ];
@@ -334,23 +335,23 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
     return [
       PlayerCircleAction(
         icon: Icons.person_outline,
-        label: '个人中心',
+        label: l10nOf(context)?.playerInfoMyProfile ?? '个人中心',
         onTap: _openHomePage,
       ),
       PlayerCircleAction(
         icon: pinned ? Icons.push_pin : Icons.push_pin_outlined,
-        label: pinned ? '取消置顶' : '置顶',
+        label: pinned ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶',
         highlighted: pinned,
         onTap: () => unawaited(_togglePinned()),
       ),
       PlayerCircleAction(
         icon: Icons.card_giftcard,
-        label: '赠送',
+        label: l10nOf(context)?.playerInfoSend ?? '赠送',
         onTap: _gift,
       ),
       PlayerCircleAction(
         icon: Icons.more_horiz,
-        label: '更多',
+        label: l10nOf(context)?.friendsMore ?? '更多',
         onTap: () => unawaited(_openMoreMenu()),
       ),
     ];
@@ -460,7 +461,7 @@ class _SessionPlayerInfoCardState extends State<_SessionPlayerInfoCard> {
                     ? [
                         PlayerCircleAction(
                           icon: Icons.account_circle_outlined,
-                          label: '个人主页',
+                          label: l10nOf(context)?.profileProfile ?? '个人主页',
                           onTap: _openHomePage,
                         ),
                       ]

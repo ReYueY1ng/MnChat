@@ -18,6 +18,8 @@ import 'widgets/rich_text_view.dart';
 import 'widgets/session_menu.dart';
 import 'widgets/session_player_info_popup.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 会话列表页（左侧栏 / 手机单页）。
 ///
 /// 只展示"已对话"的会话：好友必须聊过天（由 HomeShell 过滤后传入），
@@ -178,7 +180,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('会话', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(l10nOf(context)?.commonConversations ?? '会话', style: TextStyle(fontWeight: FontWeight.bold)),
         // 竖屏/窄屏：账号入口放 AppBar；横屏由侧栏底部承担。
         actions: railLayout ? null : const [AccountAvatarButton()],
       ),
@@ -268,7 +270,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
         controller: _searchCtrl,
         onChanged: (v) => setState(() => _search = v),
         decoration: InputDecoration(
-          hintText: '支持迷你号和昵称查找',
+          hintText: l10nOf(context)?.sessionsSearchMiniIDNickname ?? '支持迷你号和昵称查找',
           isDense: true,
           prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _search.isEmpty
@@ -337,7 +339,7 @@ class _SessionListPageState extends ConsumerState<SessionListPage> {
     if (mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('已移除会话')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.sessionsConversationRemoved ?? '已移除会话')));
     }
   }
 
@@ -400,7 +402,7 @@ class _SessionTile extends ConsumerWidget {
     final statusText = isFriend
         ? (session.gameStatus != null && session.gameStatus!.isNotEmpty
               ? session.gameStatus!
-              : (session.isOnline ? '在线' : '离线'))
+              : (session.isOnline ? l10nOf(context)?.friendsOnline ?? '在线' : l10nOf(context)?.friendsOffline ?? '离线'))
         : null;
 
     // 等级 / 拍档 / 大会员：来自会话级批量缓存（随会话流一次拉取，逐行不请求）。
@@ -583,12 +585,12 @@ class _EmptySessions extends StatelessWidget {
             color: theme.colorScheme.outline,
           ),
           const SizedBox(height: AppSpacing.sm),
-          const Text('暂无会话\n聊过天的人会出现在这里'),
+          Text(l10nOf(context)?.sessionsNoConversationsPeopleYou ?? '暂无会话\n聊过天的人会出现在这里'),
           const SizedBox(height: AppSpacing.xs),
           // 说清楚为什么好友列了一屏、会话却是空的：会话只从本机历史与实时推送
           // 来，服务端不会把“我最近跟谁聊过”下发回来。
           Text(
-            '历史消息只保留本机聊过的会话',
+            l10nOf(context)?.sessionsOnlyConversationsChattedDevice ?? '历史消息只保留本机聊过的会话',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.outline,
@@ -598,7 +600,7 @@ class _EmptySessions extends StatelessWidget {
           TextButton.icon(
             onPressed: onAddFriend,
             icon: const Icon(Icons.person_add),
-            label: const Text('添加好友'),
+            label: Text(l10nOf(context)?.friendRequestAddFriend ?? '添加好友'),
           ),
         ],
       ),

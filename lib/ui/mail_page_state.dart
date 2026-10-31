@@ -1,7 +1,7 @@
 part of 'mail_page.dart';
 
 class _MailPageState extends ConsumerState<MailPage> {
-  late MailSelection _selected;
+  late final MailNavigationController _nav;
 
   /// msgcenter 频道消息（channel → items）。
   final Map<int, List<MsgItem>> _items = {};
@@ -21,17 +21,23 @@ class _MailPageState extends ConsumerState<MailPage> {
 
   bool _started = false;
 
-  /// 互动入口的类型筛选（右栏「全部 ▾」）；切换入口 / 分类时重置为「全部」。
-  String _typeFilter = '全部';
-
-  /// 已在本页关注过的粉丝 uin（按钮置为「已关注」）。
-  final Set<int> _followed = <int>{};
-
   @override
   void initState() {
     super.initState();
-    _selected =
-        widget.focus ?? const MailSelection.entry(MsgBoxEntry.dynamics);
+    _nav = MailNavigationController(
+      widget.focus ?? const MailSelection.entry(MsgBoxEntry.dynamics),
+    )..addListener(_onNavChanged);
+  }
+
+  void _onNavChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _nav.removeListener(_onNavChanged);
+    _nav.dispose();
+    super.dispose();
   }
 
   @override
@@ -39,7 +45,10 @@ class _MailPageState extends ConsumerState<MailPage> {
     super.didChangeDependencies();
     if (_started) return;
     _started = true;
-    _ensureLoaded(_selected);
+    if (_nav.typeFilter.isEmpty) {
+      _nav.typeFilter = l10nOf(context)?.mailAll ?? '全部';
+    }
+    _ensureLoaded(_nav.selected);
     unawaited(_loadSummaries());
     unawaited(_loadLeftSummaries());
   }
@@ -75,7 +84,7 @@ class _MailPageState extends ConsumerState<MailPage> {
     if (_loading[channel] == true) return;
     final client = _center;
     if (client == null) {
-      if (mounted) setState(() => _errors[channel] = '未登录');
+      if (mounted) setState(() => _errors[channel] = l10nOf(context)?.commonNotSignedIn ?? '未登录');
       return;
     }
     setState(() {
@@ -101,7 +110,7 @@ class _MailPageState extends ConsumerState<MailPage> {
       setState(() => _items[channel] = list);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _errors[channel] = '加载失败: $e');
+      setState(() => _errors[channel] = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e');
     } finally {
       if (mounted) setState(() => _loading[channel] = false);
     }
@@ -112,7 +121,7 @@ class _MailPageState extends ConsumerState<MailPage> {
     if (_boxLoading[channel] == true) return;
     final client = _box;
     if (client == null) {
-      if (mounted) setState(() => _boxErrors[channel] = '未登录');
+      if (mounted) setState(() => _boxErrors[channel] = l10nOf(context)?.commonNotSignedIn ?? '未登录');
       return;
     }
     setState(() {
@@ -129,7 +138,7 @@ class _MailPageState extends ConsumerState<MailPage> {
       }
     } catch (e) {
       if (!mounted) return;
-      setState(() => _boxErrors[channel] = '加载失败: $e');
+      setState(() => _boxErrors[channel] = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e');
     } finally {
       if (mounted) setState(() => _boxLoading[channel] = false);
     }
@@ -219,13 +228,13 @@ class _MailPageState extends ConsumerState<MailPage> {
     }
   }
 
-  Future<void> _refreshSelection() async {    final ch = _selected.channel;
+  Future<void> _refreshSelection() async {    final ch = _nav.selected.channel;
     if (ch != null && ch != MsgChannel.activityAssistant) {
       await _loadChannel(ch);
     } else if (ch == MsgChannel.activityAssistant) {
       await _loadBoxChannel(MsgBoxChannel.sys);
     } else {
-      for (final c in _selected.entry!.channels) {
+      for (final c in _nav.selected.entry!.channels) {
         await _loadBoxChannel(c);
       }
     }
@@ -241,7 +250,7 @@ class _MailPageState extends ConsumerState<MailPage> {
 
   /// 一键已读：msgcenter 频道 → read_message；msg_box → read_channel_msg。
   Future<void> _readAll() async {
-    final ch = _selected.channel;
+    final ch = _nav.selected.channel;
     if (ch != null && ch != MsgChannel.activityAssistant) {
       final list = _items[ch] ?? const <MsgItem>[];
       final unread = [for (final e in list) if (e.unread) e.id];
@@ -255,13 +264,13 @@ class _MailPageState extends ConsumerState<MailPage> {
               for (final e in list) e.copyWith(readState: 1),
             ]);
       } else {
-        _toast('标记已读失败');
+        _toast(l10nOf(context)?.mailFailedMarkRead ?? '标记已读失败');
       }
       return;
     }
     final channels = ch == MsgChannel.activityAssistant
         ? const [MsgBoxChannel.sys]
-        : _selected.entry!.channels;
+        : _nav.selected.entry!.channels;
     await _readBoxChannels(channels);
   }
 
@@ -283,12 +292,12 @@ class _MailPageState extends ConsumerState<MailPage> {
             for (final m in list) m.copyWith(status: 1),
           ]);
     }
-    if (failed) _toast('标记已读失败');
+    if (failed) _toast(l10nOf(context)?.mailFailedMarkRead ?? '标记已读失败');
   }
 
   /// 删除已读：msgcenter 频道 → delete_message；msg_box → del_channel_msg。
   Future<void> _deleteRead() async {
-    final ch = _selected.channel;
+    final ch = _nav.selected.channel;
     if (ch != null && ch != MsgChannel.activityAssistant) {
       final list = _items[ch] ?? const <MsgItem>[];
       final read = [for (final e in list) if (!e.unread) e.id];
@@ -303,13 +312,13 @@ class _MailPageState extends ConsumerState<MailPage> {
                 if (e.unread) e,
             ]);
       } else {
-        _toast('删除失败');
+        _toast(l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
       }
       return;
     }
     final channels = ch == MsgChannel.activityAssistant
         ? const [MsgBoxChannel.sys]
-        : _selected.entry!.channels;
+        : _nav.selected.entry!.channels;
     await _deleteBoxRead(channels);
   }
 
@@ -332,7 +341,7 @@ class _MailPageState extends ConsumerState<MailPage> {
               if (m.unread) m,
           ]);
     }
-    if (failed) _toast('删除失败');
+    if (failed) _toast(l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
   }
 
   Future<void> _takeAttachment(int channel, MsgItem item) async {
@@ -361,7 +370,7 @@ class _MailPageState extends ConsumerState<MailPage> {
     if (ok) {
       setState(() => _items[channel]?.removeWhere((e) => e.id == item.id));
     } else {
-      _toast('删除失败');
+      _toast(l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
     }
   }
 
@@ -403,13 +412,14 @@ class _MailPageState extends ConsumerState<MailPage> {
   }
 
   Future<void> _openDynamics(String pid) async {
+    final l10n = l10nOf(context);
     final client = _dynamics;
     if (client == null || pid.isEmpty) return;
     try {
       final post = await client.fetchPost(pid);
       if (!mounted) return;
       if (post == null) {
-        _toast('动态不存在或已删除');
+        _toast(l10nOf(context)?.mailThisMomentDoesntExist ?? '动态不存在或已删除');
         return;
       }
       await Navigator.of(context).push(
@@ -418,21 +428,22 @@ class _MailPageState extends ConsumerState<MailPage> {
         ),
       );
     } catch (e) {
-      _toast('动态加载失败: $e');
+      _toast(l10n?.chatFailedLoadMoments(e) ?? '动态加载失败: $e');
     }
   }
 
   /// 关注粉丝（`attention_friend`）；成功后按钮置为「已关注」。
   Future<void> _follow(int uin) async {
+    final l10n = l10nOf(context);
     try {
       await ref.read(chatServiceProvider).followPlayer(uin, follow: true);
     } catch (_) {
-      _toast('关注失败');
+      _toast(l10n?.mailFailedFollow ?? '关注失败');
       return;
     }
     if (!mounted) return;
-    setState(() => _followed.add(uin));
-    _toast('已关注');
+    _nav.markFollowed(uin);
+    _toast(l10nOf(context)?.commonFollowed ?? '已关注');
   }
 
   void _toast(String msg) {
@@ -442,9 +453,9 @@ class _MailPageState extends ConsumerState<MailPage> {
 
   void _select(MailSelection sel) {
     setState(() {
-      _selected = sel;
+      _nav.select(sel);
       // 类型筛选属于入口维度：切走一律回到「全部」。
-      _typeFilter = '全部';
+      _nav.typeFilter = l10nOf(context)?.mailAll ?? '全部';
     });
     _ensureLoaded(sel);
   }
@@ -474,10 +485,10 @@ class _MailPageState extends ConsumerState<MailPage> {
     }
     if (sel.entry != null) {
       final all = _entryItems(sel.entry!);
-      if (_typeFilter == '全部') return all;
+      if (_nav.typeFilter == (l10nOf(context)?.mailAll ?? '全部')) return all;
       return [
         for (final m in all)
-          if (m.filterLabel == _typeFilter) m,
+          if (m.filterLabel == _nav.typeFilter) m,
       ];
     }
     return const <MsgBoxMessage>[];
@@ -602,10 +613,10 @@ class _MailPageState extends ConsumerState<MailPage> {
         final wide = constraints.maxWidth >= kMailCentreWideWidth;
         // 窄屏下钻实例：仅详情 + 返回。
         if (widget.focus != null && !wide) {
-          final options = _typeFilterOptions(_selected);
+          final options = _typeFilterOptions(_nav.selected);
           return Scaffold(
             appBar: AppBar(
-              title: Text(_selectionTitle(_selected)),
+              title: Text(_selectionTitle(_nav.selected)),
               // 窄屏下钻页没有栏头，把「全部 ▾」搬到 AppBar（宽屏在栏头里）。
               actions: [
                 if (options != null)
@@ -614,22 +625,22 @@ class _MailPageState extends ConsumerState<MailPage> {
                     child: Center(
                       child: _TypeFilterPill(
                         options: options,
-                        value: _typeFilter,
-                        onChanged: (v) => setState(() => _typeFilter = v),
+                        value: _nav.typeFilter,
+                        onChanged: (v) => setState(() => _nav.typeFilter = v),
                       ),
                     ),
                   ),
               ],
             ),
-            body: _buildPane(_selected, wide: false),
+            body: _buildPane(_nav.selected, wide: false),
           );
         }
         return Scaffold(
           appBar: AppBar(
-            title: const Text('消息中心'),
+            title: Text(l10nOf(context)?.mailMessageCenter ?? '消息中心'),
             actions: [
               IconButton(
-                tooltip: '刷新',
+                tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
                 onPressed: _refreshSelection,
                 icon: const Icon(Icons.refresh),
               ),
@@ -646,7 +657,7 @@ class _MailPageState extends ConsumerState<MailPage> {
                       child: _buildLeftColumn(pushOnTap: false),
                     ),
                     const VerticalDivider(width: 1),
-                    Expanded(child: _buildPane(_selected, wide: true)),
+                    Expanded(child: _buildPane(_nav.selected, wide: true)),
                   ],
                 )
               : _buildLeftColumn(pushOnTap: true),
@@ -682,7 +693,7 @@ class _MailPageState extends ConsumerState<MailPage> {
               child: _TopEntryButton(
                 entry: e,
                 unread: _entryUnread(e),
-                selected: _selected.entry == e,
+                selected: _nav.selected.entry == e,
                 onTap: () {
                   final sel = MailSelection.entry(e);
                   if (pushOnTap) {
@@ -736,9 +747,9 @@ class _MailPageState extends ConsumerState<MailPage> {
     final style = _categoryStyle(theme, channel);
     final unread = _channelUnread(channel);
     final line = _channelLine(channel);
-    final subtitle = line.text.isNotEmpty ? line.text : '暂无消息';
+    final subtitle = line.text.isNotEmpty ? line.text : l10nOf(context)?.mailNoMessages ?? '暂无消息';
     final time = line.time > 0 ? fmtMailTimeShort(line.time) : '';
-    final selected = _selected.channel == channel;
+    final selected = _nav.selected.channel == channel;
     // M3 选中态：secondaryContainer 铺底 + onSecondaryContainer 前景，无描边。
     final fg = theme.colorScheme.onSecondaryContainer;
     return Material(
@@ -850,13 +861,13 @@ class _MailPageState extends ConsumerState<MailPage> {
             const SizedBox(height: AppSpacing.sm),
             FilledButton(
               onPressed: _refreshSelection,
-              child: const Text('重试'),
+              child: Text(l10nOf(context)?.commonRetry ?? '重试'),
             ),
           ],
         ),
       );
     } else if (count == 0) {
-      body = const Center(child: Text('暂无消息'));
+      body = Center(child: Text(l10nOf(context)?.mailNoMessages ?? '暂无消息'));
     } else {
       body = RefreshIndicator(
         onRefresh: _refreshSelection,
@@ -909,8 +920,8 @@ class _MailPageState extends ConsumerState<MailPage> {
           if (options != null)
             _TypeFilterPill(
               options: options,
-              value: _typeFilter,
-              onChanged: (v) => setState(() => _typeFilter = v),
+              value: _nav.typeFilter,
+              onChanged: (v) => setState(() => _nav.typeFilter = v),
             ),
         ],
       ),
@@ -931,13 +942,13 @@ class _MailPageState extends ConsumerState<MailPage> {
           TextButton.icon(
             onPressed: canRead ? _readAll : null,
             icon: const Icon(Icons.done_all, size: 18),
-            label: const Text('一键已读'),
+            label: Text(l10nOf(context)?.mailMarkRead ?? '一键已读'),
           ),
           const SizedBox(width: AppSpacing.sm),
           TextButton.icon(
             onPressed: canDelete ? _deleteRead : null,
             icon: const Icon(Icons.delete_outline, size: 18),
-            label: const Text('删除已读'),
+            label: Text(l10nOf(context)?.mailDeleteRead ?? '删除已读'),
           ),
         ],
       ),
@@ -992,7 +1003,7 @@ class _MailPageState extends ConsumerState<MailPage> {
                 ),
               Expanded(
                 child: Text(
-                  item.title.isNotEmpty ? item.title : '（无标题）',
+                  item.title.isNotEmpty ? item.title : l10nOf(context)?.mailUntitled ?? '（无标题）',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -1065,7 +1076,7 @@ class _MailPageState extends ConsumerState<MailPage> {
                   ),
                 ),
                 Text(
-                  item.attachmentTaken ? '已领取' : '待领取',
+                  item.attachmentTaken ? l10nOf(context)?.mailClaimed ?? '已领取' : l10nOf(context)?.mailUnclaimed ?? '待领取',
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: item.attachmentTaken
@@ -1083,8 +1094,8 @@ class _MailPageState extends ConsumerState<MailPage> {
             children: [
               Text(
                 item.senderName.isNotEmpty
-                    ? '来自${item.senderName}'
-                    : '来自迷你官方',
+                    ? l10nOf(context)?.mailFrom(item.senderName) ?? '来自${item.senderName}'
+                    : l10nOf(context)?.mailFromMiniWorldOfficial ?? '来自迷你官方',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.outline,
                 ),
@@ -1122,7 +1133,7 @@ class _MailPageState extends ConsumerState<MailPage> {
     final content = m.content.isNotEmpty ? m.content : m.title;
     final bodyText = content.isNotEmpty && content != preview ? content : '';
     final timeText = (m.time > 0 || m.location.isNotEmpty)
-        ? fmtMsgTimeIp(m.time, m.location)
+        ? fmtMsgTimeIp(context, m.time, m.location)
         : '';
     return _card(
       onTap: m.hasDetail ? () => _openDynamics(m.pid) : null,
@@ -1227,7 +1238,7 @@ class _MailPageState extends ConsumerState<MailPage> {
           if (isFan && m.uin > 0) ...[
             const SizedBox(width: AppSpacing.sm),
             _FollowButton(
-              followed: _followed.contains(m.uin),
+              followed: _nav.followed.contains(m.uin),
               onPressed: () => _follow(m.uin),
             ),
           ],

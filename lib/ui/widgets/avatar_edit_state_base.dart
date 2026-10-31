@@ -174,7 +174,7 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
       if (!mounted) return;
       setState(() {
         _familyLoading = false;
-        _familyError = '家族列表加载失败';
+        _familyError = l10nOf(context)?.avatarEditFailedLoadFamilyList ?? '家族列表加载失败';
       });
     }
   }
@@ -253,13 +253,13 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
               : ({..._topFrameIds}..remove(frameId));
           _changed = true;
         });
-        _toast(pin ? '已置顶' : '已取消置顶');
+        _toast(pin ? l10nOf(context)?.commonPinned ?? '已置顶' : l10nOf(context)?.commonUnpinned ?? '已取消置顶');
       } else {
-        _toast(result.message ?? (pin ? '置顶失败，请稍后重试' : '取消置顶失败，请稍后重试'));
+        _toast(result.message ?? (pin ? l10nOf(context)?.avatarEditFailedPinTryAgain ?? '置顶失败，请稍后重试' : l10nOf(context)?.avatarEditFailedUnpinTryAgain ?? '取消置顶失败，请稍后重试'));
       }
     } catch (e) {
       if (!mounted) return;
-      _toast('操作失败：$e');
+      _toast(l10nOf(context)?.avatarEditOperationFailed(e) ?? '操作失败：$e');
     } finally {
       if (mounted) setState(() => _topBusy = false);
     }
@@ -336,7 +336,7 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
       if (!mounted) return;
       setState(() {
         _titlesLoading = false;
-        _titlesError = '称号列表加载失败';
+        _titlesError = l10nOf(context)?.avatarEditFailedLoadTitleList ?? '称号列表加载失败';
       });
     }
   }
@@ -348,11 +348,11 @@ mixin _AvatarEditStateBase on ConsumerState<AvatarEditDialog> {
     return client.getOwnedTitles();
   }
 
-  /// 称号分类页签文案：有配置时用配置分类，否则回退 [kTitleCategoryTabs]。
+  /// 称号分类页签文案：有配置时用配置分类，否则回退 [titleCategoryTabs]。
   List<String> _titleLabels(TitleCatalog catalog) {
     final types = catalog.sortedTypes;
     return types.isEmpty
-        ? kTitleCategoryTabs
-        : ['全部', ...types.map((t) => t.name)];
+        ? titleCategoryTabs(context)
+        : [l10nOf(context)?.mailAll ?? '全部', ...types.map((t) => t.name)];
   }
 }

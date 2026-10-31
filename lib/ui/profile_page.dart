@@ -71,6 +71,7 @@ import 'widgets/home_layout_dialog.dart';
 import 'widgets/partner_badges.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
 part 'profile_page_state_base.dart';
 part 'profile_page_state_actions.dart';
 part 'profile_page_widgets.dart';
@@ -80,7 +81,8 @@ part 'profile_page_widgets_compact.dart';
 const String _logTag = 'ProfilePage';
 
 /// 无协议数据版块的统一降级提示（见本文件「已知缺口」）。
-const String kHomeUnavailableHint = '外部客户端暂未获取该项数据';
+String kHomeUnavailableHint(BuildContext context) =>
+    l10nOf(context)?.profileThisExternalClientHasnt ?? '外部客户端暂未获取该项数据';
 
 /// 统计项的降级占位（数值未知时展示，避免与真实的 0 混淆）。
 const String kHomeUnknownValue = '—';
@@ -147,16 +149,16 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(_isSelf ? '个人主页' : _plainName),
+        title: Text(_isSelf ? l10nOf(context)?.profileProfile ?? '个人主页' : _plainName),
         actions: [
           if (_isSelf)
             IconButton(
-              tooltip: '头像编辑',
+              tooltip: l10nOf(context)?.profileEditAvatar ?? '头像编辑',
               icon: const Icon(Icons.badge_outlined),
               onPressed: _openAvatarEdit,
             ),
           IconButton(
-            tooltip: '刷新',
+            tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: () {
               _loadProfile();
@@ -209,13 +211,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               const SizedBox(height: AppSpacing.md),
               // 3. 个性装扮（皮肤 / 立绘，点选即换头像本体）
               _HomeSectionCard(
-                title: '个性装扮',
+                title: l10nOf(context)?.profilePersonalStyle ?? '个性装扮',
                 count: '${decorCount > 0 ? decorCount : (skinModuleCount ?? 0)}',
                 child: decorCount == 0
                     ? _UnavailableNote(
                         (skinModuleCount ?? 0) > 0
-                            ? '已拥有 $skinModuleCount 件装扮（本地暂无对应图标）'
-                            : '暂未获取到已拥有的皮肤或立绘',
+                            ? l10nOf(context)?.profileOwnStylesLocalIcons(skinModuleCount.toString()) ?? '已拥有 $skinModuleCount 件装扮（本地暂无对应图标）'
+                            : l10nOf(context)?.profileNoOwnedSkinsArtwork ?? '暂未获取到已拥有的皮肤或立绘',
                       )
                     : Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -230,7 +232,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                           ),
                           if (_portraits.isNotEmpty) ...[
                             const SizedBox(height: AppSpacing.md),
-                            Text('立绘', style: theme.textTheme.labelMedium),
+                            Text(l10nOf(context)?.profileArtwork ?? '立绘', style: theme.textTheme.labelMedium),
                             const SizedBox(height: AppSpacing.sm),
                             Wrap(
                               spacing: AppSpacing.sm,
@@ -247,13 +249,13 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               const SizedBox(height: AppSpacing.md),
               // 4. 头像框（看自己时可点选更换；看别人时只报数量）
               _HomeSectionCard(
-                title: '头像框',
+                title: l10nOf(context)?.profileAvatarFrame ?? '头像框',
                 count: '${_ownedFrames.isNotEmpty ? _ownedFrames.length : (homepageHeadFrameCount(_home) ?? 0)}',
                 child: _ownedFrames.isEmpty
                     ? _UnavailableNote(
                         (homepageHeadFrameCount(_home) ?? 0) > 0
-                            ? '已拥有 ${homepageHeadFrameCount(_home)} 个头像框'
-                            : kHomeUnavailableHint,
+                            ? l10nOf(context)?.profileOwnAvatarFrames(homepageHeadFrameCount(_home).toString()) ?? '已拥有 ${homepageHeadFrameCount(_home)} 个头像框'
+                            : kHomeUnavailableHint(context),
                       )
                     : Wrap(
                         spacing: AppSpacing.sm,
@@ -268,15 +270,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               // 5. 魅力值 / 称号
               _ResponsivePair(
                 first: _CompactModuleCard(
-                  title: '魅力值',
+                  title: l10nOf(context)?.profileCharm ?? '魅力值',
                   count: charm == null ? kHomeUnknownValue : '$charm',
-                  caption: charm == null ? kHomeUnavailableHint : '累计收到礼物魅力值',
+                  caption: charm == null ? kHomeUnavailableHint(context) : l10nOf(context)?.profileTotalCharmReceivedGifts ?? '累计收到礼物魅力值',
                 ),
                 second: _HomeSectionCard(
-                  title: '称号',
+                  title: l10nOf(context)?.profileTitle ?? '称号',
                   count: _titleName == null ? kHomeUnknownValue : null,
                   child: _titleName == null
-                      ? const _UnavailableNote('未佩戴称号')
+                      ? _UnavailableNote(l10nOf(context)?.profileNoTitleEquipped ?? '未佩戴称号')
                       : Wrap(
                           spacing: AppSpacing.sm,
                           runSpacing: AppSpacing.sm,
@@ -288,12 +290,12 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               // 6. 发布作品 / 动态
               _ResponsivePair(
                 first: _HomeSectionCard(
-                  title: '发布作品',
+                  title: l10nOf(context)?.profilePublishWork ?? '发布作品',
                   count: workCount == null ? kHomeUnknownValue : '$workCount',
                   child: workCount == null
-                      ? const _UnavailableNote(kHomeUnavailableHint)
+                      ? _UnavailableNote(kHomeUnavailableHint(context))
                       : works.isEmpty
-                      ? const _UnavailableNote('暂无已发布地图作品')
+                      ? _UnavailableNote(l10nOf(context)?.profileNoPublishedMapWorks ?? '暂无已发布地图作品')
                       : Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
@@ -323,7 +325,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                               ),
                             if (works.length > 4)
                               Text(
-                                '等 ${works.length} 张地图',
+                                l10nOf(context)?.profileAndMaps(works.length) ?? '等 ${works.length} 张地图',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: theme.colorScheme.outline,
                                 ),
@@ -332,7 +334,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                         ),
                 ),
                 second: _HomeSectionCard(
-                  title: '动态',
+                  title: l10nOf(context)?.shellMoments ?? '动态',
                   count: postingCount == null
                       ? kHomeUnknownValue
                       : '$postingCount',
@@ -346,15 +348,15 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                       : TextButton.icon(
                           onPressed: _postingTopBusy ? null : _togglePostingTop,
                           icon: const Icon(Icons.push_pin_outlined, size: 16),
-                          label: Text(_pinnedPid > 0 ? '取消置顶' : '置顶'),
+                          label: Text(_pinnedPid > 0 ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶'),
                         ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _UnavailableNote(
                         postingCount == null
-                            ? '外部客户端暂不展示动态正文'
-                            : '已发布 $postingCount 条动态',
+                            ? l10nOf(context)?.profileThisExternalClientDoesnt ?? '外部客户端暂不展示动态正文'
+                            : l10nOf(context)?.profileMomentsPublished(postingCount) ?? '已发布 $postingCount 条动态',
                       ),
                       const SizedBox(height: AppSpacing.sm),
                       OutlinedButton.icon(
@@ -364,7 +366,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
                           authorName: name,
                         ),
                         icon: const Icon(Icons.public, size: 16),
-                        label: const Text('查看我的动态'),
+                        label: Text(l10nOf(context)?.profileViewMoments ?? '查看我的动态'),
                       ),
                     ],
                   ),
@@ -373,10 +375,10 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               const SizedBox(height: AppSpacing.md),
               // 7. 最佳拍档（与最佳拍档页同源同款徽标）
               _HomeSectionCard(
-                title: '最佳拍档',
+                title: l10nOf(context)?.commonBestPartners ?? '最佳拍档',
                 count: '${partners.length}',
                 child: partners.isEmpty
-                    ? const _UnavailableNote('暂无最佳拍档')
+                    ? _UnavailableNote(l10nOf(context)?.partnerNoBestPartnersYet ?? '暂无最佳拍档')
                     : Column(
                         children: [
                           for (final p in partners)
@@ -395,44 +397,44 @@ class _ProfilePageState extends ConsumerState<ProfilePage>
               _CompactModuleGrid(
                 children: [
                   _CompactModuleCard(
-                    title: '追光计划',
+                    title: l10nOf(context)?.profileLightChaseProject ?? '追光计划',
                     count: chaseLightCount == null
                         ? kHomeUnknownValue
                         : '$chaseLightCount',
                     caption: chaseLightCount == null
-                        ? kHomeUnavailableHint
-                        : '已收集装扮',
+                        ? kHomeUnavailableHint(context)
+                        : l10nOf(context)?.profileStylesCollected ?? '已收集装扮',
                   ),
                   _CompactModuleCard(
-                    title: '勋章',
+                    title: l10nOf(context)?.profileMedals ?? '勋章',
                     count: medalCount > 0 ? '$medalCount' : kHomeUnknownValue,
-                    caption: medalCount > 0 ? '已获得勋章' : kHomeUnavailableHint,
+                    caption: medalCount > 0 ? l10nOf(context)?.profileMedalsEarned ?? '已获得勋章' : kHomeUnavailableHint(context),
                   ),
                   // 我的收藏夹数量来自独立接口
                   // `miniw/favorite?act=get_collect_ids`
                   // （`contentfavsservice.lua:205-209`），不在
                   // get_user_homepage 模块数据内。
                   _CompactModuleCard(
-                    title: '我的收藏夹',
+                    title: l10nOf(context)?.profileMyFavorites ?? '我的收藏夹',
                     count: _favoriteCount == null
                         ? kHomeUnknownValue
                         : '$_favoriteCount',
                     caption: _favoriteCount == null
-                        ? kHomeUnavailableHint
-                        : '已创建收藏夹',
+                        ? kHomeUnavailableHint(context)
+                        : l10nOf(context)?.profileFavoritesCreated ?? '已创建收藏夹',
                   ),
                   // 迷你印迹数量来自独立接口 MultimediaAlbum
                   // `miniw/camera?act=get_photo_homepage`
                   // （`multimediaalbumservice.lua:255-261`），不在
                   // get_user_homepage 模块数据内。
                   _CompactModuleCard(
-                    title: '迷你印迹',
+                    title: l10nOf(context)?.profileMiniTraces ?? '迷你印迹',
                     count: _multimediaCount == null
                         ? kHomeUnknownValue
                         : '$_multimediaCount',
                     caption: _multimediaCount == null
-                        ? kHomeUnavailableHint
-                        : '主页展示的照片',
+                        ? kHomeUnavailableHint(context)
+                        : l10nOf(context)?.profilePhotosShownProfile ?? '主页展示的照片',
                   ),
                 ],
               ),

@@ -11,6 +11,8 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/models/homepage_modules.dart' show kHomeModuleNames;
 import '../theme/app_tokens.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 保存回调：返回 `true` 表示服务端接受本次布局。
 typedef LayoutSaver =
     Future<bool> Function(List<Map<String, Object?>> layout);
@@ -46,7 +48,7 @@ class _HomeLayoutDialogState extends State<_HomeLayoutDialog> {
   String _label(Map<String, Object?> e) {
     final raw = e['moduleId'];
     final id = raw is num ? raw.toInt() : int.tryParse('$raw');
-    if (id == null) return '未知模块';
+    if (id == null) return l10nOf(context)?.homeLayoutUnknownModule ?? '未知模块';
     return kHomeModuleNames[id] ?? '模块 $id';
   }
 
@@ -62,7 +64,7 @@ class _HomeLayoutDialogState extends State<_HomeLayoutDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('编辑布局'),
+      title: Text(l10nOf(context)?.profileEditLayout ?? '编辑布局'),
       contentPadding: const EdgeInsets.fromLTRB(0, AppSpacing.md, 0, 0),
       content: SizedBox(
         width: dialogContentWidth(context, 420),
@@ -101,11 +103,11 @@ class _HomeLayoutDialogState extends State<_HomeLayoutDialog> {
       actions: [
         TextButton(
           onPressed: _busy ? null : () => Navigator.of(context).pop(false),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: _busy ? null : _save,
-          child: const Text('保存'),
+          child: Text(l10nOf(context)?.groupDetailSave ?? '保存'),
         ),
       ],
     );

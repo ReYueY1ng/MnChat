@@ -10,6 +10,8 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 
 import '../storage/app_database.dart';
+import 'backup_crypto.dart'
+    show decryptBackup, encryptBackup, isEncryptedBackup;
 
 /// 备份文件格式版本（写入 header 的 `version` 字段）。
 const int _kBackupVersion = 1;
@@ -27,7 +29,8 @@ class BackupService {
   ///
   /// 导出 [ChatMessages] / [ChatSessions] / [Friends] 三张表中
   /// `ownerUin` 等于 [ownerUin] 的行，返回 UTF-8 编码的 JSON。
-  Future<List<int>> exportJson(int ownerUin) async {
+  /// [passphrase] 非空时返回 AES-256-GCM 加密信封（见 backup_crypto.dart）。
+  Future<List<int>> exportJson(int ownerUin, {String? passphrase}) async {
     final messages = await (_db.select(_db.chatMessages)
           ..where((t) => t.ownerUin.equals(ownerUin))
           ..orderBy([
@@ -53,7 +56,9 @@ class BackupService {
       'sessions': [for (final s in sessions) _sessionToJson(s)],
       'friends': [for (final f in friends) _friendToJson(f)],
     };
-    return utf8.encode(jsonEncode(root));
+    final plain = utf8.encode(jsonEncode(root));
+    if (passphrase == null || passphrase.isEmpty) return plain;
+    return encryptBackup(plain, passphrase: passphrase);
   }
 
   /// 导入 JSON 字节（merge），返回实际插入的 (消息数, 会话数, 好友数)。
@@ -62,9 +67,13 @@ class BackupService {
   /// 跳过主身份已存在的行（消息：`sessionKey`+`uin`+`time`+`content`；
   /// 会话：`sessionKey`+`ownerUin`；好友：`uin`+`ownerUin`）。
   Future<({int messages, int sessions, int friends})> importJson(
-    List<int> bytes,
-  ) async {
-    final decoded = jsonDecode(utf8.decode(bytes));
+    List<int> bytes, {
+    String? passphrase,
+  }) async {
+    final plain = isEncryptedBackup(bytes)
+        ? await decryptBackup(bytes, passphrase: passphrase ?? '')
+        : bytes;
+    final decoded = jsonDecode(utf8.decode(plain));
     if (decoded is! Map) {
       throw const FormatException('备份文件格式不正确');
     }

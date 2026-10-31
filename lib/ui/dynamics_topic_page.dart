@@ -19,6 +19,8 @@ import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/dynamics_card.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 话题页。[topicId] 为空 → 话题列表页；非空 → 该话题下的动态流。
 class DynamicsTopicPage extends ConsumerStatefulWidget {
   /// 话题 id（`null` = 列表模式）。真实形态是字符串，如 `o:21` / `u:<uin>:<ct>`。
@@ -53,10 +55,10 @@ class _DynamicsTopicPageState extends ConsumerState<DynamicsTopicPage> {
       appBar: AppBar(
         title: Text(_isFeed
             ? '#${widget.topicTitle ?? widget.topicId}'
-            : '话题'),
+            : l10nOf(context)?.dynamicsTopicTopics ?? '话题'),
       ),
       body: _client == null
-          ? const Center(child: Text('未登录'))
+          ? Center(child: Text(l10nOf(context)?.commonNotSignedIn ?? '未登录'))
           : (_isFeed
               ? _TopicFeed(client: _client!, topicId: widget.topicId!)
               : _TopicList(client: _client!)),
@@ -103,7 +105,7 @@ class _TopicListState extends State<_TopicList> {
         _all = all;
       });
     } catch (e) {
-      if (mounted) setState(() => _error = '加载失败: $e');
+      if (mounted) setState(() => _error = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -133,7 +135,7 @@ class _TopicListState extends State<_TopicList> {
             FilledButton.tonalIcon(
               onPressed: _load,
               icon: const Icon(Icons.refresh),
-              label: const Text('重试'),
+              label: Text(l10nOf(context)?.commonRetry ?? '重试'),
             ),
           ],
         ),
@@ -145,9 +147,9 @@ class _TopicListState extends State<_TopicList> {
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: const [
+          children: [
             SizedBox(height: 160),
-            Center(child: Text('暂无话题，下拉刷新')),
+            Center(child: Text(l10nOf(context)?.dynamicsTopicNoTopicsYetPull ?? '暂无话题，下拉刷新')),
           ],
         ),
       );
@@ -178,7 +180,7 @@ class _TopicListState extends State<_TopicList> {
                   e.official ? Icons.verified_outlined : Icons.tag,
                 ),
                 title: Text('#${e.topic.title}'),
-                subtitle: Text('话题 ${e.topic.topicId}'),
+                subtitle: Text(l10nOf(context)?.dynamicsTopicTopic(e.topic.topicId) ?? '话题 ${e.topic.topicId}'),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => _open(e.topic),
               );
@@ -257,7 +259,7 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
       });
       unawaited(_enrichAvatars());
     } catch (e) {
-      if (mounted) setState(() => _error = '加载失败: $e');
+      if (mounted) setState(() => _error = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -310,7 +312,7 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
             FilledButton.tonalIcon(
               onPressed: _load,
               icon: const Icon(Icons.refresh),
-              label: const Text('重试'),
+              label: Text(l10nOf(context)?.commonRetry ?? '重试'),
             ),
           ],
         ),
@@ -321,9 +323,9 @@ class _TopicFeedState extends ConsumerState<_TopicFeed> {
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: const [
+          children: [
             SizedBox(height: 160),
-            Center(child: Text('该话题暂无动态，下拉刷新')),
+            Center(child: Text(l10nOf(context)?.dynamicsTopicNoMomentsTopicYet ?? '该话题暂无动态，下拉刷新')),
           ],
         ),
       );

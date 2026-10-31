@@ -14,6 +14,8 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class BlacklistPage extends ConsumerStatefulWidget {
   const BlacklistPage({super.key});
 
@@ -36,33 +38,35 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
   }
 
   Future<void> _remove(ChatSession s) async {
+    final l10n = l10nOf(context);
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await ref.read(chatServiceProvider).removeBlacklist(s.id);
-      _toast('已移出黑名单');
+      _toast(l10n?.blocklistRemoved ?? '已移出黑名单');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _clear() async {
+    final l10n = l10nOf(context);
     if (_busy) return;
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清空黑名单'),
-        content: const Text('确定移出黑名单中的全部好友吗？'),
+        title: Text(l10nOf(context)?.blocklistClearAll ?? '清空黑名单'),
+        content: Text(l10nOf(context)?.blocklistRemoveAllFriends ?? '确定移出黑名单中的全部好友吗？'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -71,37 +75,38 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
     setState(() => _busy = true);
     try {
       await ref.read(chatServiceProvider).clearBlacklist();
-      _toast('已清空');
+      _toast(l10n?.blocklistCleared ?? '已清空');
     } catch (e) {
-      _toast('清空失败: $e');
+      _toast(l10n?.blocklistFailedClear(e) ?? '清空失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _add() async {
+    final l10n = l10nOf(context);
     final controller = TextEditingController();
     final result = await showDialog<int>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('加入黑名单'),
+        title: Text(l10nOf(context)?.blocklistAdd ?? '加入黑名单'),
         content: TextField(
           controller: controller,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(
-            labelText: '迷你号 (Uin)',
-            hintText: '输入要拉黑的迷你号',
+          decoration: InputDecoration(
+            labelText: l10nOf(context)?.blocklistMiniIdUin ?? '迷你号 (Uin)',
+            hintText: l10nOf(context)?.blocklistEnterMiniIdToBlock ?? '输入要拉黑的迷你号',
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () =>
                 Navigator.pop(ctx, int.tryParse(controller.text.trim()) ?? 0),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -111,9 +116,9 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
     setState(() => _busy = true);
     try {
       await ref.read(chatServiceProvider).addBlacklist(result);
-      _toast('已加入黑名单');
+      _toast(l10n?.blocklistAdded ?? '已加入黑名单');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -130,16 +135,16 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
     final list = _black(snap);
     return Scaffold(
       appBar: AppBar(
-        title: const Text('黑名单'),
+        title: Text(l10nOf(context)?.friendsBlocklist ?? '黑名单'),
         actions: [
           IconButton(
-            tooltip: '加入黑名单',
+            tooltip: l10nOf(context)?.blocklistAdd ?? '加入黑名单',
             icon: const Icon(Icons.person_add_disabled_outlined),
             onPressed: _busy ? null : _add,
           ),
           if (list.isNotEmpty)
             IconButton(
-              tooltip: '清空',
+              tooltip: l10nOf(context)?.blocklistClear ?? '清空',
               icon: const Icon(Icons.delete_sweep_outlined),
               onPressed: _busy ? null : _clear,
             ),
@@ -149,7 +154,7 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.listContent),
           child: list.isEmpty
-              ? const Center(child: Text('暂无黑名单好友'))
+              ? Center(child: Text(l10nOf(context)?.blocklistEmpty ?? '暂无黑名单好友'))
               : RefreshIndicator(
                   onRefresh: () async {},
                   child: ListView.separated(
@@ -169,7 +174,7 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
                           frameId: s.headFrameId,
                         ),
                         title: RichTextView(name),
-                        subtitle: Text('迷你号 ${s.id}'),
+                        subtitle: Text(l10nOf(context)?.blocklistMiniId(s.id) ?? '迷你号 ${s.id}'),
                         trailing: _busy
                             ? const SizedBox(
                                 width: 28,
@@ -177,7 +182,7 @@ class _BlacklistPageState extends ConsumerState<BlacklistPage> {
                                 child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : IconButton(
-                                tooltip: '移出黑名单',
+                                tooltip: l10nOf(context)?.blocklistRemove ?? '移出黑名单',
                                 icon: const Icon(Icons.person_remove_outlined),
                                 onPressed: () => _remove(s),
                               ),

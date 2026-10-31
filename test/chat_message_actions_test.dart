@@ -108,6 +108,25 @@ void main() {
     expect(find.byTooltip('删除'), findsOneWidget);
   });
 
+  testWidgets('多选后复制选中正文到剪贴板', (tester) async {
+    final calls = await pumpChat(tester);
+    await tester.longPress(find.text(body));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('多选'));
+    await tester.pumpAndSettle();
+
+    // 进入多选会预选长按的那条。
+    await tester.tap(find.byKey(selectionCopyKey));
+    await tester.pumpAndSettle();
+    final setData = calls
+        .where((c) => c.method == 'Clipboard.setData')
+        .toList();
+    expect(setData, isNotEmpty);
+    expect((setData.last.arguments as Map<Object?, Object?>)['text'], body);
+    // 复制后退出多选。
+    expect(find.byTooltip('收藏'), findsNothing);
+  });
+
   testWidgets('多选模式下点消息可取消选中并退出多选', (tester) async {
     await pumpChat(tester);
 

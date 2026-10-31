@@ -112,7 +112,7 @@ class _DetailButton extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      child: const Text('详情'),
+      child: Text(l10nOf(context)?.mailDetails ?? '详情'),
     );
   }
 }
@@ -178,7 +178,7 @@ class _TypeFilterPill extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return PopupMenuButton<String>(
-      tooltip: '筛选类型',
+      tooltip: l10nOf(context)?.mailFilterType ?? '筛选类型',
       onSelected: onChanged,
       itemBuilder: (ctx) => [
         for (final o in options)
@@ -249,7 +249,7 @@ class _FollowButton extends StatelessWidget {
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
         ),
-        child: Text(followed ? '已关注' : '关注'),
+        child: Text(followed ? l10nOf(context)?.commonFollowed ?? '已关注' : l10nOf(context)?.commonFollowing ?? '关注'),
       ),
     );
   }

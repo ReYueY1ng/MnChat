@@ -1,5 +1,8 @@
 part of 'chat_page.dart';
 
+/// 「粘贴图片」按钮的测试定位 key（保持名字稳定）。
+const Key composerPasteImageKey = Key('composer_paste_image');
+
 /// 「语音」入口弹层里的两个选项（测试定位用）。
 const Key voiceRecordEntryKey = Key('voice_record_entry');
 const Key voicePickFileEntryKey = Key('voice_pick_file_entry');
@@ -36,14 +39,14 @@ class _EmptyChatState extends StatelessWidget {
             ),
             const SizedBox(height: 14),
             Text(
-              '暂无消息，打个招呼吧 👋',
+              l10nOf(context)?.chatNoMessagesYetSay ?? '暂无消息，打个招呼吧 👋',
               style: theme.textTheme.titleSmall?.copyWith(
                 fontWeight: FontWeight.w600,
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
             Text(
-              '发送第一条消息，开启你们的冒险',
+              l10nOf(context)?.chatSendFirstMessageStart ?? '发送第一条消息，开启你们的冒险',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.outline,
               ),
@@ -52,7 +55,7 @@ class _EmptyChatState extends StatelessWidget {
             OutlinedButton.icon(
               onPressed: onInsert,
               icon: const Icon(Icons.waving_hand_outlined, size: 16),
-              label: const Text('打个招呼'),
+              label: Text(l10nOf(context)?.chatSayHello ?? '打个招呼'),
             ),
           ],
         ),
@@ -75,6 +78,9 @@ class _ComposerBar extends ConsumerWidget {
   /// 发图：选图 → 上传 → 发送「图片」分享卡。为空时不显示「图片」按钮。
   final VoidCallback? onPickImage;
 
+  /// 粘贴图片：读取剪贴板里的图片文件路径并发送。为空时不显示按钮。
+  final VoidCallback? onPasteImage;
+
   /// 发语音：选音频文件 → 上传 → 以信封发送。为空时不显示「语音」按钮。
   final VoidCallback? onSendVoice;
 
@@ -84,6 +90,7 @@ class _ComposerBar extends ConsumerWidget {
     this.onImfc,
     this.onMention,
     this.onPickImage,
+    this.onPasteImage,
     this.onSendVoice,
   });
 
@@ -125,31 +132,38 @@ class _ComposerBar extends ConsumerWidget {
             children: [
               if (onPickImage != null)
                 _ToolBtn(
-                  tooltip: '图片',
+                  tooltip: l10nOf(context)?.chatImage ?? '图片',
                   icon: Icons.image_outlined,
                   onTap: onPickImage!,
                 ),
+              if (onPasteImage != null)
+                _ToolBtn(
+                  tooltip: l10nOf(context)?.chatPasteImage ?? '粘贴图片',
+                  icon: Icons.content_paste_go_outlined,
+                  key: composerPasteImageKey,
+                  onTap: onPasteImage!,
+                ),
               if (onSendVoice != null)
                 _ToolBtn(
-                  tooltip: '语音',
+                  tooltip: l10nOf(context)?.voiceMessage ?? '语音',
                   icon: Icons.mic_none_outlined,
                   onTap: onSendVoice!,
                 ),
               _ToolBtn(
-                tooltip: '表情',
+                tooltip: l10nOf(context)?.chatEmoji ?? '表情',
                 icon: Icons.emoji_emotions_outlined,
                 anchorKey: _emojiKey,
                 onTap: () => _showEmojiPicker(context, ref),
               ),
               _ToolBtn(
-                tooltip: '礼物',
+                tooltip: l10nOf(context)?.chatGift ?? '礼物',
                 icon: Icons.card_giftcard_outlined,
                 anchorKey: _giftKey,
                 onTap: () => _showGiftPicker(context, ref),
               ),
               if (onMention != null)
                 _ToolBtn(
-                  tooltip: '@群成员',
+                  tooltip: l10nOf(context)?.chatGroupMembers ?? '@群成员',
                   icon: Icons.alternate_email,
                   onTap: onMention!,
                 ),
@@ -185,7 +199,7 @@ class _ComposerBar extends ConsumerWidget {
     final active = ref.read(activeSessionProvider);
     if (active == null || active.type != ChatSessionType.friend) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('礼物只能送给好友会话')),
+        SnackBar(content: Text(l10nOf(context)?.chatGiftsSentFriendChats ?? '礼物只能送给好友会话')),
       );
       return;
     }
@@ -212,6 +226,7 @@ class _ToolBtn extends StatelessWidget {
   final Key? anchorKey;
 
   const _ToolBtn({
+    super.key,
     required this.tooltip,
     required this.icon,
     required this.onTap,
@@ -290,8 +305,8 @@ class _MentionPickerState extends State<_MentionPicker> {
           child: TextField(
             autofocus: true,
             onChanged: (v) => setState(() => _filter = v),
-            decoration: const InputDecoration(
-              hintText: '搜索群成员',
+            decoration: InputDecoration(
+              hintText: l10nOf(context)?.chatSearchGroupMembers ?? '搜索群成员',
               prefixIcon: Icon(Icons.search, size: 18),
               isDense: true,
             ),
@@ -299,13 +314,13 @@ class _MentionPickerState extends State<_MentionPicker> {
         ),
         Expanded(
           child: items.isEmpty
-              ? const Center(child: Text('没有匹配的成员'))
+              ? Center(child: Text(l10nOf(context)?.chatNoMatchingMembers ?? '没有匹配的成员'))
               : ListView.builder(
                   itemCount: items.length,
                   itemBuilder: (context, i) => ListTile(
                     dense: true,
                     title: Text(items[i].name),
-                    subtitle: Text('迷你号 ${items[i].uin}'),
+                    subtitle: Text(l10nOf(context)?.chatMiniID(items[i].uin) ?? '迷你号 ${items[i].uin}'),
                     onTap: () => widget.onPick(items[i].name),
                   ),
                 ),

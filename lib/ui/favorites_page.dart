@@ -108,7 +108,7 @@ class _FavoritesPageState extends ConsumerState<FavoritesPage> {
                     final hit = hits[i];
                     return ListTile(
                       title: RichTextView(
-                        hit.text.isEmpty ? '（内容已不在本机）' : hit.text,
+                        hit.text.isEmpty ? l10nOf(context)?.favoritesContentGone ?? '（内容已不在本机）' : hit.text,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),

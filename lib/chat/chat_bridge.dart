@@ -178,6 +178,7 @@ List<Message> chatHistoryToMessages(
 class ChatBridge {
   ChatBridge(this._service, {this.hiddenKeys}) {
     _sub = _service.eventStream.listen(handleEvent);
+    _histSub = _service.historyStream.listen(handleEvent);
   }
 
   final ChatService _service;
@@ -209,6 +210,10 @@ class ChatBridge {
 
   final Map<String, ChatController> _controllers = {};
   StreamSubscription<ChatEvent>? _sub;
+  StreamSubscription<ChatEvent>? _histSub;
+
+  /// 处于「历史窗口」模式的会话：列表暂时显示某一天的消息，实时推送不插入。
+  final Set<String> _windowed = <String>{};
 
   /// 过滤掉本机已删除的消息（其余原样返回，尽量复用入参列表）。
   List<ChatMessage> _visible(List<ChatMessage> history, String key) {
@@ -226,8 +231,7 @@ class ChatBridge {
   ///
   /// 首次创建时以 `service.historyOf` 映射并**按 id 去重**后的列表初始化
   /// [InMemoryChatController]（其构造器在 debug 下断言 id 唯一）。
-  ChatController controllerFor(ChatSessionType type, int sessionId) {
-    final key = sessionKey(type, sessionId);
+  ChatController controllerFor(ChatSessionType type, int sessionId) {    final key = sessionKey(type, sessionId);
     final existing = _controllers[key];
     if (existing != null) return existing;
 
@@ -247,8 +251,48 @@ class ChatBridge {
   /// 幂等：该会话无控制器时什么都不做。释放后再次 [controllerFor] 同一会话
   /// 会新建控制器。
   void release(ChatSessionType type, int sessionId) {
-    final c = _controllers.remove(sessionKey(type, sessionId));
-    c?.dispose();
+    final key = sessionKey(type, sessionId);
+    _windowed.remove(key);
+    _controllers.remove(key)?.dispose();
+    // 收起展开过的历史，避免切走会话后内存长期保留几百条消息。
+    _service.collapseHistory(type, sessionId);
+  }
+
+  /// 是否正在看某一天的历史窗口。
+  bool isWindowed(ChatSessionType type, int sessionId) =>
+      _windowed.contains(sessionKey(type, sessionId));
+
+  /// 把会话切成「历史窗口」：列表只显示传入的这一天（或最近一段）消息。
+  ///
+  /// 实时推送在此期间不插入窗口（否则会混进来一条不连续的今天消息）；
+  /// 退出窗口时 [clearWindow] 会对账回实时历史。
+  void showWindow(
+    ChatSessionType type,
+    int sessionId,
+    List<ChatMessage> messages,
+  ) {
+    final key = sessionKey(type, sessionId);
+    final controller = controllerFor(type, sessionId);
+    _windowed.add(key);
+    unawaited(
+      controller.setMessages(
+        chatHistoryToMessages(_visible(messages, key), type, sessionId),
+      ),
+    );
+  }
+
+  /// 退出历史窗口，列表回到实时历史。
+  void clearWindow(ChatSessionType type, int sessionId) {
+    final key = sessionKey(type, sessionId);
+    if (!_windowed.remove(key)) return;
+    final c = _controllers[key];
+    if (c != null) reconcile(c, type, sessionId);
+  }
+
+  /// 外部清空了该会话的本地历史（存储管理页）后，让已打开的列表立即重算。
+  void refresh(ChatSessionType type, int sessionId) {
+    final c = _controllers[sessionKey(type, sessionId)];
+    if (c != null) reconcile(c, type, sessionId);
   }
 
   /// 处理一条事件：该会话已有控制器则 reconcile，否则忽略（不抛异常）。
@@ -258,6 +302,10 @@ class ChatBridge {
     final controller =
         _controllers[sessionKey(event.sessionType, event.sessionId)];
     if (controller == null) return;
+    // 历史窗口模式：不要把实时消息插进用户正在回看的某一天。
+    if (_windowed.contains(sessionKey(event.sessionType, event.sessionId))) {
+      return;
+    }
     reconcile(controller, event.sessionType, event.sessionId);
   }
 
@@ -318,6 +366,8 @@ class ChatBridge {
   void dispose() {
     _sub?.cancel();
     _sub = null;
+    _histSub?.cancel();
+    _histSub = null;
     unawaited(_typingCtrl.close());
     for (final c in _controllers.values) {
       c.dispose();
@@ -327,6 +377,7 @@ class ChatBridge {
 
   /// 清空全部会话控制器（切换账号时调用，防止旧账号消息残留到新账号）。
   void reset() {
+    _windowed.clear();
     for (final c in _controllers.values) {
       c.dispose();
     }

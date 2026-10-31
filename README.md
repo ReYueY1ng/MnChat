@@ -2,28 +2,32 @@
 
 迷你世界（Mini World）外部聊天客户端 — Flutter/Dart 实现。
 
-支持 Linux 桌面与 Android（另有 Windows runner），**不支持 Web**（已移除）。
+支持 Linux 桌面与 Android；提供 Windows runner，但 **Windows 版目前仅支持前台聊天**（无后台通知与系统托盘），**不支持 Web**（已移除）。
 
 ## 功能
 
 - **登录**：`login_v3` 协议（端口池随机负载均衡）+ WebSocket 心跳取 s2/s2t 令牌
 - **好友聊天**：实时推送 + 离线历史拉取（buddysvr chat_query）
+- **完整历史**：本地 SQLite 保留全部记录；会话内可加载更早、跳到某一天，重启恢复最新一页
+- **失败重发**：发送失败进持久化发件箱，按指数退避自动重试（连接恢复即冲刷）
 - **群聊**：实时推送 + 缓存历史
 - **离线缓存**：Drift SQLite 本地持久化，启动即恢复（多账号数据隔离）
 - **头像与头像框**：网络头像 + 内存/磁盘 LRU 缓存（按用途独立配额）、静态与动画头像框
 - **社交**：动态（发布/详情/通知）、家族、伙伴、称号、访客、黑名单
 - **消息与资料**：邮件（msg_box）、玩家主页、二维码名片、富文本 / 表情
-- **通知**：Android 前台服务常驻通知、Linux DBus 通知；按会话聚合、点击直达会话
+- **通知**：Android 前台服务常驻通知、Linux DBus 通知；按会话聚合、点击直达会话。Windows 版无后台通知（见「已知限制」）
 - **桌面集成**：系统托盘（关闭到托盘）
 - **应用锁**：PIN 解锁
-- **数据**：聊天记录导出 / 合并导入（JSON）
+- **数据**：聊天记录导出 / 合并导入（JSON），可选口令加密（PBKDF2 + AES-256-GCM）；存储管理页可看占用、按保留期/会话清理并 VACUUM
+- **排障**：轮转文件日志（自动脱敏）+ 全局异常捕获 + 一键导出诊断包
+- **桌面效率**：Ctrl+F 全局搜索、Ctrl+K 快速切会话、多选复制/导出、粘贴图片文件路径
 - **协议**：XXTEA + rotate-XOR 加密、LuaTable 响应解析、msgpack 编解码
 
 ## 技术栈
 
 - Flutter 3.47.2（FVM，见 `.fvmrc`）
 - Riverpod 3.x 状态管理
-- Drift 离线存储（SQLite，schema v9；热点查询已建索引）
+- Drift 离线存储（SQLite，schema v11；消息幂等索引 + 发件箱）
 - Dio + `web_socket_channel` 通信
 - `material_ui`（Flutter 官方从框架拆出的独立 Material 库）+ `flutter_chat_ui` 2.12.0
 
@@ -55,4 +59,5 @@ Termux 本地构建：`android/gradle.properties` 里 `android.aapt2FromMavenOve
 
 - 仅支持口令登录，不支持微信 / QQ 登录
 - 平台：不支持 Web / iOS / macOS
+- Windows：可构建、可前台聊天，但**没有后台通知与系统托盘**（`PlatformCapabilities` 与设置页会明确提示）
 

@@ -19,18 +19,20 @@ import 'widgets/avatar_view.dart';
 import 'widgets/head_frame.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 访客记录页。
 class VisitorListPage extends ConsumerStatefulWidget {
   /// 要查询的玩家 uin（当前入口仅传入本人 uin）。
   final int ownerUin;
 
   /// 页面标题。
-  final String title;
+  final String? title;
 
   const VisitorListPage({
     super.key,
     required this.ownerUin,
-    this.title = '访客记录',
+    this.title,
   });
 
   @override
@@ -64,7 +66,7 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
     if (auth == null) {
       setState(() {
         _loading = false;
-        _error = '未登录';
+        _error = l10nOf(context)?.commonNotSignedIn ?? '未登录';
       });
       return;
     }
@@ -117,10 +119,14 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.title),
+        title: Text(
+          widget.title ??
+              l10nOf(context)?.visitorsVisitorRecords ??
+              '访客记录',
+        ),
         actions: [
           IconButton(
-            tooltip: '刷新',
+            tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
             icon: const Icon(Icons.refresh),
             onPressed: _load,
           ),
@@ -199,9 +205,9 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
               color: theme.colorScheme.error,
             ),
             const SizedBox(height: AppSpacing.sm),
-            Text('加载失败：$_error', textAlign: TextAlign.center),
+            Text(l10nOf(context)?.commonFailedLoad(_error.toString()) ?? '加载失败：$_error', textAlign: TextAlign.center),
             const SizedBox(height: AppSpacing.md),
-            FilledButton(onPressed: _load, child: const Text('重试')),
+            FilledButton(onPressed: _load, child: Text(l10nOf(context)?.commonRetry ?? '重试')),
           ],
         ),
       ),
@@ -228,7 +234,7 @@ class _VisitorListPageState extends ConsumerState<VisitorListPage> {
                     color: theme.colorScheme.outline,
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  const Text('还没有人来访'),
+                  Text(l10nOf(context)?.visitorsNoVisitorsYet ?? '还没有人来访'),
                 ],
               ),
             ),

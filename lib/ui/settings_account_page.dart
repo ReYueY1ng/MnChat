@@ -15,6 +15,8 @@ import 'social_sign_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/settings_tiles.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class SettingsAccountPage extends ConsumerStatefulWidget {
   const SettingsAccountPage({super.key});
 
@@ -47,6 +49,7 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
   }
 
   Future<void> _toggleAutoLogin(bool value) async {
+    final l10n = l10nOf(context);
     setState(() => _autoLogin = value);
     final settings = ref.read(settingsProvider);
     await settings.setBool(SettingsKeys.autoLogin, value);
@@ -54,7 +57,7 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
       // 关闭自动登录时清除已存凭据
       await settings.clearCredentials();
     }
-    _toast(value ? '已开启自动登录（下次登录将保存凭据）' : '已关闭自动登录');
+    _toast(value ? l10n?.settingsAccountAutoSignEnabledCredentials ?? '已开启自动登录（下次登录将保存凭据）' : l10n?.settingsAccountAutoSignDisabled ?? '已关闭自动登录');
   }
 
   // ── 应用锁 ─────────────────────────────────────────────────────────────
@@ -63,7 +66,8 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
   ///
   /// [hint] 默认按新 PIN 规则提示 6-8 位；校验旧 PIN 时可放宽为 4-8 位
   /// 以兼容历史数据（见 [AppLockService.legacyMinPinLength]）。
-  Future<String?> _askPin(String title, {String hint = '6-8 位数字'}) async {
+  Future<String?> _askPin(String title, {String? hint}) async {
+    hint ??= l10nOf(context)?.settingsAccountDigits68 ?? '6-8 位数字';
     final ctrl = TextEditingController();
     final result = await showDialog<String>(
       context: context,
@@ -81,11 +85,11 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, ctrl.text),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -97,26 +101,28 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
 
   /// 设置新 PIN（两次输入一致，且为 6-8 位数字）。
   Future<String?> _askNewPin() async {
-    final a = await _askPin('设置应用锁密码');
+    final l10n = l10nOf(context);
+    final a = await _askPin(l10nOf(context)?.settingsAccountSetAppLockPassword ?? '设置应用锁密码');
     if (a == null) return null;
     if (!RegExp(r'^\d{6,8}$').hasMatch(a)) {
-      _toast('密码需为 6-8 位数字');
+      _toast(l10n?.settingsAccountPasswordLength ?? '密码需为 6-8 位数字');
       return null;
     }
-    final b = await _askPin('再次输入密码');
+    final b = await _askPin(l10n?.settingsAccountReEnterPassword ?? '再次输入密码');
     if (b == null) return null;
     if (a != b) {
-      _toast('两次输入不一致');
+      _toast(l10n?.settingsAccountPasswordsDontMatch ?? '两次输入不一致');
       return null;
     }
     return a;
   }
 
   Future<bool> _verifyExistingPin(AppLockService service) async {
-    final pin = await _askPin('输入应用锁密码', hint: '4-8 位数字');
+    final l10n = l10nOf(context);
+    final pin = await _askPin(l10nOf(context)?.settingsAccountEnterAppLockPassword ?? '输入应用锁密码', hint: l10nOf(context)?.settingsAccountDigits48 ?? '4-8 位数字');
     if (pin == null) return false;
     if (!await service.verifyPin(pin)) {
-      _toast('密码错误');
+      _toast(l10n?.lockWrongPassword ?? '密码错误');
       return false;
     }
     return true;
@@ -124,6 +130,7 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
 
   /// 应用锁开关：开启时设置/校验密码，关闭时校验后清除。
   Future<void> _toggleLock(bool value) async {
+    final l10n = l10nOf(context);
     final service = AppLockService(ref.read(settingsProvider));
     if (value) {
       if (await service.isPinSet()) {
@@ -134,51 +141,51 @@ class _SettingsAccountPageState extends ConsumerState<SettingsAccountPage> {
         await service.setPin(pin);
       }
       await ref.read(lockEnabledProvider.notifier).set(true);
-      _toast('已开启应用锁');
+      _toast(l10n?.settingsAccountAppLockEnabled ?? '已开启应用锁');
     } else {
       if (!mounted || !await _verifyExistingPin(service)) return;
       await service.clearPin();
       await ref.read(lockEnabledProvider.notifier).set(false);
-      _toast('已关闭应用锁');
+      _toast(l10n?.settingsAccountAppLockDisabled ?? '已关闭应用锁');
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('账号与安全')),
+      appBar: AppBar(title: Text(l10nOf(context)?.settingsAccountAccountSecurity ?? '账号与安全')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
           child: ListView(
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              const SettingsSectionHeader('资料'),
+              SettingsSectionHeader(l10nOf(context)?.settingsAccountProfile ?? '资料'),
               SettingsNavTile(
                 icon: Icons.badge_outlined,
-                title: '个人资料',
-                subtitle: '查看头像 / 修改昵称 / 头像框',
+                title: l10nOf(context)?.profilePersonalInfo ?? '个人资料',
+                subtitle: l10nOf(context)?.settingsAccountViewAvatarEditNickname ?? '查看头像 / 修改昵称 / 头像框',
                 page: const ProfilePage(),
               ),
               SettingsNavTile(
                 icon: Icons.auto_awesome,
-                title: '交友标签',
-                subtitle: '设置我的个性签名（想要/喜欢）',
+                title: l10nOf(context)?.settingsAccountSocialTags ?? '交友标签',
+                subtitle: l10nOf(context)?.settingsAccountSetBioWantLike ?? '设置我的个性签名（想要/喜欢）',
                 page: const SocialSignPage(),
               ),
 
-              const SettingsSectionHeader('安全'),
+              SettingsSectionHeader(l10nOf(context)?.settingsAccountSecurity ?? '安全'),
               SettingsSwitchTile(
                 icon: Icons.lock_outline,
-                title: '应用锁',
-                subtitle: '启动 / 回前台时需输入密码解锁',
+                title: l10nOf(context)?.settingsAccountAppLock ?? '应用锁',
+                subtitle: l10nOf(context)?.settingsAccountRequirePasswordLaunchReturning ?? '启动 / 回前台时需输入密码解锁',
                 value: ref.watch(lockEnabledProvider),
                 onChanged: _toggleLock,
               ),
               SettingsSwitchTile(
                 icon: Icons.auto_fix_high,
-                title: '自动登录',
-                subtitle: '开启后下次启动自动登录（需先登录一次以保存凭据）',
+                title: l10nOf(context)?.settingsAccountAutoSign ?? '自动登录',
+                subtitle: l10nOf(context)?.settingsAccountSignAutomaticallyNextLaunch ?? '开启后下次启动自动登录（需先登录一次以保存凭据）',
                 value: _autoLogin,
                 onChanged: _autoLoginLoaded ? _toggleAutoLogin : null,
               ),

@@ -13,8 +13,11 @@ import 'package:material_ui/material_ui.dart';
 import '../core/services/image_disk_cache.dart' show ImageDiskCache;
 import '../state/providers.dart';
 import 'data_page.dart';
+import 'storage_page.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/settings_tiles.dart';
+
+import 'widgets/app_l10n.dart' show l10nOf;
 
 class SettingsPrivacyPage extends ConsumerStatefulWidget {
   const SettingsPrivacyPage({super.key});
@@ -51,16 +54,16 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('清除图片缓存'),
-        content: const Text('将删除已缓存的头像与动态图片，下次显示时重新下载。聊天记录不受影响。'),
+        title: Text(l10nOf(context)?.settingsPrivacyClearImageCache ?? '清除图片缓存'),
+        content: Text(l10nOf(context)?.settingsPrivacyDeletesCachedAvatarsMoment ?? '将删除已缓存的头像与动态图片，下次显示时重新下载。聊天记录不受影响。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('清除'),
+            child: Text(l10nOf(context)?.groupDetailClear ?? '清除'),
           ),
         ],
       ),
@@ -71,7 +74,7 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
     await _loadCacheSize();
     if (!mounted) return;
     setState(() => _clearing = false);
-    showSettingsToast(context, '图片缓存已清除');
+    showSettingsToast(context, l10nOf(context)?.settingsPrivacyImageCacheCleared ?? '图片缓存已清除');
   }
 
   /// 读取「拒绝陌生人加好友」开关（服务端）。
@@ -96,12 +99,12 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
       if (mounted) {
         showSettingsToast(
           context,
-          value ? '已开启：拒绝陌生人加好友' : '已关闭：允许陌生人加好友',
+          value ? l10nOf(context)?.settingsPrivacyEnabledStrangersCantAdd ?? '已开启：拒绝陌生人加好友' : l10nOf(context)?.settingsPrivacyDisabledStrangersAddMe ?? '已关闭：允许陌生人加好友',
         );
       }
     } catch (e) {
       if (mounted) setState(() => _closeapply = !value);
-      if (mounted) showSettingsToast(context, '设置失败: $e');
+      if (mounted) showSettingsToast(context, l10nOf(context)?.nearbyFailedSave(e) ?? '设置失败: $e');
     }
   }
 
@@ -115,65 +118,71 @@ class _SettingsPrivacyPageState extends ConsumerState<SettingsPrivacyPage> {
   @override
   Widget build(BuildContext context) {
     final cacheLabel = _cacheBytes == null
-        ? '正在统计…'
-        : '当前占用 ${_humanBytes(_cacheBytes!)}（头像与动态图片）';
+        ? l10nOf(context)?.settingsPrivacyCounting ?? '正在统计…'
+        : l10nOf(context)?.settingsPrivacyUsingAvatarsMomentImages(_humanBytes(_cacheBytes!)) ?? '当前占用 ${_humanBytes(_cacheBytes!)}（头像与动态图片）';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('隐私与数据')),
+      appBar: AppBar(title: Text(l10nOf(context)?.settingsPrivacyData ?? '隐私与数据')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
           child: ListView(
             padding: const EdgeInsets.all(AppSpacing.md),
             children: [
-              const SettingsSectionHeader('隐私'),
+              SettingsSectionHeader(l10nOf(context)?.settingsPrivacyPrivacy ?? '隐私'),
               SettingsSwitchTile(
                 icon: Icons.remove_red_eye_outlined,
-                title: '访问主页留下踪迹',
-                subtitle: '关闭后，查看他人主页不会出现在对方的访客记录中',
+                title: l10nOf(context)?.settingsPrivacyLeaveTraceWhenVisiting ?? '访问主页留下踪迹',
+                subtitle: l10nOf(context)?.settingsPrivacyWhenOffViewingSomeones ?? '关闭后，查看他人主页不会出现在对方的访客记录中',
                 value: ref.watch(leaveVisitTraceProvider),
                 onChanged: (v) =>
                     ref.read(leaveVisitTraceProvider.notifier).set(v),
               ),
               SettingsSwitchTile(
                 icon: Icons.person_off_outlined,
-                title: '拒绝陌生人加好友',
+                title: l10nOf(context)?.settingsPrivacyBlockFriendRequestsStrangers ?? '拒绝陌生人加好友',
                 subtitle: _closeapplyLoaded
-                    ? '开启后陌生人无法添加我为好友'
-                    : '读取中…',
+                    ? l10nOf(context)?.settingsPrivacyWhenStrangersCantAdd ?? '开启后陌生人无法添加我为好友'
+                    : l10nOf(context)?.nearbyReading ?? '读取中…',
                 value: _closeapply,
                 onChanged: _closeapplyLoaded ? _toggleCloseapply : null,
               ),
 
-              const SettingsSectionHeader('群邀请'),
+              SettingsSectionHeader(l10nOf(context)?.friendRequestGroupInvites ?? '群邀请'),
               SettingsSwitchTile(
                 icon: Icons.group_add_outlined,
-                title: '允许他人拉我入群',
-                subtitle: '关闭后他人邀请将被拒绝',
+                title: l10nOf(context)?.settingsPrivacyAllowOthersAddMe ?? '允许他人拉我入群',
+                subtitle: l10nOf(context)?.settingsPrivacyWhenOffInvitationsOthers ?? '关闭后他人邀请将被拒绝',
                 value: ref.watch(allowInvitedToGroupProvider),
                 onChanged: (v) =>
                     ref.read(allowInvitedToGroupProvider.notifier).set(v),
               ),
               SettingsSwitchTile(
                 icon: Icons.group_add_outlined,
-                title: '自动加入被邀请的群',
-                subtitle: '开启后收到邀请将自动进群',
+                title: l10nOf(context)?.settingsPrivacyAutomaticallyJoinInvitedGroups ?? '自动加入被邀请的群',
+                subtitle: l10nOf(context)?.settingsPrivacyWhenIJoinAutomatically ?? '开启后收到邀请将自动进群',
                 value: ref.watch(allowAutoJoinGroupProvider),
                 onChanged: (v) =>
                     ref.read(allowAutoJoinGroupProvider.notifier).set(v),
               ),
 
-              const SettingsSectionHeader('数据'),
+              SettingsSectionHeader(l10nOf(context)?.settingsPrivacyData2 ?? '数据'),
               SettingsNavTile(
                 icon: Icons.save_alt_outlined,
-                title: '聊天记录',
-                subtitle: '导出 / 导入聊天数据备份',
+                title: l10nOf(context)?.dataChatHistory ?? '聊天记录',
+                subtitle: l10nOf(context)?.settingsPrivacyExportImportChatData ?? '导出 / 导入聊天数据备份',
                 page: const DataPage(),
               ),
               SettingsNavTile(
+                icon: Icons.storage_outlined,
+                title: l10nOf(context)?.settingsPrivacyStorageManagement ?? '存储管理',
+                subtitle: l10nOf(context)?.settingsPrivacyDatabaseSizeRetentionClear ?? '数据库占用 / 保留期 / 按会话清理 / VACUUM',
+                page: const StoragePage(),
+              ),
+              SettingsNavTile(
                 icon: Icons.cleaning_services_outlined,
-                title: '清除图片缓存',
-                subtitle: _clearing ? '正在清除…' : cacheLabel,
+                title: l10nOf(context)?.settingsPrivacyClearImageCache ?? '清除图片缓存',
+                subtitle: _clearing ? l10nOf(context)?.settingsPrivacyClearing ?? '正在清除…' : cacheLabel,
                 onTap: _clearCache,
               ),
               const SizedBox(height: AppSpacing.xl),

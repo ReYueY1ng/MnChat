@@ -17,6 +17,8 @@ import '../../core/services/voice_clip.dart'
     show VoicePlayback, startVoicePlayback, voiceSecondsLabel;
 import '../theme/app_tokens.dart' show AppSpacing;
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 语音条本体（测试定位用）。
 const Key voiceBubbleKey = Key('voice_bubble');
 
@@ -103,7 +105,7 @@ class _VoiceMessageBarState extends State<VoiceMessageBar>
     });
     if (pb == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('当前平台暂不支持播放语音')),
+        SnackBar(content: Text(l10nOf(context)?.voiceVoicePlaybackIsntSupported ?? '当前平台暂不支持播放语音')),
       );
       return;
     }
@@ -179,11 +181,11 @@ class _VoiceMessageBarState extends State<VoiceMessageBar>
         : 0;
     final label = total > 0
         ? voiceSecondsLabel(playing && elapsed > 0 ? elapsed : total)
-        : (elapsed > 0 ? voiceSecondsLabel(elapsed) : '语音');
+        : (elapsed > 0 ? voiceSecondsLabel(elapsed) : l10nOf(context)?.voiceMessage ?? '语音');
 
     return Semantics(
       button: true,
-      label: '播放语音 $total 秒',
+      label: l10nOf(context)?.voicePlayingVoiceSeconds(total) ?? '播放语音 $total 秒',
       child: Padding(
         key: voiceBubbleKey,
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),

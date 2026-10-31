@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 退群 / 被移出记录（`act=query_user_groups_quit_list`，对齐 friendservice.lua）。
 ///
 /// 每条记录对应游戏里「你已退出 / 被移出 / 群已解散」的红点提醒，可单条清除
@@ -22,10 +24,10 @@ class _QuitRecord {
   const _QuitRecord(this.groupId, this.name, this.type);
 
   /// 记录类型文案（type 2=解散 / 3=被移出，其余按退出处理）。
-  String get label => switch (type) {
-        2 => '群已解散',
-        3 => '你被移出该群',
-        _ => '你已退出该群',
+  String labelOf(BuildContext context) => switch (type) {
+        2 => l10nOf(context)?.groupDetailGroupDisbanded ?? '群已解散',
+        3 => l10nOf(context)?.groupDetailYouWereRemovedGroup ?? '你被移出该群',
+        _ => l10nOf(context)?.groupDetailYouLeftGroup ?? '你已退出该群',
       };
 }
 
@@ -43,6 +45,7 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
   static int _num(Object? v) => v is num ? v.toInt() : int.tryParse('$v') ?? 0;
 
   Future<void> _load() async {
+    final l10n = l10nOf(context);
     setState(() {
       _loading = true;
       _error = null;
@@ -61,7 +64,7 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
           out.add(
             _QuitRecord(
               gid,
-              (m['group_name'] ?? m['GroupName'] ?? (gid > 0 ? '群 $gid' : ''))
+              (m['group_name'] ?? m['GroupName'] ?? (gid > 0 ? l10n?.groupDetailGroup(gid) ?? '群 $gid' : ''))
                   .toString(),
               _num(m['type']),
             ),
@@ -87,9 +90,9 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
       await ref.read(chatServiceProvider).delQuitGroupRecord(r.groupId);
       if (!mounted) return;
       setState(() => _records = [..._records]..remove(r));
-      _toast('已清除记录');
+      _toast(l10nOf(context)?.groupDetailRecordsCleared ?? '已清除记录');
     } catch (e) {
-      _toast('清除失败: $e');
+      _toast(l10nOf(context)?.groupDetailFailedClear(e) ?? '清除失败: $e');
     }
   }
 
@@ -102,7 +105,7 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
-      appBar: AppBar(title: const Text('退群记录')),
+      appBar: AppBar(title: Text(l10nOf(context)?.friendsGroupLeaveHistory ?? '退群记录')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
@@ -121,11 +124,11 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
                           color: scheme.outline,
                         ),
                         const SizedBox(height: AppSpacing.md),
-                        Text('加载失败：$_error', textAlign: TextAlign.center),
+                        Text(l10nOf(context)?.commonFailedLoad(_error.toString()) ?? '加载失败：$_error', textAlign: TextAlign.center),
                         const SizedBox(height: AppSpacing.md),
                         FilledButton.tonal(
                           onPressed: _load,
-                          child: const Text('重试'),
+                          child: Text(l10nOf(context)?.commonRetry ?? '重试'),
                         ),
                       ],
                     ),
@@ -139,7 +142,7 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
                             const SizedBox(height: 120),
                             Center(
                               child: Text(
-                                '没有退群记录',
+                                l10nOf(context)?.groupDetailNoGroupLeaveHistory ?? '没有退群记录',
                                 style: TextStyle(color: scheme.onSurfaceVariant),
                               ),
                             ),
@@ -151,10 +154,10 @@ class _QuitGroupPageState extends ConsumerState<QuitGroupPage> {
                             final r = _records[i];
                             return ListTile(
                               leading: const Icon(Icons.group_off_outlined),
-                              title: Text(r.name.isEmpty ? '群 ${r.groupId}' : r.name),
-                              subtitle: Text(r.label),
+                              title: Text(r.name.isEmpty ? l10nOf(context)?.groupDetailGroup2(r.groupId) ?? '群 ${r.groupId}' : r.name),
+                              subtitle: Text(r.labelOf(context)),
                               trailing: IconButton(
-                                tooltip: '清除',
+                                tooltip: l10nOf(context)?.groupDetailClear ?? '清除',
                                 icon: const Icon(Icons.close),
                                 onPressed: () => _delete(r),
                               ),

@@ -5,13 +5,21 @@ enum _FriendCat { friend, group }
 
 /// 排序方式 —— 文案对齐游戏 `friendSortText`（stringdef 156007-156010）。
 enum _SortMode {
-  defaultOrder('好友默认排序'),
-  tacitDesc('默契度从高到低'),
-  loginDesc('登录从近到远'),
-  loginAsc('登录从远到近');
+  defaultOrder,
+  tacitDesc,
+  loginDesc,
+  loginAsc;
 
-  const _SortMode(this.label);
-  final String label;
+  String labelOf(BuildContext context) => switch (this) {
+    _SortMode.defaultOrder =>
+      l10nOf(context)?.friendsDefaultFriendOrder ?? '好友默认排序',
+    _SortMode.tacitDesc =>
+      l10nOf(context)?.friendsHighestRapportFirst ?? '默契度从高到低',
+    _SortMode.loginDesc =>
+      l10nOf(context)?.friendsMostRecentLoginFirst ?? '登录从近到远',
+    _SortMode.loginAsc =>
+      l10nOf(context)?.friendsOldestLoginFirst ?? '登录从远到近',
+  };
 }
 
 class _FriendsPageState extends ConsumerState<FriendsPage> {
@@ -192,11 +200,11 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('好友', style: TextStyle(fontWeight: FontWeight.bold)),
+        title: Text(l10nOf(context)?.commonFriend ?? '好友', style: TextStyle(fontWeight: FontWeight.bold)),
         actions: [
           // 好友申请（红点）
           IconButton(
-            tooltip: '好友申请',
+            tooltip: l10nOf(context)?.friendRequestFriendRequests ?? '好友申请',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const FriendRequestPage()),
             ),
@@ -208,14 +216,14 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           ),
           // 添加好友
           IconButton(
-            tooltip: '添加好友',
+            tooltip: l10nOf(context)?.friendRequestAddFriend ?? '添加好友',
             icon: const Icon(Icons.person_search_outlined),
             onPressed: () => showAddFriendDialog(context, ref),
           ),
           // 更多：黑名单 / 我的二维码 / 社交发现（关注与粉丝 · 附近的人 · 退群记录）。
           // 后三项原挂在设置页里，但它们不是设置，是好友页的邻居功能，遂移到此处。
           PopupMenuButton<String>(
-            tooltip: '更多',
+            tooltip: l10nOf(context)?.friendsMore ?? '更多',
             onSelected: (v) {
               switch (v) {
                 case 'blacklist':
@@ -240,12 +248,12 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                   );
               }
             },
-            itemBuilder: (ctx) => const [
+            itemBuilder: (ctx) => [
               PopupMenuItem(
                 value: 'blacklist',
                 child: ListTile(
                   leading: Icon(Icons.block),
-                  title: Text('黑名单'),
+                  title: Text(l10nOf(context)?.friendsBlocklist ?? '黑名单'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -254,7 +262,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                 value: 'qr',
                 child: ListTile(
                   leading: Icon(Icons.qr_code),
-                  title: Text('我的二维码'),
+                  title: Text(l10nOf(context)?.friendsMyQRCode ?? '我的二维码'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -263,7 +271,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                 value: 'relation',
                 child: ListTile(
                   leading: Icon(Icons.people_outline),
-                  title: Text('关注与粉丝'),
+                  title: Text(l10nOf(context)?.friendsFollowingFollowers ?? '关注与粉丝'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -272,7 +280,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                 value: 'nearby',
                 child: ListTile(
                   leading: Icon(Icons.near_me_outlined),
-                  title: Text('附近的人'),
+                  title: Text(l10nOf(context)?.friendsPeopleNearby ?? '附近的人'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -281,7 +289,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                 value: 'quitgroup',
                 child: ListTile(
                   leading: Icon(Icons.group_off_outlined),
-                  title: Text('退群记录'),
+                  title: Text(l10nOf(context)?.friendsGroupLeaveHistory ?? '退群记录'),
                   dense: true,
                   contentPadding: EdgeInsets.zero,
                 ),
@@ -405,7 +413,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         ),
         child: Row(
           children: [
-            Text('已选 $count 人', style: theme.textTheme.labelMedium),
+            Text(l10nOf(context)?.friendsSelected(count) ?? '已选 $count 人', style: theme.textTheme.labelMedium),
             const Spacer(),
             TextButton.icon(
               onPressed: count == 0
@@ -416,18 +424,18 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
                       uins: _selected.toList(),
                     ),
               icon: const Icon(Icons.label_outline, size: 16),
-              label: const Text('打标签'),
+              label: Text(l10nOf(context)?.friendsAddTags ?? '打标签'),
             ),
             TextButton.icon(
               onPressed: count == 0 ? null : _clearTagsForSelected,
               icon: const Icon(Icons.label_off_outlined, size: 16),
-              label: const Text('清除标签'),
+              label: Text(l10nOf(context)?.friendsClearTags ?? '清除标签'),
             ),
             // 对齐游戏 `btn_multSetOnlineNotify`：批量开「上线通知」。
             TextButton.icon(
               onPressed: count == 0 ? null : _setOnlineNotifyForSelected,
               icon: const Icon(Icons.notifications_active_outlined, size: 16),
-              label: const Text('上线通知'),
+              label: Text(l10nOf(context)?.friendsOnlineNotifications ?? '上线通知'),
             ),
           ],
         ),
@@ -456,18 +464,19 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     }
     if (!mounted) return;
     setState(() => _notifyUins = {..._notifyUins, ...uins});
-    _toast('已设置上线通知（${uins.length} 人）');
+    _toast(l10nOf(context)?.friendsOnlineNotificationsSetPeople(uins.length) ?? '已设置上线通知（${uins.length} 人）');
   }
 
   Future<void> _clearTagsForSelected() async {
+    final l10n = l10nOf(context);
     try {
       await ref
           .read(chatServiceProvider)
           .clearFriendLabels(_selected.toList());
       ref.invalidate(friendTagPoolProvider);
-      _toast('已清除标签');
+      _toast(l10n?.friendsTagsCleared ?? '已清除标签');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
@@ -544,7 +553,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         autofocus: autofocus,
         onChanged: (v) => setState(() => _search = v),
         decoration: InputDecoration(
-          hintText: '搜索好友昵称 / 迷你号…',
+          hintText: l10nOf(context)?.friendsSearchFriendNicknameMini ?? '搜索好友昵称 / 迷你号…',
           isDense: true,
           prefixIcon: const Icon(Icons.search, size: 18),
           suffixIcon: _search.isEmpty
@@ -579,7 +588,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
 
     final searchToggle = toolbarIcon(
-      tooltip: _search.isEmpty ? '搜索' : '搜索：$_search',
+      tooltip: _search.isEmpty ? l10nOf(context)?.friendsSearch ?? '搜索' : l10nOf(context)?.friendsSearch2(_search) ?? '搜索：$_search',
       onPressed: () => setState(() => _searchOpen = true),
       icon: Icon(
         Icons.search,
@@ -589,12 +598,12 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
     // 刷新 / 批量管理
     final refreshButton = toolbarIcon(
-      tooltip: '刷新',
+      tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
       onPressed: () => ref.read(chatServiceProvider).loadSessions(),
       icon: const Icon(Icons.refresh, size: 18),
     );
     final batchButton = toolbarIcon(
-      tooltip: _batchMode ? '退出批量管理' : '批量管理',
+      tooltip: _batchMode ? l10nOf(context)?.friendsExitBulkManagement ?? '退出批量管理' : l10nOf(context)?.friendsBulkManagement ?? '批量管理',
       onPressed: () => setState(() {
         _batchMode = !_batchMode;
         _selected.clear();
@@ -603,7 +612,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
     // 游戏文案：`GetS(156004)` =「在线好友@1/@2」
     final countText = Text(
-      '在线好友 $online/$total',
+      l10nOf(context)?.friendsOnlineFriends(online, total) ?? '在线好友 $online/$total',
       maxLines: 1,
       overflow: TextOverflow.ellipsis,
       style: theme.textTheme.labelLarge?.copyWith(
@@ -613,7 +622,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
     );
     // 筛选入口：有生效条件时高亮（游戏里漏斗的 selSt 控制器）。
     final filterButton = toolbarIcon(
-      tooltip: '筛选',
+      tooltip: l10nOf(context)?.friendFilterFilter ?? '筛选',
       onPressed: _openFilterDialog,
       icon: Badge(
         isLabelVisible: !_filter.isEmpty,
@@ -648,7 +657,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         children: [
           Expanded(child: searchField(autofocus: true)),
           toolbarIcon(
-            tooltip: '关闭搜索',
+            tooltip: l10nOf(context)?.friendsCloseSearch ?? '关闭搜索',
             onPressed: () => setState(() {
               _searchOpen = false;
               _search = '';
@@ -666,7 +675,8 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           Expanded(child: countText),
           refreshButton,
           batchButton,
-          sortMenuButton('排序方式：${_sort.label}'),
+          sortMenuButton(l10nOf(context)?.friendsSort(_sort.labelOf(context)) ??
+              '排序方式：${_sort.labelOf(context)}'),
           filterButton,
         ],
       );
@@ -680,7 +690,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
           refreshButton,
           batchButton,
           const Spacer(),
-          sortMenuButton('排序方式'),
+          sortMenuButton(l10nOf(context)?.friendsSort2 ?? '排序方式'),
           filterButton,
           searchToggle,
         ],
@@ -717,7 +727,7 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
             else
               const SizedBox(width: AppSpacing.lg),
             const SizedBox(width: AppSpacing.sm),
-            Text(m.label),
+            Text(m.labelOf(ctx)),
           ],
         ),
       ),
@@ -756,29 +766,29 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         ),
         children: [
           chip(
-            '我的好友',
+            l10nOf(context)?.friendsMyFriends ?? '我的好友',
             active: _cat == _FriendCat.friend,
             onTap: () => setState(() => _cat = _FriendCat.friend),
           ),
           chip(
-            '最佳拍档',
+            l10nOf(context)?.commonBestPartners ?? '最佳拍档',
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const PartnerPage())),
           ),
           chip(
-            '群组',
+            l10nOf(context)?.friendsGroups ?? '群组',
             active: _cat == _FriendCat.group,
             onTap: () => setState(() => _cat = _FriendCat.group),
           ),
           chip(
-            '黑名单',
+            l10nOf(context)?.friendsBlocklist ?? '黑名单',
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const BlacklistPage())),
           ),
           chip(
-            '家族',
+            l10nOf(context)?.commonFamily ?? '家族',
             onTap: () => Navigator.of(
               context,
             ).push(MaterialPageRoute(builder: (_) => const FamilyPage())),
@@ -823,27 +833,27 @@ class _FriendsPageState extends ConsumerState<FriendsPage> {
         padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
         children: [
           item(
-            '我的好友',
+            l10nOf(context)?.friendsMyFriends ?? '我的好友',
             active: _cat == _FriendCat.friend,
             onTap: () => setState(() => _cat = _FriendCat.friend),
           ),
           item(
-            '最佳拍档',
+            l10nOf(context)?.commonBestPartners ?? '最佳拍档',
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const PartnerPage())),
           ),
           item(
-            '群组',
+            l10nOf(context)?.friendsGroups ?? '群组',
             active: _cat == _FriendCat.group,
             onTap: () => setState(() => _cat = _FriendCat.group),
           ),
           item(
-            '黑名单',
+            l10nOf(context)?.friendsBlocklist ?? '黑名单',
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const BlacklistPage())),
           ),
           item(
-            '家族',
+            l10nOf(context)?.commonFamily ?? '家族',
             onTap: () => Navigator.of(context)
                 .push(MaterialPageRoute(builder: (_) => const FamilyPage())),
           ),

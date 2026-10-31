@@ -2,6 +2,7 @@ import '../../models/messages.dart';
 import '../../storage/app_database.dart';
 import '../../storage/chat_mapper.dart';
 import '../../utils/log.dart';
+import 'message_store.dart' show HistoryCursor;
 
 /// 离线缓存加载：启动时从 SQLite 恢复上次的会话、消息与好友信息（按账号隔离），
 /// 让 UI 立即有内容。
@@ -16,6 +17,7 @@ class OfflineCache {
     required this._groupSessions,
     required this._contacts,
     required this._messagesCache,
+    required this._historyCursors,
     required this._loadGroupNames,
     required this._emitSessionSnapshot,
   });
@@ -26,10 +28,16 @@ class OfflineCache {
   final Map<int, ChatSession> _groupSessions;
   final List<Contact> _contacts;
   final Map<String, List<ChatMessage>> _messagesCache;
+
+  /// 每会话已载入历史的游标（最老一条的 time/id），供「加载更早」继续翻。
+  final Map<String, HistoryCursor> _historyCursors;
   final Future<void> Function() _loadGroupNames;
   final void Function() _emitSessionSnapshot;
 
   static const String _logTag = 'OfflineCache';
+
+  /// 启动时每个会话恢复的条数：只取**最新**的这么多条。
+  static const int kRestorePerSession = 200;
 
   Future<void> load() async {
     final db = _getDb();
@@ -40,8 +48,10 @@ class OfflineCache {
       // v6→v7 迁移：把旧数据（ownerUin=0）收养到当前账号，避免升级丢历史
       await db.adoptOrphanData(owner);
       final sessionRows = await db.allSessions(owner);
-      // 一次查询全部消息再内存分组，消除逐会话查询的 N+1
-      final allMsgs = await db.allMessages(owner);
+      // 一次查询全部消息再内存分组，消除逐会话查询的 N+1。
+      // 取**最新**的一批：按 time 升序取前 10000 行会让消息多的账号永远恢复不到
+      // 最近的消息（历史只增不减，最早的 10000 条很快就被更早的占满）。
+      final allMsgs = await db.newestMessages(owner);
       final msgsByKey = <String, List<ChatMessageRecord>>{};
       for (final r in allMsgs) {
         msgsByKey.putIfAbsent(r.sessionKey, () => []).add(r);
@@ -56,11 +66,14 @@ class OfflineCache {
         final key = sessionKeyOf(s.type, s.id);
         final msgRows = msgsByKey[key];
         if (msgRows != null && msgRows.isNotEmpty) {
-          // 与 messagesOf 语义一致：升序取最早 200 条
-          _messagesCache[key] = msgRows
-              .take(200)
+          // msgRows 是 time 降序（最新在前）：取最新 N 条后反转成升序渲染，
+          // 并把这一页里最老的一条记为继续向前翻页的游标。
+          final page = msgRows.take(kRestorePerSession).toList(growable: false);
+          _messagesCache[key] = page.reversed
               .map(chatMessageFromRecord)
-              .toList();
+              .toList(growable: false);
+          final oldest = page.last;
+          _historyCursors[key] = (time: oldest.time, id: oldest.id);
         }
       }
       // 恢复好友信息缓存（昵称/头像/在线/游玩状态）
@@ -124,8 +137,13 @@ class OfflineCache {
         final id = int.tryParse(key.substring(sep + 1));
         if (id == null || id == 0) continue;
         final isGroup = key.substring(0, sep) == ChatSessionType.group.name;
-        final msgs = rows.take(200).map(chatMessageFromRecord).toList();
+        final page = rows.take(kRestorePerSession).toList(growable: false);
+        final msgs = page.reversed
+            .map(chatMessageFromRecord)
+            .toList(growable: false);
         _messagesCache[key] = msgs;
+        final oldest = page.last;
+        _historyCursors[key] = (time: oldest.time, id: oldest.id);
         final target = isGroup ? _groupSessions : _friendSessions;
         if (target.containsKey(id)) continue;
         // 名字先用迷你号 / 「群 N」兜底，登录后由好友列表、群列表刷新成真名。

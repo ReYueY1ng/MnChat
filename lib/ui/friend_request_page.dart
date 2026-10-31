@@ -9,6 +9,8 @@ import 'theme/app_tokens.dart';
 import 'widgets/avatar_view.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 好友/群申请列表页 —— 两个 tab：好友申请 + 群邀请。
 ///
 /// 好友申请来自推送扫描（relation==2），群邀请来自
@@ -31,12 +33,12 @@ class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
       await ref.read(chatServiceProvider).rejectAllFriendRequests();
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('已拒绝全部好友申请')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.friendRequestRejectedFriendRequests ?? '已拒绝全部好友申请')));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -49,17 +51,17 @@ class _FriendRequestPageState extends ConsumerState<FriendRequestPage> {
       length: 2,
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('申请列表'),
+          title: Text(l10nOf(context)?.friendRequestRequestList ?? '申请列表'),
           actions: [
             TextButton(
               onPressed: _busy ? null : _rejectAll,
-              child: const Text('全部拒绝'),
+              child: Text(l10nOf(context)?.friendRequestReject2 ?? '全部拒绝'),
             ),
           ],
-          bottom: const TabBar(
+          bottom: TabBar(
             tabs: [
-              Tab(text: '好友申请'),
-              Tab(text: '群邀请'),
+              Tab(text: l10nOf(context)?.friendRequestFriendRequests ?? '好友申请'),
+              Tab(text: l10nOf(context)?.friendRequestGroupInvites ?? '群邀请'),
             ],
           ),
         ),
@@ -92,7 +94,7 @@ class _FriendApplyTab extends ConsumerWidget {
         ref.watch(friendRequestStreamProvider).asData?.value ??
         const <FriendRequest>[];
     if (requests.isEmpty) {
-      return const Center(child: Text('暂无待处理的好友申请'));
+      return Center(child: Text(l10nOf(context)?.friendRequestNoPendingFriendRequests ?? '暂无待处理的好友申请'));
     }
     return ListView.separated(
       itemCount: requests.length,
@@ -127,7 +129,7 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
     final service = ref.read(chatServiceProvider);
     final group = service.group;
     if (group == null) {
-      setState(() => _error = '未登录');
+      setState(() => _error = l10nOf(context)?.commonNotSignedIn ?? '未登录');
       return;
     }
     setState(() {
@@ -152,7 +154,7 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
     } catch (e) {
       if (!mounted) return;
       setState(() {
-        _error = '加载失败: $e';
+        _error = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e';
         _loading = false;
       });
     }
@@ -178,13 +180,13 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
       } else {
         setState(() => _loading = false);
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('操作失败: ret=$ret')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.friendRequestOperationFailedRet(ret.toString()) ?? '操作失败: ret=$ret')));
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _loading = false);
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('操作失败: $e')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e')));
     }
   }
 
@@ -202,14 +204,14 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
           children: [
             Text(_error!),
             const SizedBox(height: AppSpacing.sm),
-            FilledButton(onPressed: _load, child: const Text('重试')),
+            FilledButton(onPressed: _load, child: Text(l10nOf(context)?.commonRetry ?? '重试')),
           ],
         ),
       );
     }
     final items = _items ?? const <GroupApplyItem>[];
     if (items.isEmpty) {
-      return const Center(child: Text('暂无群邀请'));
+      return Center(child: Text(l10nOf(context)?.friendRequestNoGroupInvites ?? '暂无群邀请'));
     }
     return RefreshIndicator(
       onRefresh: _load,
@@ -224,10 +226,10 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
               color: theme.colorScheme.primary,
             ),
             title: Text(
-              item.groupName.isNotEmpty ? item.groupName : '群 ${item.groupId}',
+              item.groupName.isNotEmpty ? item.groupName : l10nOf(context)?.friendRequestGroup(item.groupId) ?? '群 ${item.groupId}',
             ),
             subtitle: Text(
-              '邀请人 ${item.invitor} · 成员 ${item.memberNum}',
+              l10nOf(context)?.friendRequestInvitedMembers(item.invitor, item.memberNum) ?? '邀请人 ${item.invitor} · 成员 ${item.memberNum}',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),
@@ -235,12 +237,12 @@ class _GroupApplyTabState extends ConsumerState<_GroupApplyTab> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: '同意',
+                  tooltip: l10nOf(context)?.friendRequestAccept ?? '同意',
                   icon: Icon(Icons.check, color: semantic.success),
                   onPressed: _loading ? null : () => _decide(item, true),
                 ),
                 IconButton(
-                  tooltip: '拒绝',
+                  tooltip: l10nOf(context)?.friendRequestReject ?? '拒绝',
                   icon: Icon(Icons.close, color: theme.colorScheme.error),
                   onPressed: _loading ? null : () => _decide(item, false),
                 ),
@@ -325,30 +327,32 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
   }
 
   Future<void> _accept() async {
+    final l10n = l10nOf(context);
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await ref
           .read(chatServiceProvider)
           .acceptFriendRequest(widget.request.uin);
-      _toast('已添加好友');
+      _toast(l10n?.friendRequestFriendAdded ?? '已添加好友');
     } catch (e) {
-      _toast('通过失败: $e');
+      _toast(l10n?.friendRequestFailedApprove(e) ?? '通过失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
   }
 
   Future<void> _reject() async {
+    final l10n = l10nOf(context);
     if (_busy) return;
     setState(() => _busy = true);
     try {
       await ref
           .read(chatServiceProvider)
           .rejectFriendRequest(widget.request.uin);
-      _toast('已拒绝');
+      _toast(l10n?.familyRejected ?? '已拒绝');
     } catch (e) {
-      _toast('拒绝失败: $e');
+      _toast(l10n?.friendRequestFailedReject(e) ?? '拒绝失败: $e');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -384,12 +388,12 @@ class _RequestTileState extends ConsumerState<_RequestTile> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 IconButton(
-                  tooltip: '通过',
+                  tooltip: l10nOf(context)?.familyApprove ?? '通过',
                   icon: Icon(Icons.check, color: semantic.success),
                   onPressed: _accept,
                 ),
                 IconButton(
-                  tooltip: '拒绝',
+                  tooltip: l10nOf(context)?.friendRequestReject ?? '拒绝',
                   icon: Icon(Icons.close, color: theme.colorScheme.error),
                   onPressed: _reject,
                 ),
@@ -417,24 +421,24 @@ Future<bool> showAddFriendDialog(BuildContext context, WidgetRef ref) async {
   final result = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('添加好友'),
+      title: Text(l10nOf(context)?.friendRequestAddFriend ?? '添加好友'),
       content: TextField(
         controller: controller,
         keyboardType: TextInputType.number,
         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-        decoration: const InputDecoration(
-          labelText: '迷你号 (Uin)',
-          hintText: '输入对方的迷你号',
+        decoration: InputDecoration(
+          labelText: l10nOf(context)?.blocklistMiniIdUin ?? '迷你号 (Uin)',
+          hintText: l10nOf(context)?.friendRequestEnterTheirMiniID ?? '输入对方的迷你号',
         ),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('发送申请'),
+          child: Text(l10nOf(context)?.friendRequestSendRequest ?? '发送申请'),
         ),
       ],
     ),
@@ -445,7 +449,7 @@ Future<bool> showAddFriendDialog(BuildContext context, WidgetRef ref) async {
   if (uin == null || uin <= 0) {
     if (context.mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请输入有效的迷你号')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.friendRequestEnterValidMiniID ?? '请输入有效的迷你号')));
     }
     return false;
   }
@@ -455,17 +459,17 @@ Future<bool> showAddFriendDialog(BuildContext context, WidgetRef ref) async {
 }
 
 Future<void> _doApply(BuildContext context, int uin, WidgetRef ref) async {
-  if (!context.mounted) return;
+  final l10n = l10nOf(context);
   final messenger = ScaffoldMessenger.of(context);
   final scheme = Theme.of(context).colorScheme;
   try {
     await ref.read(chatServiceProvider).applyFriend(uin);
-    messenger.showSnackBar(SnackBar(content: Text('已向 $uin 发送好友申请')));
+    messenger.showSnackBar(SnackBar(content: Text(l10n?.friendRequestFriendRequestSent(uin) ?? '已向 $uin 发送好友申请')));
   } catch (e) {
     messenger.showSnackBar(
       SnackBar(
         content: Text(
-          '发送申请失败: $e',
+          l10n?.friendRequestFailedSendRequest(e) ?? '发送申请失败: $e',
           style: TextStyle(color: scheme.onError),
         ),
         backgroundColor: scheme.error,

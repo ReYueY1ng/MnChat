@@ -53,7 +53,7 @@ class _ProfileHeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return _HomeSectionCard(
-      title: '个人资料',
+      title: l10nOf(context)?.profilePersonalInfo ?? '个人资料',
       padding: AppSpacing.cardPadding,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -63,7 +63,7 @@ class _ProfileHeaderCard extends StatelessWidget {
               // 头像本体 + 头像框统一由 AvatarView 渲染（槽位按 headFrameSlotSize
               // 放大，框不会被裁切）。点按头像打开「头像编辑」弹窗。
               Tooltip(
-                message: onEditAvatar == null ? name : '头像编辑',
+                message: onEditAvatar == null ? name : l10nOf(context)?.profileEditAvatar ?? '头像编辑',
                 child: InkWell(
                   onTap: onEditAvatar,
                   borderRadius: AppRadius.cardR,
@@ -109,7 +109,7 @@ class _ProfileHeaderCard extends StatelessWidget {
                       children: [
                         Flexible(
                           child: Text(
-                            '迷你号 $uin',
+                            l10nOf(context)?.commonMiniID2(uin) ?? '迷你号 $uin',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: theme.textTheme.bodySmall?.copyWith(
@@ -118,7 +118,7 @@ class _ProfileHeaderCard extends StatelessWidget {
                           ),
                         ),
                         IconButton(
-                          tooltip: '复制迷你号',
+                          tooltip: l10nOf(context)?.qrCopyMiniID ?? '复制迷你号',
                           iconSize: 16,
                           visualDensity: adaptiveDensity(context),
                           icon: const Icon(Icons.copy_outlined),
@@ -139,7 +139,7 @@ class _ProfileHeaderCard extends StatelessWidget {
                           const SizedBox(width: AppSpacing.xs),
                           Flexible(
                             child: Text(
-                              '家族: $familyName',
+                              l10nOf(context)?.profileFamily(familyName) ?? '家族: $familyName',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: theme.textTheme.bodySmall?.copyWith(
@@ -166,39 +166,39 @@ class _ProfileHeaderCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _HomeStatTile(
-                    label: '关注',
+                    label: l10nOf(context)?.commonFollowing ?? '关注',
                     value: _statText(stats?.following),
                     hint: stats?.following == null
-                        ? kHomeUnavailableHint
+                        ? kHomeUnavailableHint(context)
                         : null,
                   ),
                 ),
                 const _StatDivider(),
                 Expanded(
                   child: _HomeStatTile(
-                    label: '粉丝',
+                    label: l10nOf(context)?.profileFollowers ?? '粉丝',
                     value: _statText(stats?.followers),
                     hint: stats?.followers == null
-                        ? kHomeUnavailableHint
+                        ? kHomeUnavailableHint(context)
                         : null,
                   ),
                 ),
                 const _StatDivider(),
                 Expanded(
                   child: _HomeStatTile(
-                    label: '人气值',
+                    label: l10nOf(context)?.profilePopularity ?? '人气值',
                     value: _statText(stats?.popularity),
                     hint: stats?.popularity == null
-                        ? kHomeUnavailableHint
+                        ? kHomeUnavailableHint(context)
                         : null,
                   ),
                 ),
                 const _StatDivider(),
                 Expanded(
                   child: _HomeStatTile(
-                    label: '信用分',
+                    label: l10nOf(context)?.profileCreditScore ?? '信用分',
                     value: _statText(stats?.credit),
-                    hint: stats?.credit == null ? kHomeUnavailableHint : null,
+                    hint: stats?.credit == null ? kHomeUnavailableHint(context) : null,
                   ),
                 ),
               ],
@@ -213,14 +213,14 @@ class _ProfileHeaderCard extends StatelessWidget {
                 OutlinedButton.icon(
                   onPressed: onVisitors,
                   icon: const Icon(Icons.visibility_outlined, size: 16),
-                  label: const Text('最近访客'),
+                  label: Text(l10nOf(context)?.profileRecentVisitors ?? '最近访客'),
                 ),
               if (onEditLayout != null)
                 FilledButton.icon(
                   // 参考图存在「编辑布局」；外部客户端无主页布局协议 → 仅外壳。
                   onPressed: onEditLayout,
                   icon: const Icon(Icons.dashboard_customize_outlined, size: 16),
-                  label: const Text('编辑布局'),
+                  label: Text(l10nOf(context)?.profileEditLayout ?? '编辑布局'),
                 ),
             ],
           ),
@@ -256,12 +256,12 @@ class _RelationActions extends StatelessWidget {
               ? OutlinedButton.icon(
                   onPressed: busy ? null : onFollow,
                   icon: const Icon(Icons.how_to_reg_outlined, size: 18),
-                  label: const Text('已关注'),
+                  label: Text(l10nOf(context)?.commonFollowed ?? '已关注'),
                 )
               : FilledButton.icon(
                   onPressed: busy ? null : onFollow,
                   icon: const Icon(Icons.person_add_alt, size: 18),
-                  label: const Text('关注'),
+                  label: Text(l10nOf(context)?.commonFollowing ?? '关注'),
                 ),
         ),
         const SizedBox(width: AppSpacing.sm),
@@ -274,7 +274,7 @@ class _RelationActions extends StatelessWidget {
               color: blacklisted ? theme.colorScheme.onSurface : theme.colorScheme.error,
             ),
             label: Text(
-              blacklisted ? '已在黑名单' : '拉黑',
+              blacklisted ? l10nOf(context)?.profileAlreadyBlocked ?? '已在黑名单' : l10nOf(context)?.profileBlock ?? '拉黑',
               style: TextStyle(
                 color: blacklisted ? null : theme.colorScheme.error,
               ),
@@ -333,7 +333,7 @@ class _HomeBannerCard extends StatelessWidget {
                 ),
                 const SizedBox(width: AppSpacing.sm),
                 Text(
-                  '交友宣言',
+                  l10nOf(context)?.profileFriendBio ?? '交友宣言',
                   style: theme.textTheme.labelLarge?.copyWith(
                     color: scheme.onPrimaryContainer,
                   ),
@@ -343,7 +343,7 @@ class _HomeBannerCard extends StatelessWidget {
                   TextButton.icon(
                     onPressed: onEdit,
                     icon: const Icon(Icons.edit, size: 16),
-                    label: const Text('编辑'),
+                    label: Text(l10nOf(context)?.profileEdit ?? '编辑'),
                   ),
               ],
             ),
@@ -359,7 +359,7 @@ class _HomeBannerCard extends StatelessWidget {
                 borderRadius: AppRadius.inputR,
               ),
               child: Text(
-                declaration.isEmpty ? '还没有设置交友宣言' : declaration,
+                declaration.isEmpty ? l10nOf(context)?.profileNoFriendBioSet ?? '还没有设置交友宣言' : declaration,
                 style: theme.textTheme.titleMedium?.copyWith(
                   color: scheme.onSurface,
                 ),
@@ -396,7 +396,7 @@ class _NameTag extends StatelessWidget {
         borderRadius: AppRadius.pillR,
       ),
       child: Text(
-        label.isEmpty ? '未命名' : label,
+        label.isEmpty ? l10nOf(context)?.profileUnnamed ?? '未命名' : label,
         maxLines: 1,
         overflow: TextOverflow.ellipsis,
         style: theme.textTheme.labelMedium?.copyWith(

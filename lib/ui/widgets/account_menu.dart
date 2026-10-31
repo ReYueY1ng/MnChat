@@ -13,6 +13,8 @@ import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'session_player_info_popup.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 账号菜单操作项。
 enum _AccountAction {
   profile,
@@ -50,32 +52,32 @@ Future<void> showAccountMenu(
     context: context,
     position: position,
     items: [
-      _menuItem(_AccountAction.profile, Icons.badge_outlined, '个人资料'),
-      _menuItem(_AccountAction.refresh, Icons.refresh, '刷新会话'),
-      _menuItem(_AccountAction.createGroup, Icons.group_add_outlined, '创建群'),
-      _menuItem(_AccountAction.family, Icons.home_outlined, '家族'),
+      _menuItem(_AccountAction.profile, Icons.badge_outlined, l10nOf(context)?.profilePersonalInfo ?? '个人资料'),
+      _menuItem(_AccountAction.refresh, Icons.refresh, l10nOf(context)?.accountMenuRefreshConversations ?? '刷新会话'),
+      _menuItem(_AccountAction.createGroup, Icons.group_add_outlined, l10nOf(context)?.accountMenuCreateGroup ?? '创建群'),
+      _menuItem(_AccountAction.family, Icons.home_outlined, l10nOf(context)?.commonFamily ?? '家族'),
       _menuItem(
         _AccountAction.mail,
         Icons.mark_email_unread_outlined,
-        '消息中心',
+        l10nOf(context)?.mailMessageCenter ?? '消息中心',
       ),
-      _menuItem(_AccountAction.favorites, Icons.star_outline, '收藏'),
+      _menuItem(_AccountAction.favorites, Icons.star_outline, l10nOf(context)?.menuFavorite ?? '收藏'),
       _menuItem(
         _AccountAction.searchRecords,
         Icons.search,
-        '搜索聊天记录',
+        l10nOf(context)?.searchTitle ?? '搜索聊天记录',
       ),
-      _menuItem(_AccountAction.settings, Icons.settings_outlined, '设置'),
+      _menuItem(_AccountAction.settings, Icons.settings_outlined, l10nOf(context)?.settingsSettings ?? '设置'),
       const PopupMenuDivider(),
       _menuItem(
         _AccountAction.switchAccount,
         Icons.switch_account_outlined,
-        '切换账号',
+        l10nOf(context)?.accountMenuSwitchAccount ?? '切换账号',
       ),
       _menuItem(
         _AccountAction.logout,
         Icons.logout,
-        '退出登录',
+        l10nOf(context)?.settingsSignOut ?? '退出登录',
         color: errorColor,
       ),
     ],
@@ -150,16 +152,16 @@ Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
   final confirmed = await showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      title: const Text('退出登录'),
-      content: const Text('确定要退出当前账号吗？'),
+      title: Text(l10nOf(context)?.settingsSignOut ?? '退出登录'),
+      content: Text(l10nOf(context)?.settingsSignOutCurrentAccount ?? '确定要退出当前账号吗？'),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(ctx, false),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('退出'),
+          child: Text(l10nOf(context)?.settingsSignOut2 ?? '退出'),
         ),
       ],
     ),
@@ -184,7 +186,7 @@ Future<void> _showCreateGroupDialog(
     context: context,
     builder: (ctx) => StatefulBuilder(
       builder: (ctx, setDialogState) => AlertDialog(
-        title: const Text('创建群'),
+        title: Text(l10nOf(context)?.accountMenuCreateGroup ?? '创建群'),
         content: SizedBox(
           // 手机上收敛到可用宽度（360dp 机型放不下 420）。
           width: dialogContentWidth(ctx, 420),
@@ -194,9 +196,9 @@ Future<void> _showCreateGroupDialog(
               TextField(
                 controller: nameCtrl,
                 maxLength: 20,
-                decoration: const InputDecoration(
-                  labelText: '群名称',
-                  hintText: '输入群名称',
+                decoration: InputDecoration(
+                  labelText: l10nOf(context)?.groupDetailGroupName ?? '群名称',
+                  hintText: l10nOf(context)?.accountMenuEnterGroupName ?? '输入群名称',
                 ),
               ),
               if (contacts.isNotEmpty)
@@ -206,10 +208,10 @@ Future<void> _showCreateGroupDialog(
                     child: ListView(
                       shrinkWrap: true,
                       children: [
-                        const Padding(
+                        Padding(
                           padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
                           child: Text(
-                            '选择成员（可选）',
+                            l10nOf(context)?.accountMenuChooseMembersOptional ?? '选择成员（可选）',
                             style: TextStyle(fontWeight: FontWeight.w600),
                           ),
                         ),
@@ -224,7 +226,7 @@ Future<void> _showCreateGroupDialog(
                             dense: true,
                             value: selected.contains(c.uin),
                             title: Text(name),
-                            subtitle: Text('迷你号 ${c.uin}'),
+                            subtitle: Text(l10nOf(context)?.commonMiniID(c.uin) ?? '迷你号 ${c.uin}'),
                             onChanged: (v) => setDialogState(() {
                               if (v == true) {
                                 selected.add(c.uin);
@@ -244,11 +246,11 @@ Future<void> _showCreateGroupDialog(
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('创建'),
+            child: Text(l10nOf(context)?.accountMenuCreate ?? '创建'),
           ),
         ],
       ),
@@ -259,7 +261,7 @@ Future<void> _showCreateGroupDialog(
   if (name.isEmpty) {
     if (context.mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('请输入群名称')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.accountMenuEnterGroupName2 ?? '请输入群名称')));
     }
     return;
   }
@@ -275,16 +277,16 @@ Future<void> _showCreateGroupDialog(
     final ret = resp['ret'];
     if (ret is num && ret != 0) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('创建失败: ret=$ret')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.accountMenuFailedCreateRet(ret) ?? '创建失败: ret=$ret')));
       return;
     }
     ScaffoldMessenger.of(context)
-        .showSnackBar(const SnackBar(content: Text('群已创建')));
+        .showSnackBar(SnackBar(content: Text(l10nOf(context)?.accountMenuGroupCreated ?? '群已创建')));
     service.loadSessions(); // 刷新群列表
   } catch (e) {
     if (context.mounted) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('创建失败: $e')));
+          .showSnackBar(SnackBar(content: Text(l10nOf(context)?.accountMenuFailedCreate(e) ?? '创建失败: $e')));
     }
   }
 }
@@ -352,7 +354,7 @@ class _AccountAvatarButtonState extends ConsumerState<AccountAvatarButton> {
     final me = ref.watch(myAvatarInfoProvider).asData?.value;
     final ownName = me?.name ?? '';
     return Tooltip(
-      message: widget.showSelfInfo ? '我的资料' : '账号',
+      message: widget.showSelfInfo ? l10nOf(context)?.accountMenuMyProfile ?? '我的资料' : l10nOf(context)?.settingsAccount ?? '账号',
       child: InkWell(
         onTap: _open,
         customBorder: const CircleBorder(),
@@ -400,7 +402,7 @@ class _AccountMenuButtonState extends ConsumerState<AccountMenuButton> {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '菜单',
+      message: l10nOf(context)?.accountMenuMenu ?? '菜单',
       child: IconButton(
         key: _anchorKey,
         onPressed: _open,

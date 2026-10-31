@@ -7,6 +7,8 @@ import '../core/services/app_lock.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 应用锁解锁页：全屏居中，无 AppBar/返回键。
 ///
 /// 使用自绘数字键盘（不依赖系统输入法），可同时用于桌面与移动端。
@@ -97,7 +99,7 @@ class _LockPageState extends ConsumerState<LockPage>
     setState(() {
       _verifying = false;
       if (isConfirm || _pin.length >= AppLockService.maxPinLength) {
-        _error = '密码错误';
+        _error = l10nOf(context)?.lockWrongPassword ?? '密码错误';
         _pin = '';
         _shake.forward(from: 0);
       }
@@ -124,7 +126,7 @@ class _LockPageState extends ConsumerState<LockPage>
                   Text('MnChat', style: theme.textTheme.headlineSmall),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    '请输入应用锁密码',
+                    l10nOf(context)?.lockEnterAppLockPassword ?? '请输入应用锁密码',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.outline,
                     ),

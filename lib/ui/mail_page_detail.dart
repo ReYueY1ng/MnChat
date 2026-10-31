@@ -14,11 +14,11 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(
-        title: Text(_item.title.isNotEmpty ? _item.title : '消息详情'),
+        title: Text(_item.title.isNotEmpty ? _item.title : l10nOf(context)?.mailMessageDetails ?? '消息详情'),
         actions: [
           if (widget.onDelete != null)
             IconButton(
-              tooltip: '删除',
+              tooltip: l10nOf(context)?.actionDelete ?? '删除',
               icon: const Icon(Icons.delete_outline),
               onPressed: () async {
                 await widget.onDelete?.call();
@@ -31,7 +31,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
         padding: AppSpacing.pagePadding,
         children: [
           Text(
-            _item.title.isNotEmpty ? _item.title : '（无标题）',
+            _item.title.isNotEmpty ? _item.title : l10nOf(context)?.mailUntitled ?? '（无标题）',
             style: theme.textTheme.titleLarge,
           ),
           const SizedBox(height: AppSpacing.sm),
@@ -65,13 +65,13 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
           ],
           // 正文
           Text(
-            _item.content.isEmpty ? '（无内容）' : _item.content,
+            _item.content.isEmpty ? l10nOf(context)?.mailNoContent ?? '（无内容）' : _item.content,
             style: theme.textTheme.bodyMedium?.copyWith(height: 1.6),
           ),
           const SizedBox(height: AppSpacing.xl),
           // 附件
           if (_item.attach.isNotEmpty) ...[
-            Text('附件', style: theme.textTheme.titleMedium),
+            Text(l10nOf(context)?.mailAttachments ?? '附件', style: theme.textTheme.titleMedium),
             const SizedBox(height: AppSpacing.sm),
             for (final a in _item.attach)
               ListTile(
@@ -83,7 +83,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                       ? theme.colorScheme.outline
                       : theme.colorScheme.primary,
                 ),
-                title: Text(a.name.isNotEmpty ? a.name : '物品 ${a.id}'),
+                title: Text(a.name.isNotEmpty ? a.name : l10nOf(context)?.mailItem(a.id) ?? '物品 ${a.id}'),
                 trailing: a.count > 0 ? Text('×${a.count}') : null,
               ),
             const SizedBox(height: AppSpacing.sm),
@@ -99,7 +99,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                       }
                     },
               icon: const Icon(Icons.card_giftcard),
-              label: Text(_item.attachmentTaken ? '已领取' : '领取附件'),
+              label: Text(_item.attachmentTaken ? l10nOf(context)?.mailClaimed ?? '已领取' : l10nOf(context)?.mailClaimAttachments ?? '领取附件'),
             ),
             const SizedBox(height: AppSpacing.lg),
           ],
@@ -113,7 +113,7 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                   Navigator.of(context).push(
                     MaterialPageRoute<void>(
                       builder: (_) => Scaffold(
-                        appBar: AppBar(title: const Text('链接')),
+                        appBar: AppBar(title: Text(l10nOf(context)?.mailLink ?? '链接')),
                         body: SingleChildScrollView(
                           padding: AppSpacing.pagePadding,
                           child: SelectableText(jt),
@@ -123,12 +123,12 @@ class _MailDetailPageState extends ConsumerState<MailDetailPage> {
                   );
                 } else {
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('该跳转类型暂不支持')),
+                    SnackBar(content: Text(l10nOf(context)?.mailThisLinkTypeIsnt ?? '该跳转类型暂不支持')),
                   );
                 }
               },
               icon: const Icon(Icons.open_in_new),
-              label: Text(_item.jumpName.isNotEmpty ? _item.jumpName : '前往'),
+              label: Text(_item.jumpName.isNotEmpty ? _item.jumpName : l10nOf(context)?.mailGo ?? '前往'),
             ),
         ],
       ),

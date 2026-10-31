@@ -24,6 +24,8 @@ import '../theme/app_tokens.dart';
 import 'avatar_view.dart';
 import 'rich_text_view.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 玩家信息快照：信息卡展示所需的一次性拉取结果。
 class SessionPlayerInfo {
   /// 平台等级（`platformLevel`；0 = 未知）。
@@ -216,19 +218,22 @@ class PlayerInfoStats extends StatelessWidget {
                 _infoChip(
                   theme,
                   Icons.favorite_border,
-                  '默契度：$tacit',
+                  l10nOf(context)?.playerInfoRapport(tacit) ?? '默契度：$tacit',
                   color: Colors.pinkAccent,
                 ),
                 _infoChip(
                   theme,
                   Icons.military_tech_outlined,
-                  '冒险家：$adv',
+                  l10nOf(context)?.playerInfoAdventurer(adv) ?? '冒险家：$adv',
                   color: theme.colorScheme.primary,
                 ),
                 _infoChip(
                   theme,
                   Icons.local_police_outlined,
-                  '称号：${info.title ?? '未佩戴'}',
+                  l10nOf(context)?.playerInfoTitleWithValue(
+                        info.title ?? '未佩戴',
+                      ) ??
+                      '称号：${info.title ?? '未佩戴'}',
                   color: theme.colorScheme.tertiary,
                 ),
               ],

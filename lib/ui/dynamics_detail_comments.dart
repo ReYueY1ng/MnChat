@@ -81,9 +81,9 @@ class _CommentPanel extends StatelessWidget {
     final list = loading
         ? const Center(child: CircularProgressIndicator())
         : comments.isEmpty
-        ? const Padding(
+        ? Padding(
             padding: EdgeInsets.all(AppSpacing.xxl),
-            child: Center(child: Text('暂无评论')),
+            child: Center(child: Text(l10nOf(context)?.dynamicsDetailNoCommentsYet ?? '暂无评论')),
           )
         : ListView.separated(
             // fill=true 时占满父高自滚；fill=false 时内联不滚动
@@ -108,7 +108,7 @@ class _CommentPanel extends StatelessWidget {
                         : TextButton.icon(
                             onPressed: onLoadMore,
                             icon: const Icon(Icons.expand_more),
-                            label: const Text('加载更多评论'),
+                            label: Text(l10nOf(context)?.dynamicsDetailLoadMoreComments ?? '加载更多评论'),
                           ),
                   ),
                 );
@@ -154,12 +154,12 @@ class _CommentPanel extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: 6),
           child: Row(
             children: [
-              Text('共${comments.length}条评论', style: theme.textTheme.bodySmall),
+              Text(l10nOf(context)?.dynamicsDetailComments(comments.length) ?? '共${comments.length}条评论', style: theme.textTheme.bodySmall),
               const Spacer(),
               InkWell(
                 onTap: () => onToggle(false),
                 child: Text(
-                  '默认',
+                  l10nOf(context)?.dynamicsDetailDefault ?? '默认',
                   style: TextStyle(
                     color: latest
                         ? theme.colorScheme.outline
@@ -171,7 +171,7 @@ class _CommentPanel extends StatelessWidget {
               InkWell(
                 onTap: () => onToggle(true),
                 child: Text(
-                  '最新',
+                  l10nOf(context)?.dynamicsDetailLatest ?? '最新',
                   style: TextStyle(
                     color: latest
                         ? theme.colorScheme.primary
@@ -275,7 +275,7 @@ class _CommentTile extends StatelessWidget {
         ? '${comment.uin}'
         : (comment.nickname ?? '${comment.uin}');
     final meta = [
-      if (comment.createTime > 0) _relative(comment.createTime),
+      if (comment.createTime > 0) _relative(context, comment.createTime),
       'IP ${comment.location.isNotEmpty ? comment.location : comment.uin}',
     ].join('  ');
     final likeCount = comment.likeCount + likeDelta;
@@ -356,7 +356,7 @@ class _CommentTile extends StatelessWidget {
                       child: Padding(
                         padding: const EdgeInsets.only(top: 2),
                         child: Text(
-                          expanded ? '收起回复' : '共${comment.replyCount}条回复',
+                          expanded ? l10nOf(context)?.dynamicsDetailCollapseReplies ?? '收起回复' : l10nOf(context)?.dynamicsDetailReplies(comment.replyCount) ?? '共${comment.replyCount}条回复',
                           style: theme.textTheme.labelSmall?.copyWith(
                             color: theme.colorScheme.outline,
                           ),
@@ -376,7 +376,7 @@ class _CommentTile extends StatelessWidget {
                     const SizedBox(height: AppSpacing.xs),
                     if (replies!.isEmpty)
                       Text(
-                        '暂无回复',
+                        l10nOf(context)?.dynamicsDetailNoRepliesYet ?? '暂无回复',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.outline,
                         ),
@@ -447,7 +447,9 @@ class _CommentTile extends StatelessWidget {
                 ],
               ),
               PopupMenuButton<_CommentAction>(
-                tooltip: dynamicsCommentMenuTooltip,
+                tooltip:
+                l10nOf(context)?.dynamicsDetailCommentActions ??
+                dynamicsCommentMenuTooltip,
                 icon: const Icon(Icons.more_horiz, size: 18),
                 padding: EdgeInsets.zero,
                 onSelected: onAction,
@@ -531,7 +533,9 @@ class _ReplyRow extends StatelessWidget {
             ),
           ),
           PopupMenuButton<_ReplyAction>(
-            tooltip: dynamicsReplyMenuTooltip,
+            tooltip:
+              l10nOf(context)?.dynamicsDetailReplyActions ??
+              dynamicsReplyMenuTooltip,
             icon: const Icon(Icons.more_horiz, size: 16),
             padding: EdgeInsets.zero,
             onSelected: onAction,
@@ -564,7 +568,7 @@ class _WriteCommentBar extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.sm),
           Text(
-            '点击写评论',
+            l10nOf(context)?.dynamicsDetailTapWriteComment ?? '点击写评论',
             style: TextStyle(color: theme.colorScheme.onSecondaryContainer),
           ),
         ],

@@ -63,6 +63,7 @@ import 'head_frame.dart' show HeadFrameOverlay, headFrameSlotSize;
 import 'rich_text_view.dart';
 import '../../core/services/image_disk_cache.dart';
 
+import 'app_l10n.dart' show l10nOf;
 part 'avatar_edit_state_base.dart';
 part 'avatar_edit_state_data.dart';
 part 'avatar_edit_state_views.dart';
@@ -106,33 +107,46 @@ Key avatarEditTitleCellKey(int titleId) =>
 ///
 /// 有远程配置时用 `title_manager.title_typeList`（名称/排序均来自配置，
 /// 顺序恰为 开发者/迷你季/其他/自定义）；配置不可用时回退此常量。
-const List<String> kTitleCategoryTabs = ['全部', '开发者', '迷你季', '其他', '自定义'];
+List<String> titleCategoryTabs(BuildContext context) => [
+  l10nOf(context)?.mailAll ?? '全部',
+  l10nOf(context)?.avatarEditDeveloper ?? '开发者',
+  l10nOf(context)?.avatarEditMiniSeason ?? '迷你季',
+  l10nOf(context)?.settingsAboutOther ?? '其他',
+  l10nOf(context)?.avatarEditCustom ?? '自定义',
+];
 
 /// 头像编辑弹窗的左侧页签。
 enum AvatarEditTab {
-  avatar('头像'),
-  frame('头像框'),
-  nickname('昵称'),
-  title('称号'),
-  family('家族');
-
-  const AvatarEditTab(this.label);
+  avatar,
+  frame,
+  nickname,
+  title,
+  family;
 
   /// 页签文案（逐字对齐参考图）。
-  final String label;
+  String labelOf(BuildContext context) => switch (this) {
+    AvatarEditTab.avatar => l10nOf(context)?.avatarEditAvatar ?? '头像',
+    AvatarEditTab.frame => l10nOf(context)?.profileAvatarFrame ?? '头像框',
+    AvatarEditTab.nickname => l10nOf(context)?.avatarEditNickname ?? '昵称',
+    AvatarEditTab.title => l10nOf(context)?.profileTitle ?? '称号',
+    AvatarEditTab.family => l10nOf(context)?.commonFamily ?? '家族',
+  };
 }
 
 /// 「头像」页签的顶部来源分类。
 enum AvatarSourceTab {
-  all('全部'),
-  skin('装扮'),
-  ride('坐骑'),
-  portrait('个性');
-
-  const AvatarSourceTab(this.label);
+  all,
+  skin,
+  ride,
+  portrait;
 
   /// 分类文案（逐字对齐参考图）。
-  final String label;
+  String labelOf(BuildContext context) => switch (this) {
+    AvatarSourceTab.all => l10nOf(context)?.mailAll ?? '全部',
+    AvatarSourceTab.skin => l10nOf(context)?.avatarEditOutfit ?? '装扮',
+    AvatarSourceTab.ride => l10nOf(context)?.avatarEditMount ?? '坐骑',
+    AvatarSourceTab.portrait => l10nOf(context)?.avatarEditPersonality ?? '个性',
+  };
 }
 
 /// 家族列表加载器（测试注入用；为空时走 [FamilyClient.getFamilyList]）。

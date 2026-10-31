@@ -17,6 +17,8 @@ import 'image_viewer.dart';
 import 'rich_text_view.dart';
 import '../../core/services/image_disk_cache.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 批量补齐动态作者的头像展示（DIY → 角色头像本体 → 首字占位）。
 ///
 /// 动态接口只在 `role_info_list` 里下发 DIY 自定义头像与头像框，**从不给角色
@@ -149,7 +151,7 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
         });
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('操作失败，请稍后重试')));
+        ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsCardOperationFailedTryAgain ?? '操作失败，请稍后重试')));
       }
     } finally {
       if (mounted) setState(() => _likeBusy = false);
@@ -165,13 +167,13 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
         setState(() => _followed = true);
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('已关注')));
+        ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.commonFollowed ?? '已关注')));
       }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('关注失败')));
+        ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.mailFailedFollow ?? '关注失败')));
       }
     }
   }
@@ -189,9 +191,9 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
       context: context,
       builder: (ctx) => SafeArea(
         child: friends.isEmpty
-            ? const Padding(
+            ? Padding(
                 padding: EdgeInsets.all(AppSpacing.xxl),
-                child: Center(child: Text('还没有好友可以分享')),
+                child: Center(child: Text(l10nOf(context)?.dynamicsCardNoFriendsShare ?? '还没有好友可以分享')),
               )
             : ListView(
                 shrinkWrap: true,
@@ -220,12 +222,12 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
       setState(() => _shareCount = count ?? (_shareCount + 1));
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('已转发给好友')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsCardForwardedFriend ?? '已转发给好友')));
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(
           context,
-        ).showSnackBar(const SnackBar(content: Text('转发失败')));
+        ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsCardFailedForward ?? '转发失败')));
       }
     }
   }
@@ -346,9 +348,9 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
               // 视频动态标记（`video_res_id` 非空即视频）。游戏 contentType.video=4，
               // 见 dynamicsinfocard.lua:33-48 类型枚举 / :671-725 卡片布局。
               if (post.videoResId != null)
-                const _ChipLabel(
+                _ChipLabel(
                   icon: Icons.play_circle_outline,
-                  text: '视频',
+                  text: l10nOf(context)?.videoVideo ?? '视频',
                 ),
               // 投票动态：拉取投票详情就地展示（游戏 contentType.vote=5，内容由
               // `DynamicsDataManager:FindCacheVoteInfo` 提供，dynamicsinfocard.lua:507-556）。
@@ -366,7 +368,7 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
               if (post.lotteryId != null)
                 _LotteryPreview(lotteryId: post.lotteryId!, client: _client())
               else if (post.isLottery)
-                const _ChipLabel(icon: Icons.card_giftcard, text: '抽奖'),
+                _ChipLabel(icon: Icons.card_giftcard, text: l10nOf(context)?.dynamicsCardGiveaway ?? '抽奖'),
               const SizedBox(height: 6),
               // 右下角：操作区（点赞/评论/转发 + ···）
               _Actions(
@@ -388,7 +390,7 @@ class _DynamicsCardState extends ConsumerState<DynamicsCard> {
   /// 相对时间 + IP 属地，如「3天前  IP 广东」。
   String _meta() {
     final parts = <String>[
-      if (post.createTime > 0) _relativeTime(post.createTime),
+      if (post.createTime > 0) _relativeTime(context, post.createTime),
       'IP ${post.location.isNotEmpty ? post.location : post.city}',
     ];
     return parts.join('  ');
@@ -491,7 +493,7 @@ class _PostContent extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(top: 2),
                   child: Text(
-                    '查看全文',
+                    l10nOf(context)?.dynamicsCardViewFullText ?? '查看全文',
                     style: TextStyle(
                       fontSize: 12,
                       color: theme.colorScheme.primary,
@@ -656,7 +658,7 @@ class _LinkCard extends StatelessWidget {
     return InkWell(
       onTap: () {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('打开作品/地图：${post.linkName}')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsCardOpenWorkMap(post.linkName.toString()) ?? '打开作品/地图：${post.linkName}')));
       },
       child: Container(
         margin: const EdgeInsets.only(top: AppSpacing.sm),
@@ -688,7 +690,7 @@ class _LinkCard extends StatelessWidget {
                   ),
                   if (post.linkAuthor != null)
                     Text(
-                      '作者 ${post.linkAuthor}',
+                      l10nOf(context)?.dynamicsCardAuthor(post.linkAuthor.toString()) ?? '作者 ${post.linkAuthor}',
                       style: theme.textTheme.labelSmall,
                     ),
                 ],
@@ -764,7 +766,7 @@ class _VotePreviewState extends State<_VotePreview> {
     if (info == null) {
       return _ChipLabel(
         icon: Icons.how_to_vote_outlined,
-        text: _loading ? '投票（加载中）' : '投票',
+        text: _loading ? l10nOf(context)?.dynamicsCardVoteLoading ?? '投票（加载中）' : l10nOf(context)?.dynamicsDetailVote ?? '投票',
       );
     }
     return Container(
@@ -787,7 +789,7 @@ class _VotePreviewState extends State<_VotePreview> {
               const SizedBox(width: AppSpacing.xs),
               Expanded(
                 child: Text(
-                  info.title.isEmpty ? '投票' : info.title,
+                  info.title.isEmpty ? l10nOf(context)?.dynamicsDetailVote ?? '投票' : info.title,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -881,12 +883,12 @@ class _LotteryPreviewState extends State<_LotteryPreview> {
     if (l == null) {
       return _ChipLabel(
         icon: Icons.card_giftcard,
-        text: _loading ? '抽奖（加载中）' : '抽奖',
+        text: _loading ? l10nOf(context)?.dynamicsCardGiveawayLoading ?? '抽奖（加载中）' : l10nOf(context)?.dynamicsCardGiveaway ?? '抽奖',
       );
     }
     final status = switch (l.status) {
-      2 => '进行中',
-      3 => '已结束',
+      2 => l10nOf(context)?.dynamicsCardOngoing ?? '进行中',
+      3 => l10nOf(context)?.dynamicsCardEnded ?? '已结束',
       _ => '',
     };
     return Container(
@@ -907,10 +909,10 @@ class _LotteryPreviewState extends State<_LotteryPreview> {
           Expanded(
             child: Text(
               [
-                '抽奖',
-                if (l.itemNum > 0) '奖品 ×${l.itemNum}',
-                if (l.selectNum > 0) '开奖 ${l.selectNum} 人',
-                if (l.joinCount > 0) '参与 ${l.joinCount} 人',
+                l10nOf(context)?.dynamicsCardGiveaway ?? '抽奖',
+                if (l.itemNum > 0) l10nOf(context)?.dynamicsCardPrizeX(l.itemNum) ?? '奖品 ×${l.itemNum}',
+                if (l.selectNum > 0) l10nOf(context)?.dynamicsCardWinners(l.selectNum) ?? '开奖 ${l.selectNum} 人',
+                if (l.joinCount > 0) l10nOf(context)?.dynamicsCardParticipants(l.joinCount) ?? '参与 ${l.joinCount} 人',
                 if (status.isNotEmpty) status,
               ].join(' · '),
               maxLines: 1,
@@ -983,7 +985,7 @@ class _FollowButton extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Text(
-          followed ? '已关注' : '关注',
+          followed ? l10nOf(context)?.commonFollowed ?? '已关注' : l10nOf(context)?.commonFollowing ?? '关注',
           style: TextStyle(
             fontSize: 12,
             color: followed
@@ -1097,15 +1099,15 @@ class _ActionIcon extends StatelessWidget {
 }
 
 /// 相对时间：刚刚 / X分钟前 / X小时前 / X天前 / X月前 / X年前。
-String _relativeTime(int ts) {
+String _relativeTime(BuildContext context, int ts) {
   if (ts <= 0) return '';
   final diff = DateTime.now().difference(
     DateTime.fromMillisecondsSinceEpoch(ts * 1000),
   );
-  if (diff.inMinutes < 1) return '刚刚';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-  if (diff.inHours < 24) return '${diff.inHours}小时前';
-  if (diff.inDays < 30) return '${diff.inDays}天前';
-  if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
-  return '${(diff.inDays / 365).floor()}年前';
+  if (diff.inMinutes < 1) return l10nOf(context)?.dynamicsDetailJustNow ?? '刚刚';
+  if (diff.inMinutes < 60) return l10nOf(context)?.dynamicsDetailMinAgo(diff.inMinutes) ?? '${diff.inMinutes}分钟前';
+  if (diff.inHours < 24) return l10nOf(context)?.dynamicsDetailHrAgo(diff.inHours) ?? '${diff.inHours}小时前';
+  if (diff.inDays < 30) return l10nOf(context)?.dynamicsDetailDAgo(diff.inDays) ?? '${diff.inDays}天前';
+  if (diff.inDays < 365) return l10nOf(context)?.dynamicsDetailMoAgo((diff.inDays / 30).floor()) ?? '${(diff.inDays / 30).floor()}个月前';
+  return l10nOf(context)?.dynamicsDetailYrAgo((diff.inDays / 365).floor()) ?? '${(diff.inDays / 365).floor()}年前';
 }

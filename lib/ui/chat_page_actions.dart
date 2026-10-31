@@ -93,6 +93,10 @@ Future<MessageAction?> showMessageActionMenu(
   );
 }
 
+/// 多选操作条的测试定位 key（保持名字稳定）。
+const Key selectionCopyKey = Key('selection_copy');
+const Key selectionExportKey = Key('selection_export');
+
 /// 多选模式的操作条（消息区下方的批量操作栏）。
 class _SelectionBar extends StatelessWidget {
   /// 已选条数。
@@ -101,6 +105,8 @@ class _SelectionBar extends StatelessWidget {
   final VoidCallback onFavorite;
   final VoidCallback onForward;
   final VoidCallback onDelete;
+  final VoidCallback onCopy;
+  final VoidCallback onExport;
   final VoidCallback onCancel;
 
   const _SelectionBar({
@@ -108,6 +114,8 @@ class _SelectionBar extends StatelessWidget {
     required this.onFavorite,
     required this.onForward,
     required this.onDelete,
+    required this.onCopy,
+    required this.onExport,
     required this.onCancel,
   });
 
@@ -131,6 +139,18 @@ class _SelectionBar extends StatelessWidget {
                 l10n?.selectedCount(count) ?? '已选 $count 条',
                 style: Theme.of(context).textTheme.titleSmall,
               ),
+            ),
+            IconButton(
+              key: selectionCopyKey,
+              tooltip: l10nOf(context)?.chatCopySelected ?? '复制选中',
+              icon: const Icon(Icons.copy_all_outlined),
+              onPressed: count == 0 ? null : onCopy,
+            ),
+            IconButton(
+              key: selectionExportKey,
+              tooltip: l10nOf(context)?.chatExportSelected ?? '导出选中',
+              icon: const Icon(Icons.file_download_outlined),
+              onPressed: count == 0 ? null : onExport,
             ),
             IconButton(
               tooltip: l10n?.actionFavorite ?? '收藏',
@@ -200,7 +220,7 @@ class _ForwardTargetPicker extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
-                  s.type == ChatSessionType.group ? '群聊' : '迷你号 ${s.id}',
+                  s.type == ChatSessionType.group ? l10nOf(context)?.chatGroupChat ?? '群聊' : l10nOf(context)?.blocklistMiniId(s.id) ?? '迷你号 ${s.id}',
                 ),
                 onTap: () => Navigator.of(context).pop(s),
               );

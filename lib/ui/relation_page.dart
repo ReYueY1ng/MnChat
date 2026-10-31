@@ -9,6 +9,8 @@ import 'widgets/head_frame.dart';
 import 'widgets/rich_text_view.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 关注 / 粉丝列表页。
 ///
 /// 数据来自 `/server/friend` 的 `get_user_attention_list`（我关注的人）与
@@ -121,12 +123,12 @@ class _RelationPageState extends ConsumerState<RelationPage>
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('关注与粉丝'),
+        title: Text(l10nOf(context)?.friendsFollowingFollowers ?? '关注与粉丝'),
         bottom: TabBar(
           controller: _tabs,
           tabs: [
-            Tab(text: '我的关注 ${_following.length}'),
-            Tab(text: '我的粉丝 ${_fans.length}'),
+            Tab(text: l10nOf(context)?.relationFollowing(_following.length) ?? '我的关注 ${_following.length}'),
+            Tab(text: l10nOf(context)?.relationFollowers(_fans.length) ?? '我的粉丝 ${_fans.length}'),
           ],
         ),
       ),
@@ -140,8 +142,8 @@ class _RelationPageState extends ConsumerState<RelationPage>
               : TabBarView(
                   controller: _tabs,
                   children: [
-                    _list(_following, '还没有关注任何人'),
-                    _list(_fans, '还没有粉丝'),
+                    _list(_following, l10nOf(context)?.relationNotFollowingAnyoneYet ?? '还没有关注任何人'),
+                    _list(_fans, l10nOf(context)?.relationNoFollowersYet ?? '还没有粉丝'),
                   ],
                 ),
         ),
@@ -159,9 +161,9 @@ class _RelationPageState extends ConsumerState<RelationPage>
           children: [
             Icon(Icons.cloud_off_outlined, size: 40, color: scheme.outline),
             const SizedBox(height: AppSpacing.md),
-            Text('加载失败：$_error', textAlign: TextAlign.center),
+            Text(l10nOf(context)?.commonFailedLoad(_error.toString()) ?? '加载失败：$_error', textAlign: TextAlign.center),
             const SizedBox(height: AppSpacing.md),
-            FilledButton.tonal(onPressed: _load, child: const Text('重试')),
+            FilledButton.tonal(onPressed: _load, child: Text(l10nOf(context)?.commonRetry ?? '重试')),
           ],
         ),
       ),
@@ -193,7 +195,7 @@ class _RelationPageState extends ConsumerState<RelationPage>
               frameId: p?.headFrameId,
             ),
             title: RichTextView(_name(uin)),
-            subtitle: Text('迷你号 $uin'),
+            subtitle: Text(l10nOf(context)?.commonMiniID2(uin) ?? '迷你号 $uin'),
             trailing: const Icon(Icons.chevron_right),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => PlayerHomePage(targetUin: uin)),

@@ -15,6 +15,7 @@ import 'widgets/session_player_info_popup.dart';
 import 'dynamics_topic_page.dart' show DynamicsTopicPage;
 import '../core/services/image_disk_cache.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
 part 'dynamics_detail_state.dart';
 part 'dynamics_detail_post.dart';
 part 'dynamics_detail_comments.dart';
@@ -23,14 +24,14 @@ part 'dynamics_detail_comments.dart';
 const Key dynamicsPostMenuKey = Key('dynamics_post_menu');
 
 /// 动态管理菜单的 tooltip（同时是测试/无障碍定位锚点）。
-const String dynamicsPostMenuTooltip = '动态管理';
+String dynamicsPostMenuTooltip = '动态管理';
 
 /// 评论条目「更多操作」菜单的 tooltip（列表内有 N 条，故用 tooltip 而非 Key，
 /// 避免同层出现重复 Key）。
-const String dynamicsCommentMenuTooltip = '评论操作';
+String dynamicsCommentMenuTooltip = '评论操作';
 
 /// 回复条目「更多操作」菜单的 tooltip（同上，用 tooltip 定位）。
-const String dynamicsReplyMenuTooltip = '回复操作';
+String dynamicsReplyMenuTooltip = '回复操作';
 
 /// 动态详情页 —— 左侧动态全文，右侧评论区；窄屏上下堆叠。
 /// 点头像弹玩家卡片：由页面注入（带被点对象的资料 + 指针全局坐标）。

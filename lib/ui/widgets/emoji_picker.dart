@@ -40,6 +40,8 @@ import '../../state/providers.dart' show emojiStoreProvider;
 import '../theme/app_tokens.dart';
 import 'floating_panel.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 弹出表情面板（浮动，浮在 [anchor] 上方）。
 ///
 /// [onPick] 收到要插入输入框的表情代码；[onImfc] 收到要**立即发送**的互动表情
@@ -88,6 +90,14 @@ class _Page {
     this.isImfc = false,
   });
 
+  /// 页签文案。**只能在 build 里调用**：`_load` 由 initState 启动，
+  /// 那时还不能读 Localizations；内置页的文案因此延迟到渲染时解析。
+  String titleOf(BuildContext context) {
+    if (isBase) return l10nOf(context)?.emojiBasics ?? '基础';
+    if (isImfc) return l10nOf(context)?.emojiInteractive ?? '互动';
+    return title;
+  }
+
   /// 需要会员才能用（`GetType == Vip`）→ 底部栏挂「会员」角标。
   bool get requiresVip => pack?.getType == EmojiGetType.vip;
 }
@@ -132,8 +142,8 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
     if (!mounted) return;
     setState(() {
       _pages = [
-        const _Page(title: '基础', isBase: true),
-        if (widget.onImfc != null) const _Page(title: '互动', isImfc: true),
+        const _Page(title: '', isBase: true),
+        if (widget.onImfc != null) const _Page(title: '', isImfc: true),
         for (final v in packs)
           _Page(title: v.pack.displayTitle, pack: v.pack, pics: v.pics),
       ];
@@ -189,7 +199,7 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
     }
     final store = widget.store;
     final pack = page.pack!;
-    if (store == null) return const Center(child: Text('暂无可用的表情包'));
+    if (store == null) return Center(child: Text(l10nOf(context)?.emojiNoEmojiPacksAvailable ?? '暂无可用的表情包'));
     return _cellGrid(
       itemCount: page.pics.length,
       itemBuilder: (context, i) => _EmojiPicCell(
@@ -205,7 +215,7 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
     required int itemCount,
     required Widget Function(BuildContext, int) itemBuilder,
   }) {
-    if (itemCount == 0) return const Center(child: Text('暂无可用的表情包'));
+    if (itemCount == 0) return Center(child: Text(l10nOf(context)?.emojiNoEmojiPacksAvailable ?? '暂无可用的表情包'));
     return GridView.builder(
       padding: const EdgeInsets.fromLTRB(10, 10, 10, 6),
       gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
@@ -238,15 +248,15 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
         ),
         children: [
           _barButton(
-            tooltip: '添加表情包',
+            tooltip: l10nOf(context)?.emojiAddEmojiPack ?? '添加表情包',
             icon: Icons.add,
-            onTap: () => _hint('表情包商城暂未开放'),
+            onTap: () => _hint(l10nOf(context)?.emojiEmojiPackStoreIsnt ?? '表情包商城暂未开放'),
           ),
           for (var i = 0; i < pages.length; i++) _packTab(i, pages[i]),
           _barButton(
-            tooltip: '表情设置',
+            tooltip: l10nOf(context)?.emojiEmojiSettings ?? '表情设置',
             icon: Icons.settings,
-            onTap: () => _hint('表情包管理暂未开放'),
+            onTap: () => _hint(l10nOf(context)?.emojiEmojiPackManagementIsnt ?? '表情包管理暂未开放'),
           ),
         ],
       ),
@@ -259,7 +269,7 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       child: Tooltip(
-        message: page.title,
+        message: page.titleOf(context),
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: () => setState(() => _index = i),
@@ -297,8 +307,8 @@ class _EmojiPickerPanelState extends State<EmojiPickerPanel> {
                         color: const Color(0xFFFF9800),
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: const Text(
-                        '会员',
+                      child: Text(
+                        l10nOf(context)?.emojiMember ?? '会员',
                         style: TextStyle(fontSize: 9, color: Colors.white),
                       ),
                     ),

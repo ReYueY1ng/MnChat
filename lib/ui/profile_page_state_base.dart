@@ -181,9 +181,9 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
           .followPlayer(_target, follow: !_following);
       if (!mounted) return;
       setState(() => _following = !_following);
-      _toast(_following ? '已关注' : '已取消关注');
+      _toast(_following ? l10nOf(context)?.commonFollowed ?? '已关注' : l10nOf(context)?.profileUnfollowed ?? '已取消关注');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _relationBusy = false);
     }
@@ -194,18 +194,18 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text(_blacklisted ? '移出黑名单' : '加入黑名单'),
+        title: Text(_blacklisted ? l10nOf(context)?.blocklistRemove ?? '移出黑名单' : l10nOf(context)?.blocklistAdd ?? '加入黑名单'),
         content: Text(
-          _blacklisted ? '确定将 TA 移出黑名单吗？' : '拉黑后将无法看到 TA 的动态与消息，确定？',
+          _blacklisted ? l10nOf(context)?.profileRemoveThemBlocklist ?? '确定将 TA 移出黑名单吗？' : l10nOf(context)?.profileYouWontSeeTheir ?? '拉黑后将无法看到 TA 的动态与消息，确定？',
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -221,9 +221,9 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
       }
       if (!mounted) return;
       setState(() => _blacklisted = !_blacklisted);
-      _toast(_blacklisted ? '已加入黑名单' : '已移出黑名单');
+      _toast(_blacklisted ? l10nOf(context)?.blocklistAdded ?? '已加入黑名单' : l10nOf(context)?.blocklistRemoved ?? '已移出黑名单');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e');
     } finally {
       if (mounted) setState(() => _relationBusy = false);
     }
@@ -539,7 +539,7 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     if (layout.isEmpty) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(const SnackBar(content: Text('未取到主页布局')));
+      ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.profileCouldntLoadProfileLayout ?? '未取到主页布局')));
       return;
     }
 
@@ -559,7 +559,7 @@ mixin _ProfilePageStateBase on ConsumerState<ProfilePage> {
     if (!mounted || !saved) return;
     ScaffoldMessenger.of(
       context,
-    ).showSnackBar(const SnackBar(content: Text('布局已保存')));
+    ).showSnackBar(SnackBar(content: Text(l10nOf(context)?.profileLayoutSaved ?? '布局已保存')));
     await _loadHomeModules();
   }
 }

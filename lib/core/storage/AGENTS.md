@@ -3,19 +3,21 @@
 **Score: 10** — 4 files / 4,517 LOC (3,595 of them generated); the only Drift layer in the repo — a distinct persistence domain.
 
 ## OVERVIEW
-Drift (SQLite) database v9 + settings KV store + model-to-row mappers.
+Drift (SQLite) database **v11** + settings KV store + model-to-row mappers.
 
 ## WHERE TO LOOK
 | Task | File |
 |------|------|
-| Schema / migrations | app_database.dart (302) — `AppDatabase`, tables `ChatMessages`/`ChatSessions`/`Friends`/`SettingsTable`, full inline v1→v9 history |
+| Schema / migrations | app_database.dart — `AppDatabase`, tables `ChatMessages`/`ChatSessions`/`Friends`/`MessageMarks`/`SettingsTable`/`ChatOutbox`, inline v1→v11 history (v11 = dedupe index + outbox) |
 | Generated code | app_database.g.dart (3,595) — drift codegen output, committed; `part` of app_database.dart |
 | Record mappers | chat_mapper.dart (148) — `chatMessageFromRecord`, `friendDisplayName`, re-exports `sessionKeyOf` |
 | Settings KV | settings_store.dart (472) — `SettingsStore`, `SettingsKeys`, `SavedCredentials`, `SavedAccount` |
 
 ## CONVENTIONS
 - **Never hand-edit app_database.g.dart.** It is drift codegen output committed to the repo; regenerate with `fvm dart run build_runner build` and commit both `.dart` and `.g.dart` together.
-- `schemaVersion => 9`; DB name `kDbName = 'mnchat'`, opened via `driftDatabase(name:, native: DriftNativeOptions(databaseDirectory: getApplicationSupportDirectory))` — deliberately not the default Documents dir.
+- `schemaVersion => 11`; DB name `kDbName = 'mnchat'`, opened via `driftDatabase(name:, native: DriftNativeOptions(databaseDirectory: getApplicationSupportDirectory))` — deliberately not the default Documents dir.
+- Message paging API: `latestMessages(owner,key,limit)` / `messagesBefore(beforeTime,beforeId)` (keyset `(time,id)`, same-second safe) / `messagesInRange` / `newestMessages` (startup restore takes the NEWEST rows). Do not reintroduce ascending-with-limit restore.
+- Writes are idempotent: unique index `idx_chat_messages_dedupe` + `insertMessageIdempotent`; `mergeMessages` diffs instead of delete-all+insert-all.
 - Table classes live in app_database.dart with `@DataClassName` (`ChatMessageRecord`, `ChatSessionRecord`, `FriendRecord`, `SettingRecord`); the generated accessors (`chatMessages`, `chatSessions`, `friends`, `settings`) live in the `.g.dart`.
 - `sessionKeyOf(type, id)` = `'${type.name}_$id'`, defined once in `../models/session_key.dart` and re-exported from chat_mapper.dart — import it, never re-copy the format string.
 - Read-path sanitization over migration: `friendDisplayName` fixes stored garbage on read — "不修库、不加迁移".

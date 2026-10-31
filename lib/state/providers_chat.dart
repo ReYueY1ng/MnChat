@@ -69,3 +69,53 @@ class SessionSortModeNotifier extends Notifier<SessionSortMode> {
     await ref.read(settingsProvider).setString(SettingsKeys.sortMode, mode.key);
   }
 }
+
+/// 发件箱：失败消息的持久化重试队列。
+///
+/// 发送失败时由聊天页入队；连接恢复（[ChatServiceState.connected]）自动冲刷，
+/// 退避由 [OutboxService] 自己调度。
+final outboxServiceProvider = Provider<OutboxService>((ref) {
+  final chat = ref.read(chatServiceProvider);
+  final service = OutboxService(
+    // 测试环境没有 databaseProvider：整体降级为无队列，不抛。
+    getDb: () {
+      try {
+        return ref.read(databaseProvider);
+      } catch (_) {
+        return null;
+      }
+    },
+    getMyUin: () => ref.read(myUinProvider),
+    send: (m) async {
+      final resp = m.type == ChatSessionType.friend
+          ? await chat.sendFriendMessage(m.sessionId, m.text)
+          : await chat.sendGroupMessage(m.sessionId, m.text);
+      if (!responseOk(resp)) return false;
+      // 成功：把本地那条失败回显标回成功（秒级时间 + 正文定位）。
+      chat.confirmOutboxMessage(
+        type: m.type,
+        id: m.sessionId,
+        text: m.text,
+        localTime: m.createdAt,
+      );
+      return true;
+    },
+  );
+  final sub = chat.stateStream.listen((state) {
+    if (state == ChatServiceState.connected) {
+      unawaited(service.flushDue());
+    }
+  });
+  ref.onDispose(() {
+    sub.cancel();
+    service.dispose();
+  });
+  return service;
+});
+
+/// 发件箱快照（按会话计数）：UI 用它显示「N 条待重发」。
+final outboxSnapshotProvider = StreamProvider<OutboxSnapshot>((ref) async* {
+  final service = ref.watch(outboxServiceProvider);
+  yield await service.snapshot();
+  yield* service.changes;
+});

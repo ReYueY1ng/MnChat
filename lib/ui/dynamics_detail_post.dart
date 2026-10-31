@@ -29,7 +29,7 @@ class _PostPanel extends StatelessWidget {
         : '${post.uin}';
     final avatar = post.avatar;
     final meta = [
-      if (post.createTime > 0) _relative(post.createTime),
+      if (post.createTime > 0) _relative(context, post.createTime),
       'IP ${post.location.isNotEmpty ? post.location : post.city}',
     ].join('  ');
     return SingleChildScrollView(
@@ -289,12 +289,12 @@ class _VoteCardState extends State<_VoteCard> {
         _picked.clear();
         await _load(); // 刷新票数
       } else {
-        _showTip(ack.message.isNotEmpty ? ack.message : '投票失败');
+        _showTip(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailVoteFailed ?? '投票失败');
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);
-      _showTip('投票失败: $e');
+      _showTip(l10nOf(context)?.dynamicsDetailVoteFailed2(e) ?? '投票失败: $e');
     }
   }
 
@@ -328,7 +328,7 @@ class _VoteCardState extends State<_VoteCard> {
               const SizedBox(width: AppSpacing.sm),
               Expanded(
                 child: Text(
-                  info == null || info.title.isEmpty ? '投票' : info.title,
+                  info == null || info.title.isEmpty ? l10nOf(context)?.dynamicsDetailVote ?? '投票' : info.title,
                   style: TextStyle(
                     fontWeight: FontWeight.w600,
                     color: theme.colorScheme.onSecondaryContainer,
@@ -351,7 +351,7 @@ class _VoteCardState extends State<_VoteCard> {
           else if (widget.client == null) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '登录后可参与投票',
+              l10nOf(context)?.dynamicsDetailSignVote ?? '登录后可参与投票',
               style: theme.textTheme.labelMedium?.copyWith(
                 color: theme.colorScheme.onSecondaryContainer,
               ),
@@ -362,19 +362,19 @@ class _VoteCardState extends State<_VoteCard> {
               children: [
                 Expanded(
                   child: Text(
-                    '投票信息加载失败',
+                    l10nOf(context)?.dynamicsDetailFailedLoadVoteInfo ?? '投票信息加载失败',
                     style: theme.textTheme.labelMedium?.copyWith(
                       color: theme.colorScheme.onSecondaryContainer,
                     ),
                   ),
                 ),
-                TextButton(onPressed: _load, child: const Text('重试')),
+                TextButton(onPressed: _load, child: Text(l10nOf(context)?.commonRetry ?? '重试')),
               ],
             ),
           ] else ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
-              _multi ? '可多选，选好后提交' : '单选，点选后提交',
+              _multi ? l10nOf(context)?.dynamicsDetailMultipleChoiceSubmitAfter ?? '可多选，选好后提交' : l10nOf(context)?.dynamicsDetailSingleChoiceTapSubmit ?? '单选，点选后提交',
               style: theme.textTheme.labelSmall?.copyWith(
                 color: theme.colorScheme.onSecondaryContainer,
               ),
@@ -414,12 +414,12 @@ class _VoteCardState extends State<_VoteCard> {
                         const SizedBox(width: AppSpacing.sm),
                         Expanded(
                           child: Text(
-                            o.text.isEmpty ? '选项 ${o.index}' : o.text,
+                            o.text.isEmpty ? l10nOf(context)?.dynamicsDetailOption(o.index) ?? '选项 ${o.index}' : o.text,
                           ),
                         ),
                         if (o.count > 0)
                           Text(
-                            '${o.count}票',
+                            l10nOf(context)?.dynamicsDetailVotes(o.count) ?? '${o.count}票',
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: theme.colorScheme.outline,
                             ),
@@ -435,7 +435,7 @@ class _VoteCardState extends State<_VoteCard> {
               child: FilledButton(
                 onPressed:
                     (_picked.isEmpty || _submitting) ? null : _submit,
-                child: Text(_submitting ? '提交中…' : '投票'),
+                child: Text(_submitting ? l10nOf(context)?.dynamicsDetailSubmitting ?? '提交中…' : l10nOf(context)?.dynamicsDetailVote ?? '投票'),
               ),
             ),
           ],
@@ -466,7 +466,7 @@ class _LotteryInfo extends StatelessWidget {
           const SizedBox(width: AppSpacing.sm),
           Expanded(
             child: Text(
-              '抽奖详情（进行中）',
+              l10nOf(context)?.dynamicsDetailGiveawayDetailsOngoing ?? '抽奖详情（进行中）',
               style: TextStyle(color: theme.colorScheme.onTertiaryContainer),
             ),
           ),
@@ -476,15 +476,15 @@ class _LotteryInfo extends StatelessWidget {
   }
 }
 
-String _relative(int ts) {
+String _relative(BuildContext context, int ts) {
   if (ts <= 0) return '';
   final diff = DateTime.now().difference(
     DateTime.fromMillisecondsSinceEpoch(ts * 1000),
   );
-  if (diff.inMinutes < 1) return '刚刚';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}分钟前';
-  if (diff.inHours < 24) return '${diff.inHours}小时前';
-  if (diff.inDays < 30) return '${diff.inDays}天前';
-  if (diff.inDays < 365) return '${(diff.inDays / 30).floor()}个月前';
-  return '${(diff.inDays / 365).floor()}年前';
+  if (diff.inMinutes < 1) return l10nOf(context)?.dynamicsDetailJustNow ?? '刚刚';
+  if (diff.inMinutes < 60) return l10nOf(context)?.dynamicsDetailMinAgo(diff.inMinutes) ?? '${diff.inMinutes}分钟前';
+  if (diff.inHours < 24) return l10nOf(context)?.dynamicsDetailHrAgo(diff.inHours) ?? '${diff.inHours}小时前';
+  if (diff.inDays < 30) return l10nOf(context)?.dynamicsDetailDAgo(diff.inDays) ?? '${diff.inDays}天前';
+  if (diff.inDays < 365) return l10nOf(context)?.dynamicsDetailMoAgo((diff.inDays / 30).floor()) ?? '${(diff.inDays / 30).floor()}个月前';
+  return l10nOf(context)?.dynamicsDetailYrAgo((diff.inDays / 365).floor()) ?? '${(diff.inDays / 365).floor()}年前';
 }

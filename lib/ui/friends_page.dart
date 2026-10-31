@@ -17,6 +17,7 @@ import 'player_home_page.dart';
 import 'quit_group_page.dart';
 import 'relation_page.dart';
 import 'theme/app_tokens.dart';
+import 'widgets/app_l10n.dart' show l10nOf;
 import 'widgets/avatar_view.dart';
 import 'widgets/friend_filter_dialog.dart';
 import 'widgets/friend_tag_dialog.dart';

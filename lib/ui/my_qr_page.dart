@@ -11,6 +11,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class MyQrPage extends ConsumerWidget {
   const MyQrPage({super.key});
 
@@ -19,14 +21,14 @@ class MyQrPage extends ConsumerWidget {
     final theme = Theme.of(context);
     final uin = ref.watch(myUinProvider);
     return Scaffold(
-      appBar: AppBar(title: const Text('我的二维码')),
+      appBar: AppBar(title: Text(l10nOf(context)?.friendsMyQRCode ?? '我的二维码')),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(Icons.qr_code_2, size: 160, color: theme.colorScheme.primary),
             const SizedBox(height: AppSpacing.xl),
-            Text('我的迷你号', style: theme.textTheme.titleMedium),
+            Text(l10nOf(context)?.qrMyMiniID ?? '我的迷你号', style: theme.textTheme.titleMedium),
             const SizedBox(height: AppSpacing.sm),
             SelectableText(
               '$uin',
@@ -38,17 +40,17 @@ class MyQrPage extends ConsumerWidget {
             const SizedBox(height: AppSpacing.xl),
             FilledButton.icon(
               icon: const Icon(Icons.copy),
-              label: const Text('复制迷你号'),
+              label: Text(l10nOf(context)?.qrCopyMiniID ?? '复制迷你号'),
               onPressed: () {
                 Clipboard.setData(ClipboardData(text: '$uin'));
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('已复制')),
+                  SnackBar(content: Text(l10nOf(context)?.toastCopied ?? '已复制')),
                 );
               },
             ),
             const SizedBox(height: AppSpacing.md),
             Text(
-              '让对方在「好友 → 按迷你号添加」中输入此号码',
+              l10nOf(context)?.qrAskThemEnterNumber ?? '让对方在「好友 → 按迷你号添加」中输入此号码',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.outline,
               ),

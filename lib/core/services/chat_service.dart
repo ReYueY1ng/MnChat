@@ -6,7 +6,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:math' show Random;
-
 import 'package:flutter/foundation.dart' show visibleForTesting;
 
 import '../models/account_inventory.dart' show AccountInventory;
@@ -20,7 +19,10 @@ import 'auth.dart';
 import 'chat_image.dart' show buildImageShareExtend;
 import 'chat/command_client.dart';
 import 'chat/connection_manager.dart';
+import 'chat/friend_admin_ops.dart';
+import 'chat/group_admin_ops.dart';
 import 'chat/group_name_cache.dart';
+import 'chat/history_pager.dart';
 import 'chat/message_store.dart';
 import 'chat/message_upserter.dart';
 import 'chat/offline_cache.dart';
@@ -40,6 +42,7 @@ import 'profile.dart';
 import 'request_errors.dart' show responseOk;
 import 'social_sign.dart';
 import '../utils/log.dart';
+
 
 /// 本模块日志标签。
 const String _logTag = 'ChatService';
@@ -109,6 +112,12 @@ class ChatService {
   /// 纯 RPC 命令客户端（好友/群/conn 的网络调用剥离至此）。
   final ChatCommandClient _commands = ChatCommandClient();
 
+  /// 群管理协议层（成员/申请/群设置）。
+  late final GroupAdminOps _groupAdmin;
+
+  /// 好友申请/黑名单/关注协议层。
+  late final FriendAdminOps _friendAdmin;
+
   // ── 连接 ───────────────────────────────────────────────────────────────
   /// ChatPush 长连接生命周期管理器（连接/重连/保活）。
   late final ChatConnectionManager _connection;
@@ -118,11 +127,24 @@ class ChatService {
   final _eventCtrl = StreamController<ChatEvent>.broadcast();
   final _sessionCtrl = StreamController<SessionSnapshot>.broadcast();
 
+  /// 本地历史分页专用的事件流：只有加载更早的消息时才会发。
+  ///
+  /// 不复用 [eventStream]：后者会触发「后台弹通知」与未读统计，而翻阅历史
+  /// 不应该弹任何通知。
+  final _historyCtrl = StreamController<ChatEvent>.broadcast();
+
   // ── 会话缓存 ───────────────────────────────────────────────────────────
   final Map<int, ChatSession> _friendSessions = {};
   final Map<int, ChatSession> _groupSessions = {};
   final List<Contact> _contacts = [];
   final Map<String, List<ChatMessage>> _messagesCache = {};
+
+  /// 历史分页器（游标/页缓存/按天窗口）。
+  late final HistoryPager _history;
+
+  /// 历史分页每页条数。
+  static const int kHistoryPageSize = HistoryPager.pageSize;
+
   final Map<int, GroupInfo> _groupInfos = {};
   // 群成员资料缓存：groupId → (uin → PlayerProfile)。
   final Map<int, Map<int, PlayerProfile>> _groupMemberProfiles = {};
@@ -154,9 +176,16 @@ class ChatService {
   /// 可选本地持久化（drift）。null 时纯内存运行（测试/无存储环境）。
   final AppDatabase? _db;
 
+  /// 当前时间源（可注入）。
+  ///
+  /// 消息时间只精确到秒：测试以前靠 `Future.delayed(1100ms)` 制造两个不同的
+  /// 秒数，既慢又不稳定。注入 [TestClock] 后直接推进时钟即可。
+  final DateTime Function() _now;
+
   // 私有字段无法跨库用 this._db 初始化形参，故保留显式赋值
-  ChatService({AppDatabase? db}) : this._(
+  ChatService({AppDatabase? db, DateTime Function()? now}) : this._(
         db,
+        now: now,
         loginClient: null,
         chatPushClient: null,
       );
@@ -176,8 +205,10 @@ class ChatService {
     SocialSignClient? socialSignClient,
     PlayerHomeClient? playerHomeClient,
     Future<(String, String)> Function(MiniAuth auth)? heartbeatOverride,
+    DateTime Function()? now,
   }) : this._(
           db,
+          now: now,
           loginClient: loginClient,
           chatPushClient: chatPushClient,
           friendClient: friendClient,
@@ -190,6 +221,7 @@ class ChatService {
 
   ChatService._(
     AppDatabase? db, {
+    DateTime Function()? now,
     LoginClient? loginClient,
     ChatPushClient? chatPushClient,
     FriendClient? friendClient,
@@ -198,7 +230,19 @@ class ChatService {
     SocialSignClient? socialSignClient,
     PlayerHomeClient? playerHomeClient,
     this._heartbeatOverride,
-  }) : _db = db {
+  }) : _db = db,
+       _now = now ?? DateTime.now {
+    _groupAdmin = GroupAdminOps(
+      getGroup: () => _group,
+      getCommands: () => _commands,
+      refreshSessions: loadSessions,
+    );
+    _friendAdmin = FriendAdminOps(
+      getCommands: () => _commands,
+      getFriend: () => _friend,
+      removeRequest: _removeFriendRequest,
+      refreshSessions: loadSessions,
+    );
     _login = loginClient ?? LoginClient();
     _chatpush = chatPushClient ?? ChatPushClient();
     _friend = friendClient;
@@ -249,9 +293,20 @@ class ChatService {
       groupSessions: _groupSessions,
       getMyUin: () => myUin,
       isViewing: _isViewing,
+      isHistoryExpanded: (key) => _history.expanded.contains(key),
       emitEvent: (type, id, m) => _eventCtrl.add(ChatEvent(type, id, m)),
       store: _store,
       emitSessionSnapshot: _emitSessionSnapshot,
+    );
+    _history = HistoryPager(
+      getDb: () => _db,
+      getMyUin: () => myUin,
+      messagesCache: _messagesCache,
+      onHistoryLoaded: (type, id) {
+        final list = _messagesCache[sessionKeyOf(type, id)];
+        if (list == null || list.isEmpty || _historyCtrl.isClosed) return;
+        _historyCtrl.add(ChatEvent(type, id, list.first));
+      },
     );
     _offlineCache = OfflineCache(
       getDb: () => _db,
@@ -260,6 +315,7 @@ class ChatService {
       groupSessions: _groupSessions,
       contacts: _contacts,
       messagesCache: _messagesCache,
+      historyCursors: _history.cursors,
       loadGroupNames: () => _groupNames.load(),
       emitSessionSnapshot: _emitSessionSnapshot,
     );
@@ -307,6 +363,10 @@ class ChatService {
 
   Stream<ChatServiceState> get stateStream => _stateCtrl.stream;
   Stream<ChatEvent> get eventStream => _eventCtrl.stream;
+
+  /// 本地加载了更早的历史（[loadOlderHistory]）时发的事件，用于让已打开的
+  /// 聊天窗口把新插入的前缀上屏。不参与通知/未读。
+  Stream<ChatEvent> get historyStream => _historyCtrl.stream;
   /// 会话快照流：**订阅时先回放当前状态**，再转发后续事件。
   ///
   /// [_sessionCtrl] 是 broadcast 流、没有回放缓冲；而 UI 侧 `MainShell` 要等
@@ -382,6 +442,48 @@ class ChatService {
           _messagesCache[sessionKeyOf(type, id)] ?? const [],
         ),
       );
+
+  // ── 历史分页（委托 [HistoryPager]，公开 API 保持不变）───────────────
+
+  /// 是否还能向更早翻页。
+  bool hasOlderHistory(ChatSessionType type, int id) =>
+      _history.hasOlder(sessionKeyOf(type, id));
+
+  /// 进会话时准备分页状态（内存为空时加载最新一页）。
+  Future<void> prepareHistory(
+    ChatSessionType type,
+    int id, {
+    int limit = HistoryPager.restorePageSize,
+  }) => _history.prepare(type, id, limit: limit);
+
+  /// 加载更早一页，返回新增条数。
+  Future<int> loadOlderHistory(
+    ChatSessionType type,
+    int id, {
+    int limit = kHistoryPageSize,
+  }) => _history.loadOlder(type, id, limit: limit);
+
+  /// 本机删除了某会话的全部聊天记录：清掉内存镜像与游标。
+  void forgetHistory(ChatSessionType type, int id) =>
+      _history.forget(type, id);
+
+  /// 会话关闭时收拢历史。
+  void collapseHistory(ChatSessionType type, int id) {
+    final cap = type == ChatSessionType.friend
+        ? MessageUpserter.friendMessageCap
+        : MessageUpserter.groupMessageCap;
+    _history.collapse(type, id, cap: cap);
+  }
+
+  /// 某一天的历史窗口。
+  Future<List<ChatMessage>> historyForDay(
+    ChatSessionType type,
+    int id,
+    DateTime day,
+  ) => _history.forDay(type, id, day);
+
+  /// 等待本地写队列落盘（测试、登出前使用）。
+  Future<void> flushWrites() => _store.flush();
 
   // ── 认证流程 ───────────────────────────────────────────────────────────
 
@@ -665,22 +767,15 @@ class ChatService {
 
   /// 发起好友申请（按 uin 搜索添加）。
   Future<Map<String, Object?>> applyFriend(int desUin) =>
-      _commands.applyFriend(desUin);
+      _friendAdmin.applyFriend(desUin);
 
   /// 通过好友申请。
-  Future<Map<String, Object?>> acceptFriendRequest(int uin) async {
-    final resp = await _commands.acceptFriendRequest(uin);
-    _removeFriendRequest(uin, FriendRequestStatus.accepted);
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> acceptFriendRequest(int uin) =>
+      _friendAdmin.acceptFriendRequest(uin);
 
   /// 拒绝好友申请。
-  Future<Map<String, Object?>> rejectFriendRequest(int uin) async {
-    final resp = await _commands.rejectFriendRequest(uin);
-    _removeFriendRequest(uin, FriendRequestStatus.rejected);
-    return resp;
-  }
+  Future<Map<String, Object?>> rejectFriendRequest(int uin) =>
+      _friendAdmin.rejectFriendRequest(uin);
 
   /// 发送群聊消息。
   Future<Map<String, Object?>> sendGroupMessage(int groupId, String msg) =>
@@ -689,209 +784,116 @@ class ChatService {
   // ── 黑名单（对齐 friendservice.lua handle_black / clear_black）─────────
 
   /// 加入黑名单（op_type=1）。成功后本地标记 relation 黑名单位并刷新列表。
-  Future<Map<String, Object?>> addBlacklist(int desUin) async {
-    final resp = await _commands.addBlacklist(desUin);
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> addBlacklist(int desUin) =>
+      _friendAdmin.addBlacklist(desUin);
 
   /// 移出黑名单（op_type=0）。
-  Future<Map<String, Object?>> removeBlacklist(int desUin) async {
-    final resp = await _commands.removeBlacklist(desUin);
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> removeBlacklist(int desUin) =>
+      _friendAdmin.removeBlacklist(desUin);
 
   /// 清空黑名单。
-  Future<Map<String, Object?>> clearBlacklist() async {
-    final resp = await _commands.clearBlacklist();
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> clearBlacklist() =>
+      _friendAdmin.clearBlacklist();
 
   /// 关注/取关玩家（cmd=attention_friend）。
   Future<Map<String, Object?>> followPlayer(
     int desUin, {
     required bool follow,
-  }) async {
-    final friend = _friend;
-    if (friend == null) throw StateError('not logged in');
-    final resp = await friend.attentionFriend(desUin, follow: follow);
-    await loadSessions(); // 关系变化后刷新（关注列表会出现在好友里）
-    return resp;
-  }
+  }) => _friendAdmin.followPlayer(desUin, follow: follow);
 
-  // ── 群管理 ───────────────────────────────────────────────────────────
+  // ── 群管理（委托 [GroupAdminOps]，公开 API 不变）────────────────────────
 
-  /// 查询群详情（刷新 [GroupInfo] 并返回 group_id）。
   Future<Map<String, Object?>> refreshGroupInfo(int groupId) =>
-      _commands.refreshGroupInfo(groupId);
+      _groupAdmin.refreshGroupInfo(groupId);
 
-  /// 退出群。
-  Future<Map<String, Object?>> quitGroup(int groupId) async {
-    final resp = await _commands.quitGroup(groupId);
-    await loadSessions(); // 退出后刷新列表
-    return resp;
-  }
+  Future<Map<String, Object?>> quitGroup(int groupId) =>
+      _groupAdmin.quitGroup(groupId);
 
-  /// 解散群（仅群主）。
-  Future<Map<String, Object?>> dissolveGroup(int groupId) async {
-    final resp = await _commands.dissolveGroup(groupId);
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> dissolveGroup(int groupId) =>
+      _groupAdmin.dissolveGroup(groupId);
 
-  /// 转让群主（仅群主）。
-  Future<Map<String, Object?>> transferGroup(int groupId, int newLord) async {
-    final resp = await _commands.transferGroup(groupId, newLord);
-    await loadSessions();
-    return resp;
-  }
+  Future<Map<String, Object?>> transferGroup(int groupId, int newLord) =>
+      _groupAdmin.transferGroup(groupId, newLord);
 
-  /// 群置顶/取消置顶（服务端，act=set_group_top）。
-  /// 与「会话置顶」（本地 kv）不同：这是账号级的群置顶。
   Future<Map<String, Object?>> setGroupTop(
     int groupId, {
     required bool top,
-  }) async {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.setGroupTop(groupId, top: top);
-  }
+  }) => _groupAdmin.setGroupTop(groupId, top: top);
 
-  /// 禁言/取消禁言群成员（act=set_silent）。
   Future<Map<String, Object?>> setGroupMemberSilent(
     int groupId, {
     required int opUin,
     required bool silent,
-  }) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.setSilent(groupId, opUin: opUin, silent: silent);
-  }
+  }) => _groupAdmin.setGroupMemberSilent(
+    groupId,
+    opUin: opUin,
+    silent: silent,
+  );
 
-  /// 屏蔽/取消屏蔽群成员消息（act=set_ban）。
   Future<Map<String, Object?>> setGroupMemberBanned(
     int groupId, {
     required int opUin,
     required bool ban,
-  }) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.setBan(groupId, opUin: opUin, ban: ban);
-  }
+  }) => _groupAdmin.setGroupMemberBanned(groupId, opUin: opUin, ban: ban);
 
-  /// 举报群成员（act=report_group_user）。
   Future<Map<String, Object?>> reportGroupMember(
     int groupId, {
     required int opUin,
-  }) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.reportGroupUser(groupId, opUin: opUin);
-  }
+  }) => _groupAdmin.reportGroupMember(groupId, opUin: opUin);
 
-  /// 一键拒绝全部入群申请（act=reject_group_apply_all）。
-  Future<Map<String, Object?>> rejectAllGroupApplies(int groupId) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.rejectGroupApplyAll(groupId);
-  }
+  Future<Map<String, Object?>> rejectAllGroupApplies(int groupId) =>
+      _groupAdmin.rejectAllGroupApplies(groupId);
 
-  /// 踢出群成员（act=quit_group + op_uin，群主专用）。
   Future<Map<String, Object?>> kickGroupMembers(
     int groupId, {
     required List<int> uins,
     int groupCreator = 0,
     String groupName = '',
-  }) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.kickMembers(
-      groupId: groupId,
-      uins: uins,
-      groupCreator: groupCreator,
-      groupName: groupName,
-    );
-  }
+  }) => _groupAdmin.kickGroupMembers(
+    groupId,
+    uins: uins,
+    groupCreator: groupCreator,
+    groupName: groupName,
+  );
 
-  /// 群消息免打扰（服务端，act=set_slient_group）。
   Future<Map<String, Object?>> setGroupIgnore(
     int groupId, {
     required bool ignore,
-  }) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.setGroupIgnore(groupId, ignore: ignore);
-  }
+  }) => _groupAdmin.setGroupIgnore(groupId, ignore: ignore);
 
-  /// 修改群名 / 群头像（act=update_group）。成功后刷新群详情。
   Future<Map<String, Object?>> updateGroupInfo(
     int groupId, {
     required String name,
     required int iconId,
     required int iconType,
-  }) async {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    final resp = await group.updateGroupInfo(
-      groupId: groupId,
-      groupName: name,
-      iconId: iconId,
-      iconType: iconType,
-    );
-    await refreshGroupInfo(groupId);
-    return resp;
-  }
+  }) => _groupAdmin.updateGroupInfo(
+    groupId,
+    name: name,
+    iconId: iconId,
+    iconType: iconType,
+  );
 
-  /// 待处理的入群申请列表（act=query_user_groups_apply_list）。
-  Future<Map<String, Object?>> groupApplyList() {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.queryGroupApplyList();
-  }
+  Future<Map<String, Object?>> groupApplyList() => _groupAdmin.groupApplyList();
 
-  /// 同意入群申请（act=agree_group_apply）。
-  Future<Map<String, Object?>> agreeGroupApply(int groupId) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.agreeGroupApply(groupId);
-  }
+  Future<Map<String, Object?>> agreeGroupApply(int groupId) =>
+      _groupAdmin.agreeGroupApply(groupId);
 
-  /// 拒绝单个入群申请（act=reject_group_apply）。
-  Future<Map<String, Object?>> rejectGroupApply(int groupId) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.rejectGroupApply(groupId);
-  }
+  Future<Map<String, Object?>> rejectGroupApply(int groupId) =>
+      _groupAdmin.rejectGroupApply(groupId);
 
-  /// 退群 / 被移出记录（act=query_user_groups_quit_list）。
-  Future<Map<String, Object?>> quitGroupRecords() {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.queryUserGroupsQuitList();
-  }
+  Future<Map<String, Object?>> quitGroupRecords() =>
+      _groupAdmin.quitGroupRecords();
 
-  /// 删除一条退群记录（act=del_group_quit_list）。
-  Future<Map<String, Object?>> delQuitGroupRecord(int groupId) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.delGroupQuitList(groupId);
-  }
+  Future<Map<String, Object?>> delQuitGroupRecord(int groupId) =>
+      _groupAdmin.delQuitGroupRecord(groupId);
 
-  /// 是否允许他人邀请我入群（act=update_user_groups, join）。
-  Future<Map<String, Object?>> setAllowInvitedToGroup({required bool allow}) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.updateUserGroupsJoin(allow: allow);
-  }
+  Future<Map<String, Object?>> setAllowInvitedToGroup({
+    required bool allow,
+  }) => _groupAdmin.setAllowInvitedToGroup(allow: allow);
 
-  /// 是否允许自动加入被邀请的群（act=update_user_groups, auto_join）。
-  Future<Map<String, Object?>> setAllowAutoJoinGroup({required bool allow}) {
-    final group = _group;
-    if (group == null) throw StateError('not logged in');
-    return group.updateUserGroupsAutoJoin(allow: allow);
-  }
+  Future<Map<String, Object?>> setAllowAutoJoinGroup({
+    required bool allow,
+  }) => _groupAdmin.setAllowAutoJoinGroup(allow: allow);
 
   // ── 好友设置 / 社交（服务端同步）────────────────────────────────────────
 
@@ -948,7 +950,7 @@ class ChatService {
       final m = ChatMessage(
         uin: myUin,
         text: '$me 拍了拍你',
-        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        time: _now().millisecondsSinceEpoch ~/ 1000,
         isSuccess: true,
       );
       _upserter.upsertFriend(desUin, m);
@@ -978,7 +980,7 @@ class ChatService {
       ChatMessage(
         uin: myUin,
         text: text,
-        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        time: _now().millisecondsSinceEpoch ~/ 1000,
         isSuccess: true,
         interCode: interCode,
         isLive: true,
@@ -1064,7 +1066,7 @@ class ChatService {
       ChatMessage(
         uin: myUin,
         text: text,
-        time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+        time: _now().millisecondsSinceEpoch ~/ 1000,
         isSuccess: true,
         extendData: extend,
         type: ChatMsgType.custom,
@@ -1328,11 +1330,10 @@ class ChatService {
     String text, {
     bool isSuccess = true,
     String? extendData,
-  }) {
-    final m = ChatMessage(
+  }) {    final m = ChatMessage(
       uin: myUin,
       text: text,
-      time: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      time: _now().millisecondsSinceEpoch ~/ 1000,
       // 发送失败时以 isSuccess=false 回显（气泡上带错误标记，可长按重发）；
       // 库里也存 is_success=0，重启后仍能看出这条没发出去。
       isSuccess: isSuccess,
@@ -1344,6 +1345,16 @@ class ChatService {
     } else {
       _upserter.upsertGroup(sessionId, m);
     }
+  }
+
+  /// 发件箱重试成功：把 (本地时间, 正文) 对应的失败回显标回成功。
+  void confirmOutboxMessage({
+    required ChatSessionType type,
+    required int id,
+    required String text,
+    required int localTime,
+  }) {
+    _upserter.markSent(type, id, time: localTime, text: text);
   }
 
   void _emitSessionSnapshot() {
@@ -1393,7 +1404,7 @@ class ChatService {
     final hadUnread = existing.unreadCount != 0;
     sessionsMap[id] = existing.copyWith(
       unreadCount: 0,
-      lastReadTime: DateTime.now().millisecondsSinceEpoch ~/ 1000,
+      lastReadTime: _now().millisecondsSinceEpoch ~/ 1000,
     );
     _store.persistSession(type, id);
     // 只在红点真的消掉时广播：进/出会话各调一次、回前台还会补一次，而会话快照
@@ -1494,6 +1505,8 @@ class ChatService {
     _groupSessions.clear();
     _contacts.clear();
     _messagesCache.clear();
+    _history.cursors.clear();
+    _history.expanded.clear();
     _groupInfos.clear();
     _dispatcher.clear();
     _sessionsCache = null;
@@ -1508,6 +1521,7 @@ class ChatService {
     await reset();
     await _stateCtrl.close();
     await _eventCtrl.close();
+    await _historyCtrl.close();
     await _sessionCtrl.close();
     await _dispatcher.dispose();
   }

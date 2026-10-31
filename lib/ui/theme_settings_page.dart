@@ -5,6 +5,8 @@ import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 import 'widgets/settings_tiles.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 主题显示设置页：集中调整主题模式、强调色与聊天字号。
 ///
 /// 顶部预览卡片会跟随当前强调色、明暗模式与聊天字号即时刷新：
@@ -41,7 +43,7 @@ class ThemeSettingsPage extends ConsumerWidget {
     );
 
     return Scaffold(
-      appBar: AppBar(title: const Text('主题显示设置')),
+      appBar: AppBar(title: Text(l10nOf(context)?.settingsGeneralThemeDisplaySettings ?? '主题显示设置')),
       body: Center(
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: AppSizes.narrowContent),
@@ -83,7 +85,7 @@ class ThemeSettingsPage extends ConsumerWidget {
               children: [
                 Icon(Icons.preview_outlined, color: scheme.primary),
                 const SizedBox(width: AppSpacing.md),
-                Text('实时预览', style: theme.textTheme.titleSmall),
+                Text(l10nOf(context)?.themeSettingsLivePreview ?? '实时预览', style: theme.textTheme.titleSmall),
               ],
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -92,7 +94,7 @@ class ThemeSettingsPage extends ConsumerWidget {
               child: _bubble(
                 scheme.surfaceContainerHighest,
                 scheme.onSurface,
-                '你好，这是对方的示例消息。',
+                l10nOf(context)?.themeSettingsHiSampleMessageOther ?? '你好，这是对方的示例消息。',
                 fontScale,
               ),
             ),
@@ -102,7 +104,7 @@ class ThemeSettingsPage extends ConsumerWidget {
               child: _bubble(
                 scheme.primary,
                 scheme.onPrimary,
-                '收到！这是我的回复。',
+                l10nOf(context)?.themeSettingsGotReply ?? '收到！这是我的回复。',
                 fontScale,
               ),
             ),
@@ -149,25 +151,25 @@ class ThemeSettingsPage extends ConsumerWidget {
                   color: theme.colorScheme.primary,
                 ),
                 const SizedBox(width: AppSpacing.md),
-                Text('主题模式', style: theme.textTheme.titleSmall),
+                Text(l10nOf(context)?.themeSettingsThemeMode ?? '主题模式', style: theme.textTheme.titleSmall),
               ],
             ),
             const SizedBox(height: AppSpacing.md),
             SizedBox(
               width: double.infinity,
               child: SegmentedButton<AppThemeMode>(
-                segments: const [
+                segments: [
                   ButtonSegment(
                     value: AppThemeMode.system,
-                    label: Text('跟随系统'),
+                    label: Text(l10nOf(context)?.settingsFollowSystem ?? '跟随系统'),
                   ),
                   ButtonSegment(
                     value: AppThemeMode.light,
-                    label: Text('浅色'),
+                    label: Text(l10nOf(context)?.settingsLight ?? '浅色'),
                   ),
                   ButtonSegment(
                     value: AppThemeMode.dark,
-                    label: Text('深色'),
+                    label: Text(l10nOf(context)?.settingsDark ?? '深色'),
                   ),
                 ],
                 selected: {mode},
@@ -195,7 +197,7 @@ class ThemeSettingsPage extends ConsumerWidget {
               children: [
                 Icon(Icons.palette_outlined, color: theme.colorScheme.primary),
                 const SizedBox(width: AppSpacing.md),
-                Text('强调色', style: theme.textTheme.titleSmall),
+                Text(l10nOf(context)?.themeSettingsAccentColor ?? '强调色', style: theme.textTheme.titleSmall),
               ],
             ),
             const SizedBox(height: AppSpacing.md),
@@ -265,10 +267,10 @@ class ThemeSettingsPage extends ConsumerWidget {
       children: [
         SettingsSwitchTile(
           icon: Icons.contrast,
-          title: '纯黑模式（AMOLED）',
+          title: l10nOf(context)?.themeSettingsPureBlackModeAMOLED ?? '纯黑模式（AMOLED）',
           subtitle: isDark
-              ? '深色模式下背景改用纯黑，OLED 屏更省电、观感更沉'
-              : '仅深色模式生效（当前为浅色模式）',
+              ? l10nOf(context)?.themeSettingsUsePureBlackBackgrounds ?? '深色模式下背景改用纯黑，OLED 屏更省电、观感更沉'
+              : l10nOf(context)?.themeSettingsOnlyAppliesDarkMode ?? '仅深色模式生效（当前为浅色模式）',
           value: amoled,
           onChanged: isDark
               ? (v) => ref.read(appAmoledProvider.notifier).set(v)
@@ -276,16 +278,16 @@ class ThemeSettingsPage extends ConsumerWidget {
         ),
         SettingsSwitchTile(
           icon: Icons.brightness_high_outlined,
-          title: '高对比度',
-          subtitle: '提高前景 / 背景对比（M3 高对比档），弱视或强光下更易读',
+          title: l10nOf(context)?.themeSettingsHighContrast ?? '高对比度',
+          subtitle: l10nOf(context)?.themeSettingsIncreaseForegroundBackgroundContrast ?? '提高前景 / 背景对比（M3 高对比档），弱视或强光下更易读',
           value: highContrast,
           onChanged: (v) =>
               ref.read(appHighContrastProvider.notifier).set(v),
         ),
         SettingsSwitchTile(
           icon: Icons.auto_awesome_outlined,
-          title: '跟随系统取色',
-          subtitle: 'Android 跟随壁纸取色、Linux 跟随桌面主题色；开启后上面的强调色不再生效',
+          title: l10nOf(context)?.themeSettingsUseSystemColors ?? '跟随系统取色',
+          subtitle: l10nOf(context)?.themeSettingsAndroidFollowsWallpaperLinux ?? 'Android 跟随壁纸取色、Linux 跟随桌面主题色；开启后上面的强调色不再生效',
           value: dynamicColor,
           onChanged: (v) =>
               ref.read(dynamicColorEnabledProvider.notifier).set(v),
@@ -311,7 +313,7 @@ class ThemeSettingsPage extends ConsumerWidget {
               children: [
                 Icon(Icons.format_size, color: theme.colorScheme.primary),
                 const SizedBox(width: AppSpacing.md),
-                Text('聊天字号', style: theme.textTheme.titleSmall),
+                Text(l10nOf(context)?.themeSettingsChatTextSize ?? '聊天字号', style: theme.textTheme.titleSmall),
                 const Spacer(),
                 Text(
                   '${fontScale.toStringAsFixed(1)}×',
@@ -337,7 +339,7 @@ class ThemeSettingsPage extends ConsumerWidget {
                 borderRadius: AppRadius.inputR,
               ),
               child: Text(
-                '示例：这条消息会随字号缩放。',
+                l10nOf(context)?.themeSettingsExampleMessageScalesText ?? '示例：这条消息会随字号缩放。',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   fontSize: 16 * fontScale,
                 ),
@@ -351,7 +353,7 @@ class ThemeSettingsPage extends ConsumerWidget {
                     ? null
                     : () => ref.read(chatFontScaleProvider.notifier).set(1.0),
                 icon: const Icon(Icons.restart_alt),
-                label: const Text('恢复默认'),
+                label: Text(l10nOf(context)?.themeSettingsResetDefault ?? '恢复默认'),
               ),
             ),
           ],
@@ -366,8 +368,8 @@ class ThemeSettingsPage extends ConsumerWidget {
     return Card(
       child: SwitchListTile(
         secondary: Icon(Icons.code, color: theme.colorScheme.primary),
-        title: const Text('富文本显示原文本'),
-        subtitle: const Text('开启后，[i][color][b] 等游戏标签原样显示，不再渲染颜色、加粗或表情'),
+        title: Text(l10nOf(context)?.themeSettingsShowRawTextRich ?? '富文本显示原文本'),
+        subtitle: Text(l10nOf(context)?.themeSettingsWhenGameTagsLike ?? '开启后，[i][color][b] 等游戏标签原样显示，不再渲染颜色、加粗或表情'),
         value: rawText,
         onChanged: (v) => ref.read(richTextRawProvider.notifier).set(v),
       ),

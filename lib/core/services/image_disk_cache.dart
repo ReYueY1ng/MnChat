@@ -31,6 +31,10 @@ import 'package:flutter/painting.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../utils/log.dart';
+import '../utils/lru_cache.dart' show LruTtlCache;
+
+/// 内存层有效期：图片字节由磁盘层兜底，过期只会多一次读盘，不影响返回内容。
+const Duration _kMemoryTtl = Duration(days: 1);
 
 /// 图片用途：决定磁盘/内存的**独立配额**。
 ///
@@ -73,10 +77,14 @@ class ImageDiskCache {
 
   ImageDiskCache._();
 
-  /// 内存层：用途 → (URL → 字节)。Dart 的 map 字面量本身即插入有序
-  /// （`LinkedHashMap`），访问后重插实现 LRU。
-  final Map<ImageCacheKind, Map<String, Uint8List>> _memory = {
-    for (final k in ImageCacheKind.values) k: <String, Uint8List>{},
+  /// 内存层：用途 → (URL → 字节)。按用途各自一份 LRU + TTL（见
+  /// [ImageCacheKind.memoryMaxEntries]），命中会刷新 LRU 位置。
+  final Map<ImageCacheKind, LruTtlCache<String, Uint8List>> _memory = {
+    for (final k in ImageCacheKind.values)
+      k: LruTtlCache<String, Uint8List>(
+        maxEntries: k.memoryMaxEntries,
+        ttl: _kMemoryTtl,
+      ),
   };
 
   /// 用途 → 磁盘目录（null 表示该用途不落盘）。
@@ -137,8 +145,8 @@ class ImageDiskCache {
 
   /// 清空磁盘与内存缓存（全部用途）。
   Future<void> clear() async {
-    for (final list in _memory.values) {
-      list.clear();
+    for (final cache in _memory.values) {
+      cache.clear();
     }
     for (final k in ImageCacheKind.values) {
       final dir = await _cacheDir(k);
@@ -155,20 +163,11 @@ class ImageDiskCache {
 
   // ── 内存层 ──────────────────────────────────────────────────────────
 
-  Uint8List? _fromMemory(String url, ImageCacheKind kind) {
-    final list = _memory[kind]!;
-    final hit = list.remove(url);
-    if (hit != null) list[url] = hit; // 重新插到尾部 = 最近使用
-    return hit;
-  }
+  Uint8List? _fromMemory(String url, ImageCacheKind kind) =>
+      _memory[kind]!.get(url);
 
   void _putMemory(String url, Uint8List bytes, ImageCacheKind kind) {
-    final list = _memory[kind]!;
-    list.remove(url);
-    list[url] = bytes;
-    while (list.length > kind.memoryMaxEntries) {
-      list.remove(list.keys.first);
-    }
+    _memory[kind]!.put(url, bytes);
   }
 
   // ── 磁盘层 ──────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 聊天气泡页（`/miniw/business?act=bubble_get_data`）。
 ///
 /// 气泡名称 / 图标来自游戏**内置**配置（`ns_business_config.bubble_cfg`），
@@ -86,9 +88,9 @@ class _BubblePageState extends ConsumerState<BubblePage> {
       await client.useRecord(id);
       if (!mounted) return;
       setState(() => _using = id);
-      _toast(id == 0 ? '已取消佩戴气泡' : '已佩戴气泡 #$id');
+      _toast(id == 0 ? l10nOf(context)?.bubbleBubbleUnequipped ?? '已取消佩戴气泡' : l10nOf(context)?.bubbleBubbleEquipped(id) ?? '已佩戴气泡 #$id');
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
@@ -98,13 +100,13 @@ class _BubblePageState extends ConsumerState<BubblePage> {
   }
 
   String _expiryText(_OwnedBubble b) {
-    if (b.permanent) return '永久';
+    if (b.permanent) return l10nOf(context)?.bubblePermanent ?? '永久';
     final d = DateTime.fromMillisecondsSinceEpoch(b.timeout * 1000);
     final now = DateTime.now();
-    if (d.isBefore(now)) return '已过期';
+    if (d.isBefore(now)) return l10nOf(context)?.bubbleExpired ?? '已过期';
     final mo = d.month.toString().padLeft(2, '0');
     final dd = d.day.toString().padLeft(2, '0');
-    return '有效期至 $mo-$dd';
+    return l10nOf(context)?.bubbleValidUntil(mo, dd) ?? '有效期至 $mo-$dd';
   }
 
   @override
@@ -112,12 +114,12 @@ class _BubblePageState extends ConsumerState<BubblePage> {
     final scheme = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('聊天气泡'),
+        title: Text(l10nOf(context)?.bubbleChatBubble ?? '聊天气泡'),
         actions: [
           if (_using != 0)
             TextButton(
               onPressed: () => _use(0),
-              child: const Text('取消佩戴'),
+              child: Text(l10nOf(context)?.bubbleUnequip ?? '取消佩戴'),
             ),
         ],
       ),
@@ -139,11 +141,11 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                           color: scheme.outline,
                         ),
                         const SizedBox(height: AppSpacing.md),
-                        Text('加载失败：$_error', textAlign: TextAlign.center),
+                        Text(l10nOf(context)?.commonFailedLoad(_error.toString()) ?? '加载失败：$_error', textAlign: TextAlign.center),
                         const SizedBox(height: AppSpacing.md),
                         FilledButton.tonal(
                           onPressed: _load,
-                          child: const Text('重试'),
+                          child: Text(l10nOf(context)?.commonRetry ?? '重试'),
                         ),
                       ],
                     ),
@@ -156,8 +158,8 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(AppSpacing.lg, AppSpacing.md, AppSpacing.lg, AppSpacing.xs),
                         child: Text(
-                          '气泡名称/样式由游戏内置配置决定，外部客户端无法显示，'
-                          '仅能切换佩戴。',
+                          l10nOf(context)?.bubbleNameStyleNote ??
+                              '气泡名称/样式由游戏内置配置决定，外部客户端无法显示，仅能切换佩戴。',
                           style: TextStyle(
                             fontSize: 12,
                             color: scheme.onSurfaceVariant,
@@ -169,7 +171,7 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                           padding: const EdgeInsets.all(AppSpacing.xl),
                           child: Center(
                             child: Text(
-                              '还没有可用气泡',
+                              l10nOf(context)?.bubbleNoBubblesAvailableYet ?? '还没有可用气泡',
                               style: TextStyle(color: scheme.onSurfaceVariant),
                             ),
                           ),
@@ -184,7 +186,7 @@ class _BubblePageState extends ConsumerState<BubblePage> {
                                   ? scheme.primary
                                   : scheme.onSurfaceVariant,
                             ),
-                            title: Text('气泡 #${b.id}'),
+                            title: Text(l10nOf(context)?.bubbleBubble(b.id) ?? '气泡 #${b.id}'),
                             subtitle: Text(_expiryText(b)),
                             trailing: _using == b.id
                                 ? Icon(Icons.check_circle, color: scheme.primary)

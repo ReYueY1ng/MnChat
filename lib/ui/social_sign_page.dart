@@ -12,6 +12,8 @@ import '../core/services/social_sign.dart';
 import '../state/providers.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 class SocialSignPage extends ConsumerStatefulWidget {
   const SocialSignPage({super.key});
 
@@ -56,7 +58,7 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
         _loading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('加载失败: $e')),
+        SnackBar(content: Text(l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e')),
       );
     }
   }
@@ -72,12 +74,12 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
       );
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(ok ? '已保存' : '保存失败')),
+        SnackBar(content: Text(ok ? l10nOf(context)?.signSaved ?? '已保存' : l10nOf(context)?.signFailedSave ?? '保存失败')),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('保存失败: $e')),
+        SnackBar(content: Text(l10nOf(context)?.signFailedSave2(e) ?? '保存失败: $e')),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -92,11 +94,11 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
         DeclarationCatalog.empty;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('交友标签'),
+        title: Text(l10nOf(context)?.settingsAccountSocialTags ?? '交友标签'),
         actions: [
           TextButton(
             onPressed: _loading || _saving ? null : _save,
-            child: const Text('保存'),
+            child: Text(l10nOf(context)?.groupDetailSave ?? '保存'),
           ),
         ],
       ),
@@ -108,14 +110,14 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
               : ListView(
                   padding: const EdgeInsets.all(AppSpacing.lg),
                   children: [
-                    const Text('想要…', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(l10nOf(context)?.signWant ?? '想要…', style: TextStyle(fontWeight: FontWeight.w600)),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         ChoiceChip(
-                          label: const Text('不设置'),
+                          label: Text(l10nOf(context)?.signNotSet ?? '不设置'),
                           selected: _socialLab == 0,
                           onSelected: (_) => setState(() => _socialLab = 0),
                         ),
@@ -128,14 +130,14 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                       ],
                     ),
                     const SizedBox(height: AppSpacing.xl),
-                    const Text('喜欢…', style: TextStyle(fontWeight: FontWeight.w600)),
+                    Text(l10nOf(context)?.signLike ?? '喜欢…', style: TextStyle(fontWeight: FontWeight.w600)),
                     const SizedBox(height: AppSpacing.sm),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         ChoiceChip(
-                          label: const Text('不设置'),
+                          label: Text(l10nOf(context)?.signNotSet ?? '不设置'),
                           selected: _gameLab == 0,
                           onSelected: (_) => setState(() => _gameLab = 0),
                         ),
@@ -151,14 +153,14 @@ class _SocialSignPageState extends ConsumerState<SocialSignPage> {
                     Card(
                       child: ListTile(
                         leading: const Icon(Icons.auto_awesome),
-                        title: const Text('我的名片'),
+                        title: Text(l10nOf(context)?.signMyCard ?? '我的名片'),
                         subtitle: Text(
                           formatDeclaration(
                             _socialLab,
                             _gameLab,
                             catalog: catalog,
                           ).isEmpty
-                              ? '未设置'
+                              ? l10nOf(context)?.signNotSet2 ?? '未设置'
                               : formatDeclaration(
                                   _socialLab,
                                   _gameLab,

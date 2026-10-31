@@ -17,6 +17,8 @@ import '../../state/providers.dart';
 import '../theme/app_tokens.dart';
 import 'friend_filter_dialog.dart' show showCreateFriendTagDialog;
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 打开「标签」面板：[uins] 为要操作的好友（单个 = 从会话菜单进来）。
 Future<void> showFriendTagDialog(
   BuildContext context,
@@ -48,8 +50,8 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
     final tags = ref.watch(friendTagPoolProvider).asData?.value;
     return AlertDialog(
       title: Text(widget.uins.length > 1
-          ? '给 ${widget.uins.length} 位好友打标签'
-          : '标签'),
+          ? l10nOf(context)?.friendTagTagFriends(widget.uins.length) ?? '给 ${widget.uins.length} 位好友打标签'
+          : l10nOf(context)?.friendFilterTags ?? '标签'),
       contentPadding: const EdgeInsets.fromLTRB(
         AppSpacing.xl,
         AppSpacing.md,
@@ -73,7 +75,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
                         vertical: AppSpacing.sm,
                       ),
                       child: Text(
-                        '你还未创建标签',
+                        l10nOf(context)?.friendFilterYouHaventCreatedAny ?? '你还未创建标签',
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: theme.colorScheme.outline,
                         ),
@@ -92,13 +94,13 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
                   TextButton.icon(
                     onPressed: _busy ? null : _createTag,
                     icon: const Icon(Icons.add, size: 16),
-                    label: const Text('新建标签'),
+                    label: Text(l10nOf(context)?.friendFilterNewTag ?? '新建标签'),
                   ),
                   if (widget.uins.length > 1)
                     TextButton.icon(
                       onPressed: _busy ? null : _clearAll,
                       icon: const Icon(Icons.label_off_outlined, size: 16),
-                      label: const Text('清除这些好友的标签'),
+                      label: Text(l10nOf(context)?.friendTagClearTagsTheseFriends ?? '清除这些好友的标签'),
                     ),
                 ],
               ),
@@ -106,7 +108,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('完成'),
+          child: Text(l10nOf(context)?.friendTagDone ?? '完成'),
         ),
       ],
     );
@@ -124,12 +126,12 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
         color: all ? theme.colorScheme.primary : null,
       ),
       title: Text(t.label),
-      subtitle: t.uins.isEmpty ? null : Text('${t.uins.length} 位好友'),
+      subtitle: t.uins.isEmpty ? null : Text(l10nOf(context)?.friendTagFriends(t.uins.length) ?? '${t.uins.length} 位好友'),
       onTap: _busy
           ? null
           : () => _toggleTag(t, add: !all),
       trailing: IconButton(
-        tooltip: '删除标签',
+        tooltip: l10nOf(context)?.friendTagDeleteTag ?? '删除标签',
         icon: const Icon(Icons.delete_outline, size: 18),
         onPressed: _busy ? null : () => _deleteTag(t),
       ),
@@ -145,14 +147,14 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
             opType: add ? 1 : 2,
             tagId: t.tagId,
           ),
-      add ? '已打标签' : '已取消标签',
+      add ? l10nOf(context)?.friendTagTagsApplied ?? '已打标签' : l10nOf(context)?.friendTagTagsRemoved ?? '已取消标签',
     );
   }
 
   Future<void> _clearAll() async {
     await _run(
       () => ref.read(chatServiceProvider).clearFriendLabels(widget.uins),
-      '已清除标签',
+      l10nOf(context)?.friendsTagsCleared ?? '已清除标签',
     );
   }
 
@@ -163,7 +165,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
       () => ref
           .read(chatServiceProvider)
           .setFriendLabelPool(opType: 1, label: label),
-      '已创建「$label」',
+      l10nOf(context)?.friendTagCreated(label) ?? '已创建「$label」',
     );
   }
 
@@ -171,16 +173,16 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: Text('删除标签「${t.label}」'),
-        content: const Text('删除后该标签会从所有好友身上移除。'),
+        title: Text(l10nOf(context)?.friendTagDeleteTag2(t.label) ?? '删除标签「${t.label}」'),
+        content: Text(l10nOf(context)?.friendTagAfterDeletionTagRemoved ?? '删除后该标签会从所有好友身上移除。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('删除'),
+            child: Text(l10nOf(context)?.actionDelete ?? '删除'),
           ),
         ],
       ),
@@ -190,7 +192,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
       () => ref
           .read(chatServiceProvider)
           .setFriendLabelPool(opType: 0, tagId: t.tagId),
-      '已删除标签',
+      l10nOf(context)?.friendTagTagDeleted ?? '已删除标签',
     );
   }
 
@@ -203,6 +205,7 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
     Future<Map<String, Object?>> Function() action,
     String okText,
   ) async {
+    final l10n = l10nOf(context);
     setState(() => _busy = true);
     final messenger = ScaffoldMessenger.of(context);
     try {
@@ -210,14 +213,14 @@ class _FriendTagDialogState extends ConsumerState<_FriendTagDialog> {
       if (!responseOk(resp)) {
         final code = resp['result'] ?? resp['code'] ?? resp['ret'];
         messenger.showSnackBar(
-          SnackBar(content: Text('服务端未受理（result=$code）')),
+          SnackBar(content: Text(l10n?.friendTagServerDidntAcceptResult(code.toString()) ?? '服务端未受理（result=$code）')),
         );
         return;
       }
       ref.invalidate(friendTagPoolProvider);
       messenger.showSnackBar(SnackBar(content: Text(okText)));
     } catch (e) {
-      messenger.showSnackBar(SnackBar(content: Text('操作失败: $e')));
+      messenger.showSnackBar(SnackBar(content: Text(l10n?.commonOperationFailed(e) ?? '操作失败: $e')));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

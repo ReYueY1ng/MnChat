@@ -192,7 +192,7 @@ class _HomeFooter extends StatelessWidget {
       children: [
         Icon(Icons.public, size: 14, color: theme.colorScheme.outline),
         const SizedBox(width: AppSpacing.xs),
-        Text('IP属地：${ipAddr ?? kHomeUnknownValue}', style: style),
+        Text(l10nOf(context)?.profileIPRegion(ipAddr ?? kHomeUnknownValue) ?? 'IP属地：${ipAddr ?? kHomeUnknownValue}', style: style),
         const Spacer(),
         Text('$uin', style: style),
       ],

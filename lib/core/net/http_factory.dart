@@ -14,6 +14,7 @@ library;
 
 import 'package:dio/dio.dart';
 
+import '../services/app_failure.dart' show classifyDio;
 import '../services/request_errors.dart' show RequestErrorBus;
 import '../utils/log.dart' show log, redactUrl;
 import 'config.dart' show kUa;
@@ -56,7 +57,7 @@ Dio createDio({Duration? connectTimeout, Duration? receiveTimeout}) {
         label: '网络请求',
         endpoint: redactUrl(e.requestOptions.uri.toString()),
         code: e.response?.statusCode,
-        message: e.message ?? e.type.name,
+        message: classifyDio(e).summary,
       );
       handler.next(e);
     },

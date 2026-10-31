@@ -11,6 +11,8 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/services/voice_clip.dart' show voiceSecondsLabel;
 import '../../core/services/voice_recorder.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 录音弹窗的测试定位 key（保持名字稳定）。
 const Key voiceRecordDialogKey = Key('voice_record_dialog');
 
@@ -49,7 +51,7 @@ class _VoiceRecordDialogState extends State<_VoiceRecordDialog> {
     if (!mounted) return;
     setState(() {
       _recording = ok;
-      _error = ok ? null : '拿不到麦克风权限，或设备不可用';
+      _error = ok ? null : l10nOf(context)?.voiceNoMicrophonePermissionDevice ?? '拿不到麦克风权限，或设备不可用';
     });
     if (ok) {
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -81,7 +83,7 @@ class _VoiceRecordDialogState extends State<_VoiceRecordDialog> {
     final error = _error;
     return AlertDialog(
       key: voiceRecordDialogKey,
-      title: const Text('录音'),
+      title: Text(l10nOf(context)?.chatRecord ?? '录音'),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -101,11 +103,11 @@ class _VoiceRecordDialogState extends State<_VoiceRecordDialog> {
       actions: [
         TextButton(
           onPressed: _busy ? null : () => _finish(send: false),
-          child: const Text('取消'),
+          child: Text(l10nOf(context)?.commonCancel ?? '取消'),
         ),
         FilledButton(
           onPressed: (!_recording || _busy) ? null : () => _finish(),
-          child: const Text('停止并发送'),
+          child: Text(l10nOf(context)?.voiceStopSend ?? '停止并发送'),
         ),
       ],
     );

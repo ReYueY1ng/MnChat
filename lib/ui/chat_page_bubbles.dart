@@ -251,9 +251,9 @@ class _RichMediaBubble extends ConsumerWidget {
         ? media.giftSrcName
         : media.nickname;
     final meta = [
-      '默契礼物',
+      l10nOf(context)?.chatRapportGift ?? '默契礼物',
       if (who.isNotEmpty) who,
-      if (media.giftAddValue > 0) '默契度 +${media.giftAddValue}',
+      if (media.giftAddValue > 0) l10nOf(context)?.chatRapport(media.giftAddValue) ?? '默契度 +${media.giftAddValue}',
     ].join(' · ');
     return InkWell(
       borderRadius: AppRadius.inputR,
@@ -362,14 +362,14 @@ class _RichMediaBubble extends ConsumerWidget {
   Widget _mapCard(BuildContext context, RichMedia media, ThemeData theme) {
     final isRoom = media.isRoomInvite;
     final title = isRoom
-        ? (media.roomName.isNotEmpty ? media.roomName : '房间邀请')
-        : (media.name.isNotEmpty ? media.name : '地图分享');
-    final desc = isRoom ? '邀请你一起玩 · 需在游戏内加入房间' : '邀请你一起玩 · 发现一个好玩的地图，快来一起吧';
+        ? (media.roomName.isNotEmpty ? media.roomName : l10nOf(context)?.chatRoomInvite ?? '房间邀请')
+        : (media.name.isNotEmpty ? media.name : l10nOf(context)?.chatMapShare ?? '地图分享');
+    final desc = isRoom ? l10nOf(context)?.chatInvitesYouPlayJoin ?? '邀请你一起玩 · 需在游戏内加入房间' : l10nOf(context)?.chatInvitesYouPlayFound ?? '邀请你一起玩 · 发现一个好玩的地图，快来一起吧';
     return InkWell(
       borderRadius: AppRadius.inputR,
       onTap: () {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(isRoom ? '房间需在游戏内加入' : '地图需在游戏内打开')),
+          SnackBar(content: Text(isRoom ? l10nOf(context)?.chatJoinRoomGame ?? '房间需在游戏内加入' : l10nOf(context)?.chatOpenMapGame ?? '地图需在游戏内打开')),
         );
       },
       child: Padding(
@@ -418,7 +418,7 @@ class _RichMediaBubble extends ConsumerWidget {
                       ),
                       const SizedBox(height: AppSpacing.xs),
                       Text(
-                        isRoom ? '房间' : '地图',
+                        isRoom ? l10nOf(context)?.chatRoom ?? '房间' : l10nOf(context)?.chatMap ?? '地图',
                         style: theme.textTheme.labelSmall?.copyWith(
                           color: theme.colorScheme.primary,
                         ),
@@ -454,7 +454,7 @@ class _RichMediaBubble extends ConsumerWidget {
           ? () {
               // 外部客户端无支付流，无法领取红包；仅提示。
               ScaffoldMessenger.of(context)
-                  .showSnackBar(const SnackBar(content: Text('红包需在游戏内领取')));
+                  .showSnackBar(SnackBar(content: Text(l10nOf(context)?.chatRedPacketsMustClaimed ?? '红包需在游戏内领取')));
             }
           : media.isRoomInvite
           ? () {
@@ -462,8 +462,12 @@ class _RichMediaBubble extends ConsumerWidget {
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
                   content: Text(
-                    '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}'
-                    '（需在游戏内加入）',
+                    l10nOf(context)?.chatRoomNameInGame(
+                          media.roomName.isNotEmpty
+                              ? media.roomName
+                              : media.roomUin,
+                        ) ??
+                        '房间: ${media.roomName.isNotEmpty ? media.roomName : media.roomUin}（需在游戏内加入）',
                   ),
                 ),
               );
@@ -527,7 +531,7 @@ class _RichMediaBubble extends ConsumerWidget {
               ),
             if (media.author.isNotEmpty)
               Text(
-                '作者: ${media.author}',
+                l10nOf(context)?.chatAuthor(media.author) ?? '作者: ${media.author}',
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -562,7 +566,10 @@ class _RichMediaBubble extends ConsumerWidget {
               ),
             if (media.isRedPacket)
               Text(
-                '金额 ¥${media.amount > 0 ? media.amount / 10 : '?'}',
+                l10nOf(context)?.chatAmountYuan(
+                      media.amount > 0 ? media.amount / 10 : '?',
+                    ) ??
+                    '金额 ¥${media.amount > 0 ? media.amount / 10 : '?'}',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.error,
                   fontWeight: FontWeight.w600,
@@ -675,7 +682,7 @@ class _DynamicEmojiHintChip extends StatelessWidget {
         ),
         const SizedBox(width: 6),
         Text(
-          '动态表情',
+          l10nOf(context)?.chatAnimatedEmoji ?? '动态表情',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: theme.colorScheme.outline,
           ),

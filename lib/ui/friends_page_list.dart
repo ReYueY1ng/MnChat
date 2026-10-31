@@ -28,12 +28,12 @@ class _FriendTile extends ConsumerWidget {
     this.onSelectToggle,
   });
 
-  String _relationLabel(int relation) {
+  String _relationLabel(BuildContext context, int relation) {
     // 黑名单优先；然后是「好友」——同为好友且互相关注时（relation 含 8|16）
     // 必须显示「好友」而非「关注」，因此 bit3(8) 要先于 bit4(16) 判断。
-    if ((relation & 64) != 0) return '黑名单';
-    if ((relation & 8) != 0) return '好友';
-    if ((relation & 16) != 0) return '关注';
+    if ((relation & 64) != 0) return l10nOf(context)?.friendsBlocklist ?? '黑名单';
+    if ((relation & 8) != 0) return l10nOf(context)?.commonFriend ?? '好友';
+    if ((relation & 16) != 0) return l10nOf(context)?.commonFollowing ?? '关注';
     return '';
   }
 
@@ -42,10 +42,10 @@ class _FriendTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final semantic = AppSemanticColors.of(context);
     final isGroup = session.type == ChatSessionType.group;
-    final rel = _relationLabel(session.relation);
+    final rel = _relationLabel(context, session.relation);
     final gameText = isGroup
-        ? '群聊'
-        : (session.gameStatus ?? (session.isOnline ? '在线' : '离线'));
+        ? l10nOf(context)?.chatGroupChat ?? '群聊'
+        : (session.gameStatus ?? (session.isOnline ? l10nOf(context)?.friendsOnline ?? '在线' : l10nOf(context)?.friendsOffline ?? '离线'));
     final name = session.name.isNotEmpty ? session.name : '${session.id}';
 
     // 等级 / 拍档 / 大会员 / 默契度：来自会话级批量缓存（随会话流一次拉取）。
@@ -148,7 +148,7 @@ class _FriendTile extends ConsumerWidget {
       trailing: isGroup
           ? null
           : IconButton(
-              tooltip: '查看主页',
+              tooltip: l10nOf(context)?.friendsViewProfile ?? '查看主页',
               icon: const Icon(Icons.account_circle_outlined, size: 22),
               onPressed: () => Navigator.of(context).push(
                 MaterialPageRoute(
@@ -158,7 +158,7 @@ class _FriendTile extends ConsumerWidget {
             ),
       subtitle: isGroup
           ? Text(
-              '点击进入群聊',
+              l10nOf(context)?.friendsTapOpenGroupChat ?? '点击进入群聊',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: theme.textTheme.bodySmall,
@@ -179,7 +179,7 @@ class _FriendTile extends ConsumerWidget {
                 const SizedBox(width: 5),
                 Flexible(
                   child: Text(
-                    '$gameText · 迷你号 ${session.id}',
+                    l10nOf(context)?.friendsMiniID(gameText, session.id) ?? '$gameText · 迷你号 ${session.id}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: theme.textTheme.bodySmall?.copyWith(
@@ -234,18 +234,18 @@ class _EmptyFriends extends StatelessWidget {
               color: theme.colorScheme.outline,
             ),
             const SizedBox(height: AppSpacing.sm),
-            const Text('暂无好友\n下拉刷新或点击右上角添加'),
+            Text(l10nOf(context)?.friendsNoFriendsYetPull ?? '暂无好友\n下拉刷新或点击右上角添加'),
             const SizedBox(height: AppSpacing.sm),
             TextButton.icon(
               onPressed: onAddFriend,
               icon: const Icon(Icons.person_search),
-              label: const Text('按迷你号添加'),
+              label: Text(l10nOf(context)?.friendsAddMiniID ?? '按迷你号添加'),
             ),
           ],
         ),
       );
     }
-    return Center(child: Text(isGroup ? '暂无群聊' : '没有符合条件的好友'));
+    return Center(child: Text(isGroup ? l10nOf(context)?.friendsNoGroupChats ?? '暂无群聊' : l10nOf(context)?.friendsNoFriendsMatchFilters ?? '没有符合条件的好友'));
   }
 }
 

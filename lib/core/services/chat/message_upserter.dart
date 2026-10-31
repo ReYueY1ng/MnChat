@@ -12,6 +12,7 @@ class MessageUpserter {
     required this._groupSessions,
     required this._getMyUin,
     required this._isViewing,
+    required this._isHistoryExpanded,
     required this._emitEvent,
     required this._store,
     required this._emitSessionSnapshot,
@@ -22,6 +23,12 @@ class MessageUpserter {
   final Map<int, ChatSession> _groupSessions;
   final int Function() _getMyUin;
   final bool Function(ChatSessionType type, int id) _isViewing;
+
+  /// 该会话是否已经主动展开过历史（加载过更早的页）。
+  ///
+  /// 展开后不再按 50/100 裁剪：否则用户刚往上翻了几百条，来一条新消息就把
+  /// 列表裁回最近 50 条，表现为「历史突然消失」。
+  final bool Function(String sessionKey) _isHistoryExpanded;
   final void Function(ChatSessionType type, int id, ChatMessage m) _emitEvent;
   final MessageStore _store;
   final void Function() _emitSessionSnapshot;
@@ -43,7 +50,7 @@ class MessageUpserter {
     // 同一 id），已存在则跳过（flutter_chat_core 控制器 debug 下断言 id 唯一）。
     if (list.any((e) => sameMessage(e, m))) return;
     list.add(m);
-    if (list.length > friendMessageCap) {
+    if (list.length > friendMessageCap && !_isHistoryExpanded(key)) {
       list.removeRange(0, list.length - friendMessageCap);
     }
 
@@ -78,7 +85,7 @@ class MessageUpserter {
     final list = _messagesCache.putIfAbsent(key, () => []);
     if (list.any((e) => sameMessage(e, m))) return;
     list.add(m);
-    if (list.length > groupMessageCap) {
+    if (list.length > groupMessageCap && !_isHistoryExpanded(key)) {
       list.removeRange(0, list.length - groupMessageCap);
     }
 
@@ -103,8 +110,7 @@ class MessageUpserter {
     _emitSessionSnapshot();
   }
 
-  /// 拉回某会话历史（网络/离线历史拉回时）：与已有历史**合并** → 升序归位 →
-  /// 落盘 → 回填会话摘要 → 发快照 → 通知已打开的聊天窗口刷新。
+  /// 拉回某会话历史（网络/离线历史拉回时）：与已有历史**合并** → 升序归位 →  /// 落盘 → 回填会话摘要 → 发快照 → 通知已打开的聊天窗口刷新。
   ///
   /// 注意是「合并」而非「替换」：`buddysvr.chat_query` 是**消费式读取**，返回的
   /// 只是离线队列，既不含已经通过推送（WS）收到的消息，也不含更早的历史；直接
@@ -131,6 +137,34 @@ class MessageUpserter {
     _emitSessionSnapshot();
     // 通知已打开的聊天窗口刷新（复用 ChatEvent：provider 只按 type/id 匹配）。
     _emitEvent(type, id, sorted.last);
+  }
+
+  /// 发件箱重试成功：把 (自己, 本地时间, 正文) 对应的失败回显标成已发送。
+  ///
+  /// 内存里没有这条（重启后还没打开会话）时只改库；下次打开会话自然读成成功。
+  void markSent(
+    ChatSessionType type,
+    int id, {
+    required int time,
+    required String text,
+  }) {
+    final key = MessageStore.sessionKey(type, id);
+    final list = _messagesCache[key];
+    if (list != null) {
+      final myUin = _getMyUin();
+      for (var i = 0; i < list.length; i++) {
+        final m = list[i];
+        if (m.uin == myUin && m.time == time && m.text == text) {
+          if (!m.isSuccess) {
+            list[i] = m.copyWith(isSuccess: true);
+            _emitEvent(type, id, list[i]);
+            _emitSessionSnapshot();
+          }
+          break;
+        }
+      }
+    }
+    _store.markSent(type, id, time: time, text: text);
   }
 }
 

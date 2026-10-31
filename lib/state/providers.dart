@@ -17,6 +17,7 @@ import '../core/models/messages.dart';
 import '../core/services/auth.dart';
 import '../core/services/chat_service.dart';
 import '../core/services/chat/message_marks.dart' show MessageMarksStore;
+import '../core/services/chat/outbox.dart' show OutboxService, OutboxSnapshot;
 import '../core/services/dynamics.dart';
 import '../core/services/emoji_store.dart';
 import '../core/services/gift_config.dart' show GiftConfigClient;
@@ -25,7 +26,7 @@ import '../core/services/message_center.dart';
 import '../core/services/msg_box.dart';
 import '../core/services/notification_service.dart';
 import '../core/services/partner.dart';
-import '../core/services/request_errors.dart' show RequestErrorBus;
+import '../core/services/request_errors.dart' show RequestErrorBus, responseOk;
 import '../core/services/social_sign.dart'
     show DeclarationCatalog, DeclarationConfigClient;
 import '../core/services/profile.dart';

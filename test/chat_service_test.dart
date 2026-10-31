@@ -21,6 +21,8 @@ import 'package:mnchat/core/services/social_sign.dart';
 import 'package:mnchat/core/storage/app_database.dart';
 import 'package:mnchat/core/storage/chat_mapper.dart';
 
+import 'support/harness.dart' show TestClock;
+
 /// 假登录客户端：跳过真实网络，直接返回成功认证。
 class _FakeLoginClient extends LoginClient {
   _FakeLoginClient() : super();
@@ -103,9 +105,11 @@ ChatService _loggedInService({
   GroupClient? group,
   ChatPushClient? chatpush,
   LoginClient? login,
+  TestClock? clock,
 }) {
   final service = ChatService.forTest(
     db: db,
+    now: clock?.now,
     loginClient: login ?? _FakeLoginClient(),
     chatPushClient: chatpush ?? _FakeChatPushClient(),
     friendClient: friend ?? _FakeFriendClient(),
@@ -121,7 +125,8 @@ ChatService _loggedInService({
 void main() {
   group('session 列表排序 / 消息 upsert 后失效', () {
     test('upsert 使 lastMessage 更新、sessions 按最后消息时间倒序', () async {
-      final service = _loggedInService();
+      final clock = TestClock();
+      final service = _loggedInService(clock: clock);
       await service.login(uin: 1, password: 'p');
       service.addLocalMessage(ChatSessionType.friend, 100, 'a');
       service.addLocalMessage(ChatSessionType.friend, 100, 'b');
@@ -133,7 +138,7 @@ void main() {
       // 缓存失效前快照（按最后消息时间）
       final before = service.sessions.map((s) => s.lastMessage!.time).toList();
       // 追加一条更晚时间的消息 → 该会话应排到最前
-      await Future.delayed(const Duration(milliseconds: 1100));
+      clock.advance(const Duration(seconds: 1));
       service.addLocalMessage(ChatSessionType.friend, 100, 'late');
       final after = service.sessions.map((s) => s.lastMessage!.time).toList();
       expect(after, isNot(equals(before)));
@@ -151,12 +156,13 @@ void main() {
 
   group('historyOf 返回升序、按 id 去重', () {
     test('乱序时间戳输入 → historyOf 升序', () async {
-      final service = _loggedInService();
+      final clock = TestClock();
+      final service = _loggedInService(clock: clock);
       // 直接塞缓存：通过 addLocalMessage 只能拿到单调递增时间；这里用请求历史路径。
       // 用 db 预置乱序消息后 loadOfflineCache 验证。见下方 offline bootstrap 组。
       // 本用例仅验证 addLocalMessage 顺序保持（时间单调）。
       service.addLocalMessage(ChatSessionType.friend, 55, 'one');
-      await Future.delayed(const Duration(milliseconds: 1100));
+      clock.advance(const Duration(seconds: 1));
       service.addLocalMessage(ChatSessionType.friend, 55, 'two');
       final msgs = service.historyOf(ChatSessionType.friend, 55);
       expect(msgs.map((m) => m.text).toList(), ['one', 'two']);
@@ -249,12 +255,46 @@ void main() {
       service.sessionStream.listen((s) => snapshots.add(s.sessions.length));
 
       service.addLocalMessage(ChatSessionType.friend, 700, 'ping');
-      // 落库
+      // 落库（写队列串行执行，读之前先等队列排空）
+      await service.flushWrites();
       final rows = await db.allMessages(42);
       expect(rows, hasLength(1));
       expect(rows.first.content, 'ping');
       // 快照至少发了一次
       expect(snapshots, isNotEmpty);
+    });
+
+    test('confirmOutboxMessage 把失败回显标回成功（内存 + 库）', () async {
+      final db = AppDatabase(NativeDatabase.memory());
+      addTearDown(db.close);
+      final service = _loggedInService(db: db);
+      await service.login(uin: 42, password: 'p');
+
+      service.addLocalMessage(
+        ChatSessionType.friend,
+        700,
+        'retry',
+        isSuccess: false,
+      );
+      await service.flushWrites();
+      final before = service.historyOf(ChatSessionType.friend, 700).last;
+      expect(before.isSuccess, isFalse);
+
+      service.confirmOutboxMessage(
+        type: ChatSessionType.friend,
+        id: 700,
+        text: 'retry',
+        localTime: before.time,
+      );
+      await service.flushWrites();
+
+      expect(
+        service.historyOf(ChatSessionType.friend, 700).last.isSuccess,
+        isTrue,
+      );
+      final rows = await db.allMessages(42);
+      expect(rows, hasLength(1));
+      expect(rows.single.isSuccess, isTrue);
     });
   });
 

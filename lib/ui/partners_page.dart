@@ -27,6 +27,8 @@ import 'theme/app_tokens.dart';
 import 'widgets/empty_state.dart';
 import 'widgets/rich_text_view.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 搭子页。
 class PartnersPage extends ConsumerStatefulWidget {
   const PartnersPage({super.key});
@@ -112,7 +114,7 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
     for (final s in sessions) {
       if (s.id == uin) return s.name;
     }
-    return '迷你号 $uin';
+    return l10nOf(context)?.commonMiniID2(uin) ?? '迷你号 $uin';
   }
 
   DateTime? _lastAt(int uin) {
@@ -156,10 +158,10 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('搭子'),
+        title: Text(l10nOf(context)?.partnersPartner ?? '搭子'),
         actions: [
           IconButton(
-            tooltip: '刷新最近玩伴',
+            tooltip: l10nOf(context)?.partnersRefreshRecentPlaymates ?? '刷新最近玩伴',
             icon: const Icon(Icons.refresh),
             onPressed: () => unawaited(_loadRecent()),
           ),
@@ -173,8 +175,8 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
               if (stale.isNotEmpty) ...[
                 _sectionHeader(
                   theme,
-                  '该互动了',
-                  '连续 $kPartnerStaleDays 天不互动，默契度每天 -$kPartnerDecayPerDay',
+                  l10nOf(context)?.partnersTimeInteract ?? '该互动了',
+                  l10nOf(context)?.partnersAfterDaysWithoutInteracting(kPartnerStaleDays, kPartnerDecayPerDay) ?? '连续 $kPartnerStaleDays 天不互动，默契度每天 -$kPartnerDecayPerDay',
                 ),
                 for (final (uin, tacit, days, floor) in stale)
                   _tile(
@@ -185,17 +187,17 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
                         color: theme.colorScheme.error,
                       ),
                     ),
-                    subtitle: '默契度 $tacit → 再不互动会降到 $floor',
+                    subtitle: l10nOf(context)?.partnersRapportDropWithoutInteraction(tacit, floor) ?? '默契度 $tacit → 再不互动会降到 $floor',
                   ),
               ],
-              _sectionHeader(theme, '我的拍档', '默契度与关系等级（服务端数据）'),
+              _sectionHeader(theme, l10nOf(context)?.partnersMyPartners ?? '我的拍档', l10nOf(context)?.partnersRapportRelationLevelServer ?? '默契度与关系等级（服务端数据）'),
               if (partners.isEmpty)
-                const Padding(
+                Padding(
                   padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
                   child: EmptyState(
                     icon: Icons.favorite_border,
-                    title: '还没有拍档',
-                    hint: '在游戏里与好友的默契度达到 100 即可建立拍档关系',
+                    title: l10nOf(context)?.partnersNoPartnersYet ?? '还没有拍档',
+                    hint: l10nOf(context)?.partnersReach100RapportFriend ?? '在游戏里与好友的默契度达到 100 即可建立拍档关系',
                   ),
                 )
               else
@@ -209,10 +211,10 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
                       ),
                     ),
                     subtitle: next > 0
-                        ? '默契度 $tacit / 下一级 $next'
-                        : '默契度 $tacit',
+                        ? l10nOf(context)?.partnersRapportNextLevel(tacit, next) ?? '默契度 $tacit / 下一级 $next'
+                        : l10nOf(context)?.partnersRapport(tacit) ?? '默契度 $tacit',
                   ),
-              _sectionHeader(theme, '最近玩伴', '退出房间后也能找回一起玩过的人'),
+              _sectionHeader(theme, l10nOf(context)?.partnersRecentPlaymates ?? '最近玩伴', l10nOf(context)?.partnersFindPeopleYouPlayed ?? '退出房间后也能找回一起玩过的人'),
               ..._recentSection(theme),
               const SizedBox(height: AppSpacing.xl),
             ],
@@ -231,7 +233,7 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: AppSpacing.lg),
           child: ErrorRetryCard(
-            message: '最近玩伴拉取失败',
+            message: l10nOf(context)?.partnersFailedLoadRecentPlaymates ?? '最近玩伴拉取失败',
             detail: error,
             onRetry: () => unawaited(_loadRecent()),
           ),
@@ -239,7 +241,7 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
       ];
     }
     if (recent == null) {
-      return const [
+      return [
         Padding(
           padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: Center(child: CircularProgressIndicator()),
@@ -247,13 +249,13 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
       ];
     }
     if (recent.isEmpty) {
-      return const [
+      return [
         Padding(
           padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
           child: EmptyState(
             icon: Icons.people_outline,
-            title: '还没有一起玩过的伙伴',
-            hint: '进过房间后这里会出现一起玩过的人',
+            title: l10nOf(context)?.partnersNoPlaymatesYet ?? '还没有一起玩过的伙伴',
+            hint: l10nOf(context)?.partnersPeopleYouPlayedAppear ?? '进过房间后这里会出现一起玩过的人',
           ),
         ),
       ];
@@ -268,7 +270,7 @@ class _PartnersPageState extends ConsumerState<PartnersPage> {
               color: theme.colorScheme.outline,
             ),
           ),
-          subtitle: '最近一起玩过',
+          subtitle: l10nOf(context)?.partnersRecentlyPlayed ?? '最近一起玩过',
         ),
     ];
   }

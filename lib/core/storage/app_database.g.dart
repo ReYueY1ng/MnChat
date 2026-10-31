@@ -2781,6 +2781,726 @@ class SettingsTableCompanion extends UpdateCompanion<SettingRecord> {
   }
 }
 
+class $ChatOutboxTable extends ChatOutbox
+    with TableInfo<$ChatOutboxTable, ChatOutboxRecord> {
+  @override
+  final GeneratedDatabase attachedDatabase;
+  final String? _alias;
+  $ChatOutboxTable(this.attachedDatabase, [this._alias]);
+  static const VerificationMeta _idMeta = const VerificationMeta('id');
+  @override
+  late final GeneratedColumn<int> id = GeneratedColumn<int>(
+    'id',
+    aliasedName,
+    false,
+    hasAutoIncrement: true,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultConstraints: GeneratedColumn.constraintIsAlways(
+      'PRIMARY KEY AUTOINCREMENT',
+    ),
+  );
+  static const VerificationMeta _ownerUinMeta = const VerificationMeta(
+    'ownerUin',
+  );
+  @override
+  late final GeneratedColumn<int> ownerUin = GeneratedColumn<int>(
+    'owner_uin',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionKeyMeta = const VerificationMeta(
+    'sessionKey',
+  );
+  @override
+  late final GeneratedColumn<String> sessionKey = GeneratedColumn<String>(
+    'session_key',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _typeIdMeta = const VerificationMeta('typeId');
+  @override
+  late final GeneratedColumn<int> typeId = GeneratedColumn<int>(
+    'type_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _sessionIdMeta = const VerificationMeta(
+    'sessionId',
+  );
+  @override
+  late final GeneratedColumn<int> sessionId = GeneratedColumn<int>(
+    'session_id',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _contentMeta = const VerificationMeta(
+    'content',
+  );
+  @override
+  late final GeneratedColumn<String> content = GeneratedColumn<String>(
+    'content',
+    aliasedName,
+    false,
+    type: DriftSqlType.string,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _extendDataMeta = const VerificationMeta(
+    'extendData',
+  );
+  @override
+  late final GeneratedColumn<String> extendData = GeneratedColumn<String>(
+    'extend_data',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  static const VerificationMeta _msgTypeMeta = const VerificationMeta(
+    'msgType',
+  );
+  @override
+  late final GeneratedColumn<int> msgType = GeneratedColumn<int>(
+    'msg_type',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(1),
+  );
+  static const VerificationMeta _createdAtMeta = const VerificationMeta(
+    'createdAt',
+  );
+  @override
+  late final GeneratedColumn<int> createdAt = GeneratedColumn<int>(
+    'created_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _attemptsMeta = const VerificationMeta(
+    'attempts',
+  );
+  @override
+  late final GeneratedColumn<int> attempts = GeneratedColumn<int>(
+    'attempts',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: false,
+    defaultValue: const Constant(0),
+  );
+  static const VerificationMeta _nextAttemptAtMeta = const VerificationMeta(
+    'nextAttemptAt',
+  );
+  @override
+  late final GeneratedColumn<int> nextAttemptAt = GeneratedColumn<int>(
+    'next_attempt_at',
+    aliasedName,
+    false,
+    type: DriftSqlType.int,
+    requiredDuringInsert: true,
+  );
+  static const VerificationMeta _lastErrorMeta = const VerificationMeta(
+    'lastError',
+  );
+  @override
+  late final GeneratedColumn<String> lastError = GeneratedColumn<String>(
+    'last_error',
+    aliasedName,
+    true,
+    type: DriftSqlType.string,
+    requiredDuringInsert: false,
+  );
+  @override
+  List<GeneratedColumn> get $columns => [
+    id,
+    ownerUin,
+    sessionKey,
+    typeId,
+    sessionId,
+    content,
+    extendData,
+    msgType,
+    createdAt,
+    attempts,
+    nextAttemptAt,
+    lastError,
+  ];
+  @override
+  String get aliasedName => _alias ?? actualTableName;
+  @override
+  String get actualTableName => $name;
+  static const String $name = 'chat_outbox';
+  @override
+  VerificationContext validateIntegrity(
+    Insertable<ChatOutboxRecord> instance, {
+    bool isInserting = false,
+  }) {
+    final context = VerificationContext();
+    final data = instance.toColumns(true);
+    if (data.containsKey('id')) {
+      context.handle(_idMeta, id.isAcceptableOrUnknown(data['id']!, _idMeta));
+    }
+    if (data.containsKey('owner_uin')) {
+      context.handle(
+        _ownerUinMeta,
+        ownerUin.isAcceptableOrUnknown(data['owner_uin']!, _ownerUinMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_ownerUinMeta);
+    }
+    if (data.containsKey('session_key')) {
+      context.handle(
+        _sessionKeyMeta,
+        sessionKey.isAcceptableOrUnknown(data['session_key']!, _sessionKeyMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionKeyMeta);
+    }
+    if (data.containsKey('type_id')) {
+      context.handle(
+        _typeIdMeta,
+        typeId.isAcceptableOrUnknown(data['type_id']!, _typeIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_typeIdMeta);
+    }
+    if (data.containsKey('session_id')) {
+      context.handle(
+        _sessionIdMeta,
+        sessionId.isAcceptableOrUnknown(data['session_id']!, _sessionIdMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_sessionIdMeta);
+    }
+    if (data.containsKey('content')) {
+      context.handle(
+        _contentMeta,
+        content.isAcceptableOrUnknown(data['content']!, _contentMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_contentMeta);
+    }
+    if (data.containsKey('extend_data')) {
+      context.handle(
+        _extendDataMeta,
+        extendData.isAcceptableOrUnknown(data['extend_data']!, _extendDataMeta),
+      );
+    }
+    if (data.containsKey('msg_type')) {
+      context.handle(
+        _msgTypeMeta,
+        msgType.isAcceptableOrUnknown(data['msg_type']!, _msgTypeMeta),
+      );
+    }
+    if (data.containsKey('created_at')) {
+      context.handle(
+        _createdAtMeta,
+        createdAt.isAcceptableOrUnknown(data['created_at']!, _createdAtMeta),
+      );
+    } else if (isInserting) {
+      context.missing(_createdAtMeta);
+    }
+    if (data.containsKey('attempts')) {
+      context.handle(
+        _attemptsMeta,
+        attempts.isAcceptableOrUnknown(data['attempts']!, _attemptsMeta),
+      );
+    }
+    if (data.containsKey('next_attempt_at')) {
+      context.handle(
+        _nextAttemptAtMeta,
+        nextAttemptAt.isAcceptableOrUnknown(
+          data['next_attempt_at']!,
+          _nextAttemptAtMeta,
+        ),
+      );
+    } else if (isInserting) {
+      context.missing(_nextAttemptAtMeta);
+    }
+    if (data.containsKey('last_error')) {
+      context.handle(
+        _lastErrorMeta,
+        lastError.isAcceptableOrUnknown(data['last_error']!, _lastErrorMeta),
+      );
+    }
+    return context;
+  }
+
+  @override
+  Set<GeneratedColumn> get $primaryKey => {id};
+  @override
+  ChatOutboxRecord map(Map<String, dynamic> data, {String? tablePrefix}) {
+    final effectivePrefix = tablePrefix != null ? '$tablePrefix.' : '';
+    return ChatOutboxRecord(
+      id: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}id'],
+      )!,
+      ownerUin: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}owner_uin'],
+      )!,
+      sessionKey: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}session_key'],
+      )!,
+      typeId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}type_id'],
+      )!,
+      sessionId: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}session_id'],
+      )!,
+      content: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}content'],
+      )!,
+      extendData: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}extend_data'],
+      ),
+      msgType: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}msg_type'],
+      )!,
+      createdAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}created_at'],
+      )!,
+      attempts: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}attempts'],
+      )!,
+      nextAttemptAt: attachedDatabase.typeMapping.read(
+        DriftSqlType.int,
+        data['${effectivePrefix}next_attempt_at'],
+      )!,
+      lastError: attachedDatabase.typeMapping.read(
+        DriftSqlType.string,
+        data['${effectivePrefix}last_error'],
+      ),
+    );
+  }
+
+  @override
+  $ChatOutboxTable createAlias(String alias) {
+    return $ChatOutboxTable(attachedDatabase, alias);
+  }
+}
+
+class ChatOutboxRecord extends DataClass
+    implements Insertable<ChatOutboxRecord> {
+  final int id;
+
+  /// 账号归属（多账号隔离）。
+  final int ownerUin;
+
+  /// 会话 key（`friend_123` / `group_456`）。
+  final String sessionKey;
+
+  /// 会话类型（1=好友，2=群；与 `ChatSessionType.index + 1` 对应）。
+  final int typeId;
+
+  /// 好友 uin 或群 id。
+  final int sessionId;
+
+  /// 消息正文（列名不能叫 `text`：与 drift `Table.text` 方法冲突）。
+  final String content;
+
+  /// 私有信封（引用/输入状态）的 extend_data；普通文本为空。
+  final String? extendData;
+
+  /// 服务端消息类型（1=普通文本，3/4=卡片）。
+  final int msgType;
+  final int createdAt;
+
+  /// 已尝试次数（0 = 还没重试过）。
+  final int attempts;
+
+  /// 下一次可重试的时间（epoch 秒）。
+  final int nextAttemptAt;
+
+  /// 最近一次失败原因，供 UI 显示。
+  final String? lastError;
+  const ChatOutboxRecord({
+    required this.id,
+    required this.ownerUin,
+    required this.sessionKey,
+    required this.typeId,
+    required this.sessionId,
+    required this.content,
+    this.extendData,
+    required this.msgType,
+    required this.createdAt,
+    required this.attempts,
+    required this.nextAttemptAt,
+    this.lastError,
+  });
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    map['id'] = Variable<int>(id);
+    map['owner_uin'] = Variable<int>(ownerUin);
+    map['session_key'] = Variable<String>(sessionKey);
+    map['type_id'] = Variable<int>(typeId);
+    map['session_id'] = Variable<int>(sessionId);
+    map['content'] = Variable<String>(content);
+    if (!nullToAbsent || extendData != null) {
+      map['extend_data'] = Variable<String>(extendData);
+    }
+    map['msg_type'] = Variable<int>(msgType);
+    map['created_at'] = Variable<int>(createdAt);
+    map['attempts'] = Variable<int>(attempts);
+    map['next_attempt_at'] = Variable<int>(nextAttemptAt);
+    if (!nullToAbsent || lastError != null) {
+      map['last_error'] = Variable<String>(lastError);
+    }
+    return map;
+  }
+
+  ChatOutboxCompanion toCompanion(bool nullToAbsent) {
+    return ChatOutboxCompanion(
+      id: Value(id),
+      ownerUin: Value(ownerUin),
+      sessionKey: Value(sessionKey),
+      typeId: Value(typeId),
+      sessionId: Value(sessionId),
+      content: Value(content),
+      extendData: extendData == null && nullToAbsent
+          ? const Value.absent()
+          : Value(extendData),
+      msgType: Value(msgType),
+      createdAt: Value(createdAt),
+      attempts: Value(attempts),
+      nextAttemptAt: Value(nextAttemptAt),
+      lastError: lastError == null && nullToAbsent
+          ? const Value.absent()
+          : Value(lastError),
+    );
+  }
+
+  factory ChatOutboxRecord.fromJson(
+    Map<String, dynamic> json, {
+    ValueSerializer? serializer,
+  }) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return ChatOutboxRecord(
+      id: serializer.fromJson<int>(json['id']),
+      ownerUin: serializer.fromJson<int>(json['ownerUin']),
+      sessionKey: serializer.fromJson<String>(json['sessionKey']),
+      typeId: serializer.fromJson<int>(json['typeId']),
+      sessionId: serializer.fromJson<int>(json['sessionId']),
+      content: serializer.fromJson<String>(json['content']),
+      extendData: serializer.fromJson<String?>(json['extendData']),
+      msgType: serializer.fromJson<int>(json['msgType']),
+      createdAt: serializer.fromJson<int>(json['createdAt']),
+      attempts: serializer.fromJson<int>(json['attempts']),
+      nextAttemptAt: serializer.fromJson<int>(json['nextAttemptAt']),
+      lastError: serializer.fromJson<String?>(json['lastError']),
+    );
+  }
+  @override
+  Map<String, dynamic> toJson({ValueSerializer? serializer}) {
+    serializer ??= driftRuntimeOptions.defaultSerializer;
+    return <String, dynamic>{
+      'id': serializer.toJson<int>(id),
+      'ownerUin': serializer.toJson<int>(ownerUin),
+      'sessionKey': serializer.toJson<String>(sessionKey),
+      'typeId': serializer.toJson<int>(typeId),
+      'sessionId': serializer.toJson<int>(sessionId),
+      'content': serializer.toJson<String>(content),
+      'extendData': serializer.toJson<String?>(extendData),
+      'msgType': serializer.toJson<int>(msgType),
+      'createdAt': serializer.toJson<int>(createdAt),
+      'attempts': serializer.toJson<int>(attempts),
+      'nextAttemptAt': serializer.toJson<int>(nextAttemptAt),
+      'lastError': serializer.toJson<String?>(lastError),
+    };
+  }
+
+  ChatOutboxRecord copyWith({
+    int? id,
+    int? ownerUin,
+    String? sessionKey,
+    int? typeId,
+    int? sessionId,
+    String? content,
+    Value<String?> extendData = const Value.absent(),
+    int? msgType,
+    int? createdAt,
+    int? attempts,
+    int? nextAttemptAt,
+    Value<String?> lastError = const Value.absent(),
+  }) => ChatOutboxRecord(
+    id: id ?? this.id,
+    ownerUin: ownerUin ?? this.ownerUin,
+    sessionKey: sessionKey ?? this.sessionKey,
+    typeId: typeId ?? this.typeId,
+    sessionId: sessionId ?? this.sessionId,
+    content: content ?? this.content,
+    extendData: extendData.present ? extendData.value : this.extendData,
+    msgType: msgType ?? this.msgType,
+    createdAt: createdAt ?? this.createdAt,
+    attempts: attempts ?? this.attempts,
+    nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+    lastError: lastError.present ? lastError.value : this.lastError,
+  );
+  ChatOutboxRecord copyWithCompanion(ChatOutboxCompanion data) {
+    return ChatOutboxRecord(
+      id: data.id.present ? data.id.value : this.id,
+      ownerUin: data.ownerUin.present ? data.ownerUin.value : this.ownerUin,
+      sessionKey: data.sessionKey.present
+          ? data.sessionKey.value
+          : this.sessionKey,
+      typeId: data.typeId.present ? data.typeId.value : this.typeId,
+      sessionId: data.sessionId.present ? data.sessionId.value : this.sessionId,
+      content: data.content.present ? data.content.value : this.content,
+      extendData: data.extendData.present
+          ? data.extendData.value
+          : this.extendData,
+      msgType: data.msgType.present ? data.msgType.value : this.msgType,
+      createdAt: data.createdAt.present ? data.createdAt.value : this.createdAt,
+      attempts: data.attempts.present ? data.attempts.value : this.attempts,
+      nextAttemptAt: data.nextAttemptAt.present
+          ? data.nextAttemptAt.value
+          : this.nextAttemptAt,
+      lastError: data.lastError.present ? data.lastError.value : this.lastError,
+    );
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ChatOutboxRecord(')
+          ..write('id: $id, ')
+          ..write('ownerUin: $ownerUin, ')
+          ..write('sessionKey: $sessionKey, ')
+          ..write('typeId: $typeId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('content: $content, ')
+          ..write('extendData: $extendData, ')
+          ..write('msgType: $msgType, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('lastError: $lastError')
+          ..write(')'))
+        .toString();
+  }
+
+  @override
+  int get hashCode => Object.hash(
+    id,
+    ownerUin,
+    sessionKey,
+    typeId,
+    sessionId,
+    content,
+    extendData,
+    msgType,
+    createdAt,
+    attempts,
+    nextAttemptAt,
+    lastError,
+  );
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      (other is ChatOutboxRecord &&
+          other.id == this.id &&
+          other.ownerUin == this.ownerUin &&
+          other.sessionKey == this.sessionKey &&
+          other.typeId == this.typeId &&
+          other.sessionId == this.sessionId &&
+          other.content == this.content &&
+          other.extendData == this.extendData &&
+          other.msgType == this.msgType &&
+          other.createdAt == this.createdAt &&
+          other.attempts == this.attempts &&
+          other.nextAttemptAt == this.nextAttemptAt &&
+          other.lastError == this.lastError);
+}
+
+class ChatOutboxCompanion extends UpdateCompanion<ChatOutboxRecord> {
+  final Value<int> id;
+  final Value<int> ownerUin;
+  final Value<String> sessionKey;
+  final Value<int> typeId;
+  final Value<int> sessionId;
+  final Value<String> content;
+  final Value<String?> extendData;
+  final Value<int> msgType;
+  final Value<int> createdAt;
+  final Value<int> attempts;
+  final Value<int> nextAttemptAt;
+  final Value<String?> lastError;
+  const ChatOutboxCompanion({
+    this.id = const Value.absent(),
+    this.ownerUin = const Value.absent(),
+    this.sessionKey = const Value.absent(),
+    this.typeId = const Value.absent(),
+    this.sessionId = const Value.absent(),
+    this.content = const Value.absent(),
+    this.extendData = const Value.absent(),
+    this.msgType = const Value.absent(),
+    this.createdAt = const Value.absent(),
+    this.attempts = const Value.absent(),
+    this.nextAttemptAt = const Value.absent(),
+    this.lastError = const Value.absent(),
+  });
+  ChatOutboxCompanion.insert({
+    this.id = const Value.absent(),
+    required int ownerUin,
+    required String sessionKey,
+    required int typeId,
+    required int sessionId,
+    required String content,
+    this.extendData = const Value.absent(),
+    this.msgType = const Value.absent(),
+    required int createdAt,
+    this.attempts = const Value.absent(),
+    required int nextAttemptAt,
+    this.lastError = const Value.absent(),
+  }) : ownerUin = Value(ownerUin),
+       sessionKey = Value(sessionKey),
+       typeId = Value(typeId),
+       sessionId = Value(sessionId),
+       content = Value(content),
+       createdAt = Value(createdAt),
+       nextAttemptAt = Value(nextAttemptAt);
+  static Insertable<ChatOutboxRecord> custom({
+    Expression<int>? id,
+    Expression<int>? ownerUin,
+    Expression<String>? sessionKey,
+    Expression<int>? typeId,
+    Expression<int>? sessionId,
+    Expression<String>? content,
+    Expression<String>? extendData,
+    Expression<int>? msgType,
+    Expression<int>? createdAt,
+    Expression<int>? attempts,
+    Expression<int>? nextAttemptAt,
+    Expression<String>? lastError,
+  }) {
+    return RawValuesInsertable({
+      if (id != null) 'id': id,
+      if (ownerUin != null) 'owner_uin': ownerUin,
+      if (sessionKey != null) 'session_key': sessionKey,
+      if (typeId != null) 'type_id': typeId,
+      if (sessionId != null) 'session_id': sessionId,
+      if (content != null) 'content': content,
+      if (extendData != null) 'extend_data': extendData,
+      if (msgType != null) 'msg_type': msgType,
+      if (createdAt != null) 'created_at': createdAt,
+      if (attempts != null) 'attempts': attempts,
+      if (nextAttemptAt != null) 'next_attempt_at': nextAttemptAt,
+      if (lastError != null) 'last_error': lastError,
+    });
+  }
+
+  ChatOutboxCompanion copyWith({
+    Value<int>? id,
+    Value<int>? ownerUin,
+    Value<String>? sessionKey,
+    Value<int>? typeId,
+    Value<int>? sessionId,
+    Value<String>? content,
+    Value<String?>? extendData,
+    Value<int>? msgType,
+    Value<int>? createdAt,
+    Value<int>? attempts,
+    Value<int>? nextAttemptAt,
+    Value<String?>? lastError,
+  }) {
+    return ChatOutboxCompanion(
+      id: id ?? this.id,
+      ownerUin: ownerUin ?? this.ownerUin,
+      sessionKey: sessionKey ?? this.sessionKey,
+      typeId: typeId ?? this.typeId,
+      sessionId: sessionId ?? this.sessionId,
+      content: content ?? this.content,
+      extendData: extendData ?? this.extendData,
+      msgType: msgType ?? this.msgType,
+      createdAt: createdAt ?? this.createdAt,
+      attempts: attempts ?? this.attempts,
+      nextAttemptAt: nextAttemptAt ?? this.nextAttemptAt,
+      lastError: lastError ?? this.lastError,
+    );
+  }
+
+  @override
+  Map<String, Expression> toColumns(bool nullToAbsent) {
+    final map = <String, Expression>{};
+    if (id.present) {
+      map['id'] = Variable<int>(id.value);
+    }
+    if (ownerUin.present) {
+      map['owner_uin'] = Variable<int>(ownerUin.value);
+    }
+    if (sessionKey.present) {
+      map['session_key'] = Variable<String>(sessionKey.value);
+    }
+    if (typeId.present) {
+      map['type_id'] = Variable<int>(typeId.value);
+    }
+    if (sessionId.present) {
+      map['session_id'] = Variable<int>(sessionId.value);
+    }
+    if (content.present) {
+      map['content'] = Variable<String>(content.value);
+    }
+    if (extendData.present) {
+      map['extend_data'] = Variable<String>(extendData.value);
+    }
+    if (msgType.present) {
+      map['msg_type'] = Variable<int>(msgType.value);
+    }
+    if (createdAt.present) {
+      map['created_at'] = Variable<int>(createdAt.value);
+    }
+    if (attempts.present) {
+      map['attempts'] = Variable<int>(attempts.value);
+    }
+    if (nextAttemptAt.present) {
+      map['next_attempt_at'] = Variable<int>(nextAttemptAt.value);
+    }
+    if (lastError.present) {
+      map['last_error'] = Variable<String>(lastError.value);
+    }
+    return map;
+  }
+
+  @override
+  String toString() {
+    return (StringBuffer('ChatOutboxCompanion(')
+          ..write('id: $id, ')
+          ..write('ownerUin: $ownerUin, ')
+          ..write('sessionKey: $sessionKey, ')
+          ..write('typeId: $typeId, ')
+          ..write('sessionId: $sessionId, ')
+          ..write('content: $content, ')
+          ..write('extendData: $extendData, ')
+          ..write('msgType: $msgType, ')
+          ..write('createdAt: $createdAt, ')
+          ..write('attempts: $attempts, ')
+          ..write('nextAttemptAt: $nextAttemptAt, ')
+          ..write('lastError: $lastError')
+          ..write(')'))
+        .toString();
+  }
+}
+
 abstract class _$AppDatabase extends GeneratedDatabase {
   _$AppDatabase(QueryExecutor e) : super(e);
   $AppDatabaseManager get managers => $AppDatabaseManager(this);
@@ -2789,6 +3509,7 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final $FriendsTable friends = $FriendsTable(this);
   late final $MessageMarksTable messageMarks = $MessageMarksTable(this);
   late final $SettingsTableTable settingsTable = $SettingsTableTable(this);
+  late final $ChatOutboxTable chatOutbox = $ChatOutboxTable(this);
   late final Index idxChatMessagesOwnerSessionTime = Index(
     'idx_chat_messages_owner_session_time',
     'CREATE INDEX idx_chat_messages_owner_session_time ON chat_messages (owner_uin, session_key, time)',
@@ -2796,6 +3517,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
   late final Index idxChatMessagesOwnerTime = Index(
     'idx_chat_messages_owner_time',
     'CREATE INDEX idx_chat_messages_owner_time ON chat_messages (owner_uin, time)',
+  );
+  late final Index idxChatMessagesDedupe = Index(
+    'idx_chat_messages_dedupe',
+    'CREATE UNIQUE INDEX idx_chat_messages_dedupe ON chat_messages (owner_uin, session_key, uin, time, content)',
   );
   late final Index idxChatSessionsOwnerUin = Index(
     'idx_chat_sessions_owner_uin',
@@ -2809,6 +3534,10 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     'idx_message_marks_owner_kind',
     'CREATE INDEX idx_message_marks_owner_kind ON message_marks (owner_uin, kind)',
   );
+  late final Index idxChatOutboxOwnerNext = Index(
+    'idx_chat_outbox_owner_next',
+    'CREATE INDEX idx_chat_outbox_owner_next ON chat_outbox (owner_uin, next_attempt_at)',
+  );
   @override
   Iterable<TableInfo<Table, Object?>> get allTables =>
       allSchemaEntities.whereType<TableInfo<Table, Object?>>();
@@ -2819,11 +3548,14 @@ abstract class _$AppDatabase extends GeneratedDatabase {
     friends,
     messageMarks,
     settingsTable,
+    chatOutbox,
     idxChatMessagesOwnerSessionTime,
     idxChatMessagesOwnerTime,
+    idxChatMessagesDedupe,
     idxChatSessionsOwnerUin,
     idxFriendsOwnerUin,
     idxMessageMarksOwnerKind,
+    idxChatOutboxOwnerNext,
   ];
 }
 
@@ -4250,6 +4982,346 @@ typedef $$SettingsTableTableProcessedTableManager =
       SettingRecord,
       PrefetchHooks Function()
     >;
+typedef $$ChatOutboxTableCreateCompanionBuilder = ChatOutboxCompanion Function({
+  Value<int> id,
+  required int ownerUin,
+  required String sessionKey,
+  required int typeId,
+  required int sessionId,
+  required String content,
+  Value<String?> extendData,
+  Value<int> msgType,
+  required int createdAt,
+  Value<int> attempts,
+  required int nextAttemptAt,
+  Value<String?> lastError,
+});
+typedef $$ChatOutboxTableUpdateCompanionBuilder = ChatOutboxCompanion Function({
+  Value<int> id,
+  Value<int> ownerUin,
+  Value<String> sessionKey,
+  Value<int> typeId,
+  Value<int> sessionId,
+  Value<String> content,
+  Value<String?> extendData,
+  Value<int> msgType,
+  Value<int> createdAt,
+  Value<int> attempts,
+  Value<int> nextAttemptAt,
+  Value<String?> lastError,
+});
+
+class $$ChatOutboxTableFilterComposer
+    extends Composer<_$AppDatabase, $ChatOutboxTable> {
+  $$ChatOutboxTableFilterComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnFilters<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get typeId => $composableBuilder(
+    column: $table.typeId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get extendData => $composableBuilder(
+    column: $table.extendData,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get msgType => $composableBuilder(
+    column: $table.msgType,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnFilters(column),
+  );
+
+  ColumnFilters<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnFilters(column),
+  );
+}
+
+class $$ChatOutboxTableOrderingComposer
+    extends Composer<_$AppDatabase, $ChatOutboxTable> {
+  $$ChatOutboxTableOrderingComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  ColumnOrderings<int> get id => $composableBuilder(
+    column: $table.id,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get ownerUin => $composableBuilder(
+    column: $table.ownerUin,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get typeId => $composableBuilder(
+    column: $table.typeId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get sessionId => $composableBuilder(
+    column: $table.sessionId,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get content => $composableBuilder(
+    column: $table.content,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get extendData => $composableBuilder(
+    column: $table.extendData,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get msgType => $composableBuilder(
+    column: $table.msgType,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get createdAt => $composableBuilder(
+    column: $table.createdAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get attempts => $composableBuilder(
+    column: $table.attempts,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => ColumnOrderings(column),
+  );
+
+  ColumnOrderings<String> get lastError => $composableBuilder(
+    column: $table.lastError,
+    builder: (column) => ColumnOrderings(column),
+  );
+}
+
+class $$ChatOutboxTableAnnotationComposer
+    extends Composer<_$AppDatabase, $ChatOutboxTable> {
+  $$ChatOutboxTableAnnotationComposer({
+    required super.$db,
+    required super.$table,
+    super.joinBuilder,
+    super.$addJoinBuilderToRootComposer,
+    super.$removeJoinBuilderFromRootComposer,
+  });
+  GeneratedColumn<int> get id =>
+      $composableBuilder(column: $table.id, builder: (column) => column);
+
+  GeneratedColumn<int> get ownerUin =>
+      $composableBuilder(column: $table.ownerUin, builder: (column) => column);
+
+  GeneratedColumn<String> get sessionKey => $composableBuilder(
+    column: $table.sessionKey,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get typeId =>
+      $composableBuilder(column: $table.typeId, builder: (column) => column);
+
+  GeneratedColumn<int> get sessionId =>
+      $composableBuilder(column: $table.sessionId, builder: (column) => column);
+
+  GeneratedColumn<String> get content =>
+      $composableBuilder(column: $table.content, builder: (column) => column);
+
+  GeneratedColumn<String> get extendData => $composableBuilder(
+    column: $table.extendData,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<int> get msgType =>
+      $composableBuilder(column: $table.msgType, builder: (column) => column);
+
+  GeneratedColumn<int> get createdAt =>
+      $composableBuilder(column: $table.createdAt, builder: (column) => column);
+
+  GeneratedColumn<int> get attempts =>
+      $composableBuilder(column: $table.attempts, builder: (column) => column);
+
+  GeneratedColumn<int> get nextAttemptAt => $composableBuilder(
+    column: $table.nextAttemptAt,
+    builder: (column) => column,
+  );
+
+  GeneratedColumn<String> get lastError =>
+      $composableBuilder(column: $table.lastError, builder: (column) => column);
+}
+
+class $$ChatOutboxTableTableManager
+    extends
+        RootTableManager<
+          _$AppDatabase,
+          $ChatOutboxTable,
+          ChatOutboxRecord,
+          $$ChatOutboxTableFilterComposer,
+          $$ChatOutboxTableOrderingComposer,
+          $$ChatOutboxTableAnnotationComposer,
+          $$ChatOutboxTableCreateCompanionBuilder,
+          $$ChatOutboxTableUpdateCompanionBuilder,
+          (
+            ChatOutboxRecord,
+            BaseReferences<_$AppDatabase, $ChatOutboxTable, ChatOutboxRecord>,
+          ),
+          ChatOutboxRecord,
+          PrefetchHooks Function()
+        > {
+  $$ChatOutboxTableTableManager(_$AppDatabase db, $ChatOutboxTable table)
+    : super(
+        TableManagerState(
+          db: db,
+          table: table,
+          createFilteringComposer: () =>
+              $$ChatOutboxTableFilterComposer($db: db, $table: table),
+          createOrderingComposer: () =>
+              $$ChatOutboxTableOrderingComposer($db: db, $table: table),
+          createComputedFieldComposer: () =>
+              $$ChatOutboxTableAnnotationComposer($db: db, $table: table),
+          updateCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                Value<int> ownerUin = const Value.absent(),
+                Value<String> sessionKey = const Value.absent(),
+                Value<int> typeId = const Value.absent(),
+                Value<int> sessionId = const Value.absent(),
+                Value<String> content = const Value.absent(),
+                Value<String?> extendData = const Value.absent(),
+                Value<int> msgType = const Value.absent(),
+                Value<int> createdAt = const Value.absent(),
+                Value<int> attempts = const Value.absent(),
+                Value<int> nextAttemptAt = const Value.absent(),
+                Value<String?> lastError = const Value.absent(),
+              }) => ChatOutboxCompanion(
+                id: id,
+                ownerUin: ownerUin,
+                sessionKey: sessionKey,
+                typeId: typeId,
+                sessionId: sessionId,
+                content: content,
+                extendData: extendData,
+                msgType: msgType,
+                createdAt: createdAt,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
+                lastError: lastError,
+              ),
+          createCompanionCallback:
+              ({
+                Value<int> id = const Value.absent(),
+                required int ownerUin,
+                required String sessionKey,
+                required int typeId,
+                required int sessionId,
+                required String content,
+                Value<String?> extendData = const Value.absent(),
+                Value<int> msgType = const Value.absent(),
+                required int createdAt,
+                Value<int> attempts = const Value.absent(),
+                required int nextAttemptAt,
+                Value<String?> lastError = const Value.absent(),
+              }) => ChatOutboxCompanion.insert(
+                id: id,
+                ownerUin: ownerUin,
+                sessionKey: sessionKey,
+                typeId: typeId,
+                sessionId: sessionId,
+                content: content,
+                extendData: extendData,
+                msgType: msgType,
+                createdAt: createdAt,
+                attempts: attempts,
+                nextAttemptAt: nextAttemptAt,
+                lastError: lastError,
+              ),
+          withReferenceMapper: (p0) => p0
+              .map(
+                (e) => (
+                  e.readTable<$ChatOutboxTable, ChatOutboxRecord>(table),
+                  BaseReferences<
+                    _$AppDatabase,
+                    $ChatOutboxTable,
+                    ChatOutboxRecord
+                  >(db, table, e),
+                ),
+              )
+              .toList(),
+          prefetchHooksCallback: null,
+        ),
+      );
+}
+
+typedef $$ChatOutboxTableProcessedTableManager =
+    ProcessedTableManager<
+      _$AppDatabase,
+      $ChatOutboxTable,
+      ChatOutboxRecord,
+      $$ChatOutboxTableFilterComposer,
+      $$ChatOutboxTableOrderingComposer,
+      $$ChatOutboxTableAnnotationComposer,
+      $$ChatOutboxTableCreateCompanionBuilder,
+      $$ChatOutboxTableUpdateCompanionBuilder,
+      (
+        ChatOutboxRecord,
+        BaseReferences<_$AppDatabase, $ChatOutboxTable, ChatOutboxRecord>,
+      ),
+      ChatOutboxRecord,
+      PrefetchHooks Function()
+    >;
 
 class $AppDatabaseManager {
   final _$AppDatabase _db;
@@ -4264,4 +5336,6 @@ class $AppDatabaseManager {
       $$MessageMarksTableTableManager(_db, _db.messageMarks);
   $$SettingsTableTableTableManager get settingsTable =>
       $$SettingsTableTableTableManager(_db, _db.settingsTable);
+  $$ChatOutboxTableTableManager get chatOutbox =>
+      $$ChatOutboxTableTableManager(_db, _db.chatOutbox);
 }

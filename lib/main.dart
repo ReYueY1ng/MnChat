@@ -1,36 +1,34 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:material_ui/material_ui.dart';
 import 'package:media_kit/media_kit.dart' show MediaKit;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:app_links/app_links.dart';
-import 'package:quick_actions/quick_actions.dart';
+import 'package:path_provider/path_provider.dart';
 
+import 'app/deep_link_coordinator.dart' show DeepLinkCoordinator;
+import 'app/desktop_shell.dart' show initDesktopShell;
 import 'core/models/deep_link.dart';
 import 'core/models/messages.dart';
 import 'core/models/mention.dart' show textMentions;
 import 'core/models/nickname.dart' show plainNickname;
 import 'core/models/skin_head_catalog.dart' show headIconAsset;
 import 'core/services/app_lock.dart';
+import 'core/services/diagnostics.dart' show installCrashHandlers;
 import 'core/services/chat/online_notify.dart'
     show newlyOnlineFriends, onlineFriendUins;
 import 'core/services/chat_service.dart'
     show ChatService, ChatEvent, SessionSnapshot;
 import 'core/services/notification_service.dart';
-import 'core/services/tray_service.dart';
 import 'core/storage/app_database.dart';
 import 'core/storage/settings_store.dart';
 import 'core/utils/log.dart';
+import 'core/utils/rotating_log.dart' show RotatingLogFile;
 import 'l10n/app_localizations.dart';
-import 'package:window_manager/window_manager.dart';
 import 'state/providers.dart';
 import 'ui/home_shell.dart' show MainShell;
-import 'ui/chat_search_page.dart' show ChatSearchPage;
-import 'ui/favorites_page.dart' show FavoritesPage;
 import 'ui/lock_page.dart';
 import 'ui/login_page.dart';
-import 'ui/partners_page.dart' show PartnersPage;
-import 'ui/video_player_page.dart' show VideoPlayerPage;
 import 'ui/theme/app_theme.dart';
 import 'ui/theme/app_tokens.dart' show AppContrast, isDesktopPlatform;
 
@@ -44,6 +42,20 @@ Future<void> main(List<String> args) async {
   MediaKit.ensureInitialized();
   // 桌面端深链：命令行参数（如 `mnchat://friend/123`）。Linux/Windows 的 Flutter
   // runner 会把 argv 交给入口函数，无需操作系统级协议注册即可打开指定会话。
+  // 日志落盘 + 全局错误钩子：必须在业务代码之前装好，否则启动期崩溃无处可查。
+  // 落盘失败（只读文件系统等）只降级为控制台日志，绝不阻断启动。
+  try {
+    final support = await getApplicationSupportDirectory();
+    final logFile = RotatingLogFile(
+      directory: Directory('${support.path}/logs'),
+    );
+    await logFile.init();
+    Log.addSink(logFile.write);
+    installCrashHandlers(flush: () => unawaited(logFile.flush()));
+  } catch (e) {
+    log.warn('日志文件初始化失败（已降级为控制台输出）: $e', tag: _logTag);
+  }
+
   final initialLink = parseDeepLink(args.isEmpty ? null : args.first);
   final db = AppDatabase(openAppDatabaseConnection());
   // 托盘/窗口初始化必须在 runApp **之后**、且不能 await：
@@ -57,89 +69,7 @@ Future<void> main(List<String> args) async {
       child: MnChatApp(initialLink: initialLink),
     ),
   );
-  unawaited(_initDesktopShell(db));
-}
-
-/// 初始化桌面壳层（系统托盘 + 关闭到托盘）。
-///
-/// 仅在桌面端生效；任何失败（含资源缺失）都只记日志并降级，绝不抛出，
-/// 避免影响已经渲染出来的界面。
-Future<void> _initDesktopShell(AppDatabase db) async {
-  try {
-    final store = SettingsStore(db);
-    final closeToTray = await store.getBool(
-      SettingsKeys.closeToTray,
-      fallback: true,
-    );
-    final trayReady = await TrayService.init(closeToTray: closeToTray);
-    // 只有桌面端才谈得上「托盘注册失败」；Android 上 init 直接返回 false，
-    // 那不是失败，别去改设置。
-    if (TrayService.isDesktop && !trayReady && closeToTray) {
-      // 没有可用托盘（Linux 上是 StatusNotifierWatcher 缺失）却还拦截关窗：
-      // 关窗后应用既不可见也召不回来。降级为「关窗即退出」，并把设置写回去，
-      // 设置页会显示为已关闭；下次启动就不会再拦。
-      await TrayService.setCloseToTray(false);
-      await store.setBool(SettingsKeys.closeToTray, false);
-      log.warn(
-        '系统托盘不可用，已自动关闭「关闭到托盘」（关窗现在会直接退出）',
-        tag: _logTag,
-      );
-    }
-    await _restoreWindowSize(store);
-  } catch (e) {
-    log.warn('桌面壳层初始化失败（已忽略）: $e', tag: _logTag);
-  }
-}
-
-/// 恢复上次的窗口尺寸，并监听后续变化。
-///
-/// 放在 main.dart 而不是 TrayService：它要读 SettingsStore（storage 层），
-/// 而 tray_service 只管托盘与窗口生命周期，不碰存储。
-Future<void> _restoreWindowSize(SettingsStore store) async {
-  if (!TrayService.isDesktop) return;
-  try {
-    final w = await store.getInt(SettingsKeys.windowWidth);
-    final h = await store.getInt(SettingsKeys.windowHeight);
-    // 低于最小可用尺寸的脏数据直接忽略（可能是手动改库或早期版本写的）。
-    if (w != null && h != null && w >= 480 && h >= 360) {
-      await windowManager.setSize(Size(w.toDouble(), h.toDouble()));
-    }
-    _windowKeeper = _WindowSizeKeeper(store);
-    windowManager.addListener(_windowKeeper!);
-  } catch (e) {
-    log.warn('窗口尺寸恢复失败（已忽略）: $e', tag: _logTag);
-  }
-}
-
-_WindowSizeKeeper? _windowKeeper;
-
-/// 记住窗口尺寸：拖动过程中会连续触发事件，停手 1.5s 才落盘。
-class _WindowSizeKeeper with WindowListener {
-  _WindowSizeKeeper(this._store);
-
-  final SettingsStore _store;
-  Timer? _debounce;
-
-  @override
-  void onWindowResize() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 1500), _save);
-  }
-
-  /// 关窗时补一次：否则「拖完立刻关窗」那次尺寸会丢。
-  @override
-  void onWindowClose() => _save();
-
-  Future<void> _save() async {
-    _debounce?.cancel();
-    try {
-      final size = await windowManager.getSize();
-      await _store.setInt(SettingsKeys.windowWidth, size.width.round());
-      await _store.setInt(SettingsKeys.windowHeight, size.height.round());
-    } catch (e) {
-      log.warn('窗口尺寸保存失败（已忽略）: $e', tag: _logTag);
-    }
-  }
+  unawaited(initDesktopShell(db));
 }
 
 class MnChatApp extends ConsumerStatefulWidget {
@@ -181,6 +111,9 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// 通知点击订阅（点通知 → 打开对应会话）。
   StreamSubscription<String>? _tapSub;
 
+  /// 通知上的「标记已读」订阅。
+  StreamSubscription<String>? _readSub;
+
   /// 每个会话最近的若干条正文，供通知折叠面板展示。
   final Map<String, List<String>> _recentTexts = {};
 
@@ -191,11 +124,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
   /// `activeSessionProvider`）。
   final GlobalKey<NavigatorState> _navKey = GlobalKey<NavigatorState>();
 
-  /// 待落地的深链（登录成功前先记下）。
-  DeepLink? _pendingLink;
-
-  /// 移动端深链订阅（桌面端为空）。
-  StreamSubscription<Uri>? _linkSub;
+  /// 深链/快捷方式路由（解析、挂起、登录后落地）。
+  late final DeepLinkCoordinator _links;
 
   /// 通知权限是否已申请过（只申请一次）。
   bool _notifyPermissionAsked = false;
@@ -223,9 +153,17 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       });
     });
     // 冷启动深链（桌面命令行 / 移动端 intent）与快捷方式：与通知点击共用同一条导航通道。
-    _pendingLink = widget.initialLink;
-    unawaited(_initDeepLinks());
-    unawaited(_initQuickActions());
+    _links = DeepLinkCoordinator(
+      navKey: _navKey,
+      isDesktop: isDesktopPlatform,
+      isReady: () =>
+          ref.read(authProvider).isLoggedIn || _autoLoginAvailable,
+      isAlive: () => mounted,
+      openSession: (type, id) =>
+          ref.read(activeSessionProvider.notifier).open(type, id),
+    );
+    _links.setInitial(widget.initialLink);
+    unawaited(_links.init());
     _prepareAutoLogin();
   }
 
@@ -256,6 +194,8 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     await svc.init();
     // 点击通知 → 打开对应会话（热启动）
     _tapSub = svc.taps.listen(_openSessionFromKey);
+    // 通知上的「标记已读」动作（目前只有 Linux 提供）
+    _readSub = svc.readRequests.listen(_markReadFromKey);
     // 冷启动：应用是被点击通知拉起来的 → 直接进那个会话
     final initial = await svc.initialTapSessionKey();
     if (initial != null && initial.isNotEmpty) _openSessionFromKey(initial);
@@ -264,112 +204,35 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
 
   /// 点击通知 → 打开对应会话（key 形如 `friend_123` / `group_456`）。
   void _openSessionFromKey(String key) {
-    final sep = key.lastIndexOf('_');
-    if (sep <= 0) return;
-    final id = int.tryParse(key.substring(sep + 1));
-    if (id == null || id == 0) return;
+    final parsed = _parseSessionKey(key);
+    if (parsed == null) return;
     // 尚未登录（冷启动早期）→ 先记住，登录成功后补开
     if (!mounted || !ref.read(authProvider).isLoggedIn) {
       _pendingTapSessionKey = key;
       return;
     }
+    ref.read(activeSessionProvider.notifier).open(parsed.type, parsed.id);
+  }
+
+  /// 通知上的「标记已读」→ 清掉该会话未读并撤掉通知。
+  void _markReadFromKey(String key) {
+    final parsed = _parseSessionKey(key);
+    if (parsed == null) return;
+    if (!mounted || !ref.read(authProvider).isLoggedIn) return;
+    ref.read(chatServiceProvider).markRead(parsed.type, parsed.id);
+    unawaited(_notifications?.cancel(key) ?? Future<void>.value());
+  }
+
+  /// 解析会话 key；格式非法返回 null。
+  ({ChatSessionType type, int id})? _parseSessionKey(String key) {
+    final sep = key.lastIndexOf('_');
+    if (sep <= 0) return null;
+    final id = int.tryParse(key.substring(sep + 1));
+    if (id == null || id == 0) return null;
     final type = key.substring(0, sep) == ChatSessionType.group.name
         ? ChatSessionType.group
         : ChatSessionType.friend;
-    ref.read(activeSessionProvider.notifier).open(type, id);
-  }
-
-  /// 深链初始化：桌面端只认命令行参数（见 [main]），移动端走 app_links。
-  ///
-  /// 桌面端刻意不调 app_links：Linux/Windows 上它没有可用实现，调用会抛；
-  /// 而命令行参数已经覆盖了“从终端/浏览器打开”的场景。
-  Future<void> _initDeepLinks() async {
-    if (isDesktopPlatform) return;
-    try {
-      final links = AppLinks();
-      final initial = await links.getInitialLink();
-      if (initial != null) _handleDeepLink(initial.toString());
-      _linkSub = links.uriLinkStream.listen(
-        (uri) => _handleDeepLink(uri.toString()),
-        onError: (Object e) => log.warn('深链条出错（已忽略）：$e', tag: _logTag),
-      );
-    } catch (e) {
-      log.warn('深链初始化失败（已忽略）：$e', tag: _logTag);
-    }
-  }
-
-  /// Android 桌面图标长按快捷方式 —— 类型就是深链字符串，与深链同一套路由。
-  Future<void> _initQuickActions() async {
-    if (isDesktopPlatform) return;
-    try {
-      const quickActions = QuickActions();
-      await quickActions.setShortcutItems(const <ShortcutItem>[
-        ShortcutItem(type: 'mnchat://search', localizedTitle: '搜索聊天记录'),
-        ShortcutItem(type: 'mnchat://favorites', localizedTitle: '收藏'),
-        ShortcutItem(type: 'mnchat://partners', localizedTitle: '我的搭子'),
-      ]);
-      // 快捷方式是回调式 API（不是 Stream）：直接接到同一套深链处理上。
-      await quickActions.initialize(_handleDeepLink);
-    } catch (e) {
-      log.warn('快捷方式初始化失败（已忽略）：$e', tag: _logTag);
-    }
-  }
-
-  /// 收到一条深链：先记下再尝试落地（未登录时留给 [_afterLogin]）。
-  void _handleDeepLink(String url) {
-    final link = parseDeepLink(url);
-    if (link == null) return;
-    _pendingLink = link;
-    _applyPendingLink();
-  }
-
-  /// 落地待处理的深链：会话交给 [_openSessionFromKey]（与通知点击完全同一条路，
-  /// 不新开页面栈），固定页面用 [_navKey] push。
-  void _applyPendingLink() {
-    final link = _pendingLink;
-    if (link == null || !mounted) return;
-    // 登录态就绪前不动：会话要等服务端会话列表，提前打开会被会话加载覆盖。
-    if (!(ref.read(authProvider).isLoggedIn || _autoLoginAvailable)) return;
-    _pendingLink = null;
-    if (link.isSession) {
-      _openSessionFromKey(link.sessionKey!);
-      return;
-    }
-    final view = link.view;
-    if (link.isVideo) {
-      final source = link.videoUrl!;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final nav = _navKey.currentState;
-        if (nav == null) {
-          _pendingLink = link;
-          return;
-        }
-        nav.push(
-          MaterialPageRoute<void>(
-            builder: (_) => VideoPlayerPage(source: source),
-          ),
-        );
-      });
-      return;
-    }
-    if (view == null) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final nav = _navKey.currentState;
-      if (nav == null) {
-        // 首帧还没建好 Navigator：留回待处理，下一次（登录/新深链）再试。
-        _pendingLink = link;
-        return;
-      }
-      nav.push(
-        MaterialPageRoute<void>(
-          builder: (_) => switch (view) {
-            DeepLinkView.favorites => const FavoritesPage(),
-            DeepLinkView.search => const ChatSearchPage(),
-            DeepLinkView.partners => const PartnersPage(),
-          },
-        ),
-      );
-    });
+    return (type: type, id: id);
   }
 
   /// 登录成功后的通知相关动作：申请权限 + 补开「登录前点击的通知」。
@@ -387,7 +250,7 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
       );
     }
     // 登录前到的深链 / 快捷方式在这里补做。
-    _applyPendingLink();
+    _links.apply();
   }
 
   /// 是否处于「用户看不到界面」的状态。
@@ -583,8 +446,9 @@ class _MnChatAppState extends ConsumerState<MnChatApp>
     _notifySub = null;
     _tapSub?.cancel();
     _tapSub = null;
-    _linkSub?.cancel();
-    _linkSub = null;
+    _readSub?.cancel();
+    _readSub = null;
+    _links.dispose();
     _notifications?.dispose();
     _notifications = null;
     super.dispose();

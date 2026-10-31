@@ -171,11 +171,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('确定'),
+            child: Text(l10nOf(context)?.commonConfirm ?? '确定'),
           ),
         ],
       ),
@@ -199,11 +199,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('取消'),
+            child: Text(l10nOf(context)?.commonCancel ?? '取消'),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(ctx, controller.text.trim()),
-            child: const Text('发布'),
+            child: Text(l10nOf(context)?.dynamicsDetailPublish ?? '发布'),
           ),
         ],
       ),
@@ -355,7 +355,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     if (contacts.isEmpty) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('暂无好友可分享')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsDetailNoFriendsShare ?? '暂无好友可分享')));
       }
       return;
     }
@@ -365,9 +365,9 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         child: ListView(
           shrinkWrap: true,
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
-                '分享动态到…',
+                l10nOf(context)?.dynamicsDetailShareMoment ?? '分享动态到…',
                 style: TextStyle(fontWeight: FontWeight.w600),
               ),
             ),
@@ -375,7 +375,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
               (c) => ListTile(
                 leading: const Icon(Icons.person),
                 title: Text(c.nickname.isNotEmpty ? c.nickname : '${c.uin}'),
-                subtitle: Text('迷你号 ${c.uin}'),
+                subtitle: Text(l10nOf(context)?.commonMiniID(c.uin) ?? '迷你号 ${c.uin}'),
                 onTap: () => Navigator.pop(ctx, c.uin),
               ),
             ),
@@ -394,12 +394,12 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       );
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('已分享给 $picked')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsDetailShared(picked) ?? '已分享给 $picked')));
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('分享失败: $e')));
+            .showSnackBar(SnackBar(content: Text(l10nOf(context)?.dynamicsDetailFailedShare(e) ?? '分享失败: $e')));
       }
     }
   }
@@ -409,21 +409,22 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 写评论：弹对话框 → addComment（act=add_comment，对齐
   /// dynamicsdatamanager.lua:1287-1330 AddComment）→ 刷新。
   Future<void> _writeComment() async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
-    final content = await _promptText(title: '写评论');
+    final content = await _promptText(title: l10nOf(context)?.dynamicsDetailWriteComment ?? '写评论');
     if (content == null) return;
     try {
       final ack = await client.addComment(widget.post.pid, content);
       if (!mounted) return;
       if (ack.ok) {
-        _toast('评论已发布');
+        _toast(l10nOf(context)?.dynamicsDetailCommentPosted ?? '评论已发布');
         _loadComments(reset: true);
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '发布失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailFailedPublish ?? '发布失败');
       }
     } catch (e) {
-      _toast('发布失败: $e');
+      _toast(l10n?.dynamicsDetailFailedPublish2(e) ?? '发布失败: $e');
     }
   }
 
@@ -437,21 +438,21 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     return <PopupMenuEntry<_CommentAction>>[
       PopupMenuItem<_CommentAction>(
         value: liked ? _CommentAction.unlike : _CommentAction.like,
-        child: Text(liked ? '取消点赞' : '点赞'),
+        child: Text(liked ? l10nOf(context)?.dynamicsDetailUnlike ?? '取消点赞' : l10nOf(context)?.dynamicsDetailLike ?? '点赞'),
       ),
       if (_isMinePost)
         PopupMenuItem<_CommentAction>(
           value: pinned ? _CommentAction.untop : _CommentAction.top,
-          child: Text(pinned ? '取消置顶' : '置顶'),
+          child: Text(pinned ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶'),
         ),
-      const PopupMenuItem<_CommentAction>(
+      PopupMenuItem<_CommentAction>(
         value: _CommentAction.reply,
-        child: Text('回复'),
+        child: Text(l10nOf(context)?.dynamicsDetailReply ?? '回复'),
       ),
       if (canDelete)
-        const PopupMenuItem<_CommentAction>(
+        PopupMenuItem<_CommentAction>(
           value: _CommentAction.delete,
-          child: Text('删除评论'),
+          child: Text(l10nOf(context)?.dynamicsDetailDeleteComment ?? '删除评论'),
         ),
     ];
   }
@@ -497,6 +498,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 评论点赞 / 取消（act=prize_comment；对齐
   /// dynamicsdatamanager.lua:3453-3476 ReqCommentPrise）。
   Future<void> _toggleCommentLike(int index, bool prize) async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null || index >= _comments.length) return;
     final c = _comments[index];
@@ -507,11 +509,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       final ack = await client.prizeComment(c, prize: prize);
       if (!ack.ok) {
         _applyCommentLike(key, !prize);
-        _toast(ack.message.isNotEmpty ? ack.message : '操作失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10n?.dynamicsDetailOperationFailed ?? '操作失败');
       }
     } catch (e) {
       _applyCommentLike(key, !prize);
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
@@ -543,33 +545,34 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       if (!mounted) return;
       if (ack.ok) {
         setState(() => _topCommentKey = top ? key : null);
-        _toast(top ? '已置顶' : '已取消置顶');
+        _toast(top ? l10nOf(context)?.commonPinned ?? '已置顶' : l10nOf(context)?.commonUnpinned ?? '已取消置顶');
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '操作失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailOperationFailed ?? '操作失败');
       }
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
   /// 删除评论（act=delete_single_comment；对齐
   /// dynamicsdatamanager.lua:1335-1362 DeleteComment 的 type==0 分支）。
   Future<void> _deleteComment(int index) async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null || index >= _comments.length) return;
     final c = _comments[index];
-    if (!await _confirm('删除评论', '确定删除这条评论吗？')) return;
+    if (!await _confirm(l10nOf(context)?.dynamicsDetailDeleteComment ?? '删除评论', l10nOf(context)?.dynamicsDetailDeleteComment2 ?? '确定删除这条评论吗？')) return;
     try {
       final ack = await client.deleteComment(widget.post.pid, c);
       if (!mounted) return;
       if (ack.ok) {
-        _toast('已删除');
+        _toast(l10nOf(context)?.dynamicsDetailDeleted ?? '已删除');
         _loadComments(reset: true);
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '删除失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
       }
     } catch (e) {
-      _toast('删除失败: $e');
+      _toast(l10n?.dynamicsDetailDeleteFailed2(e) ?? '删除失败: $e');
     }
   }
 
@@ -580,6 +583,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   ///
   /// [opUin] 为被回复者；缺省回落到父评论的 [DynamicsComment.replyTargetUin]。
   Future<void> _writeReply(DynamicsComment parent, {int? opUin}) async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
     final target = opUin ?? parent.replyTargetUin;
@@ -587,7 +591,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     final name = plainNickname(rawName).isNotEmpty
         ? plainNickname(rawName)
         : '${parent.uin}';
-    final content = await _promptText(title: '回复 $name', hint: '回复 @$name');
+    final content = await _promptText(title: l10nOf(context)?.dynamicsDetailReply2(name) ?? '回复 $name', hint: l10nOf(context)?.dynamicsDetailReply3(name) ?? '回复 @$name');
     if (content == null) return;
     try {
       final ack = await client.addCommentReply(
@@ -597,13 +601,13 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       );
       if (!mounted) return;
       if (ack.ok) {
-        _toast('回复已发布');
+        _toast(l10nOf(context)?.dynamicsDetailReplyPosted ?? '回复已发布');
         await _reloadReplies(parent);
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '发布失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailFailedPublish ?? '发布失败');
       }
     } catch (e) {
-      _toast('发布失败: $e');
+      _toast(l10n?.dynamicsDetailFailedPublish2(e) ?? '发布失败: $e');
     }
   }
 
@@ -640,12 +644,12 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
     return <PopupMenuEntry<_ReplyAction>>[
       PopupMenuItem<_ReplyAction>(
         value: liked ? _ReplyAction.unlike : _ReplyAction.like,
-        child: Text(liked ? '取消点赞' : '点赞'),
+        child: Text(liked ? l10nOf(context)?.dynamicsDetailUnlike ?? '取消点赞' : l10nOf(context)?.dynamicsDetailLike ?? '点赞'),
       ),
       if (canDelete)
-        const PopupMenuItem<_ReplyAction>(
+        PopupMenuItem<_ReplyAction>(
           value: _ReplyAction.delete,
-          child: Text('删除回复'),
+          child: Text(l10nOf(context)?.dynamicsDetailDeleteReply ?? '删除回复'),
         ),
     ];
   }
@@ -689,6 +693,7 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 回复点赞 / 取消（act=prize_comment_rep；对齐
   /// dynamicsdatamanager.lua:5086-5100 / 5215 Req_Prize_Comment_Reply）。
   Future<void> _toggleReplyLike(DynamicsComment reply, bool prize) async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null || reply.repId.isEmpty) return;
     if (prize == _likedReplyIds.contains(reply.repId)) return;
@@ -697,11 +702,11 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       final ack = await client.prizeCommentReply(reply.repId, prize: prize);
       if (!ack.ok) {
         _applyReplyLike(reply.repId, !prize);
-        _toast(ack.message.isNotEmpty ? ack.message : '操作失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10n?.dynamicsDetailOperationFailed ?? '操作失败');
       }
     } catch (e) {
       _applyReplyLike(reply.repId, !prize);
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
@@ -722,22 +727,23 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
   /// 删除回复：自己发的 → delete_player_comment_rep；否则（动态作者视角）
   /// → delete_comment_rep。对齐 dynamics_frame_deletecommentctrl.lua:155-180。
   Future<void> _deleteReply(DynamicsComment reply) async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null || reply.repId.isEmpty) return;
-    if (!await _confirm('删除回复', '确定删除这条回复吗？')) return;
+    if (!await _confirm(l10nOf(context)?.dynamicsDetailDeleteReply ?? '删除回复', l10nOf(context)?.dynamicsDetailDeleteReply2 ?? '确定删除这条回复吗？')) return;
     try {
       final ack = reply.uin == _myUin
           ? await client.deletePlayerCommentReply(reply.repId)
           : await client.deleteCommentReply(reply.repId);
       if (!mounted) return;
       if (ack.ok) {
-        _toast('已删除');
+        _toast(l10nOf(context)?.dynamicsDetailDeleted ?? '已删除');
         await _reloadRepliesFor(reply);
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '删除失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
       }
     } catch (e) {
-      _toast('删除失败: $e');
+      _toast(l10n?.dynamicsDetailDeleteFailed2(e) ?? '删除失败: $e');
     }
   }
 
@@ -756,17 +762,17 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
 
   List<PopupMenuEntry<_PostAction>> _postMenuItems() =>
       <PopupMenuEntry<_PostAction>>[
-        const PopupMenuItem<_PostAction>(
+        PopupMenuItem<_PostAction>(
           value: _PostAction.delete,
-          child: Text('删除动态'),
+          child: Text(l10nOf(context)?.dynamicsDetailDeleteMoment ?? '删除动态'),
         ),
         PopupMenuItem<_PostAction>(
           value: _PostAction.top,
-          child: Text(_postTop ? '取消置顶' : '置顶'),
+          child: Text(_postTop ? l10nOf(context)?.commonUnpin ?? '取消置顶' : l10nOf(context)?.commonPin ?? '置顶'),
         ),
-        const PopupMenuItem<_PostAction>(
+        PopupMenuItem<_PostAction>(
           value: _PostAction.auth,
-          child: Text('改可见范围'),
+          child: Text(l10nOf(context)?.dynamicsDetailChangeVisibility ?? '改可见范围'),
         ),
       ];
 
@@ -783,21 +789,22 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
 
   /// 删除动态（act=delete_posting；对齐 dynamicsdatamanager.lua:1470-1489）。
   Future<void> _deletePost() async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
-    if (!await _confirm('删除动态', '删除后不可恢复，确定删除这条动态吗？')) return;
+    if (!await _confirm(l10nOf(context)?.dynamicsDetailDeleteMoment ?? '删除动态', l10nOf(context)?.dynamicsDetailThisCannotUndoneDelete ?? '删除后不可恢复，确定删除这条动态吗？')) return;
     try {
       final ack = await client.deletePosting(widget.post.pid);
       if (!mounted) return;
       if (ack.ok) {
-        _toast('动态已删除');
+        _toast(l10nOf(context)?.dynamicsDetailMomentDeleted ?? '动态已删除');
         final navigator = Navigator.of(context);
         if (navigator.canPop()) navigator.pop(true);
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '删除失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailDeleteFailed ?? '删除失败');
       }
     } catch (e) {
-      _toast('删除失败: $e');
+      _toast(l10n?.dynamicsDetailDeleteFailed2(e) ?? '删除失败: $e');
     }
   }
 
@@ -812,24 +819,25 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       if (!mounted) return;
       if (ack.ok) {
         setState(() => _postTop = top);
-        _toast(top ? '已置顶' : '已取消置顶');
+        _toast(top ? l10nOf(context)?.commonPinned ?? '已置顶' : l10nOf(context)?.commonUnpinned ?? '已取消置顶');
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '操作失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailOperationFailed ?? '操作失败');
       }
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10nOf(context)?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
   /// 改可见范围（act=setPostingAuth&ptype=see；对齐
   /// dynamicsdatamanager.lua:1509-1529 SetPostingAuth 与 DynamicConstant.AUTH）。
   Future<void> _changePostAuth() async {
+    final l10n = l10nOf(context);
     final client = _client;
     if (client == null) return;
     final picked = await showDialog<int>(
       context: context,
       builder: (ctx) => SimpleDialog(
-        title: const Text('改可见范围'),
+        title: Text(l10nOf(context)?.dynamicsDetailChangeVisibility ?? '改可见范围'),
         children: DynamicsAuth.labels.entries
             .map(
               (e) => SimpleDialogOption(
@@ -849,12 +857,12 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
       );
       if (!mounted) return;
       if (ack.ok) {
-        _toast('已改为「${DynamicsAuth.label(picked)}」');
+        _toast(l10nOf(context)?.dynamicsDetailChanged(DynamicsAuth.label(picked)) ?? '已改为「${DynamicsAuth.label(picked)}」');
       } else {
-        _toast(ack.message.isNotEmpty ? ack.message : '操作失败');
+        _toast(ack.message.isNotEmpty ? ack.message : l10nOf(context)?.dynamicsDetailOperationFailed ?? '操作失败');
       }
     } catch (e) {
-      _toast('操作失败: $e');
+      _toast(l10n?.commonOperationFailed(e) ?? '操作失败: $e');
     }
   }
 
@@ -893,12 +901,12 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
         MediaQuery.sizeOf(context).width >= AppSizes.detailTwoColumnBreakpoint;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('动态详情'),
+        title: Text(l10nOf(context)?.dynamicsDetailMomentDetails ?? '动态详情'),
         actions: [
           // 点赞数并入图标角标：360dp 手机上标题栏放不下「图标 + 数字文本 +
           // 评论 + 分享 + 更多」五个 action，标题会被挤成省略号。
           IconButton(
-            tooltip: '点赞',
+            tooltip: l10nOf(context)?.dynamicsDetailLike ?? '点赞',
             onPressed: _toggleLike,
             icon: Badge(
               isLabelVisible: _likeCount > 0,
@@ -915,14 +923,16 @@ class _DynamicsDetailPageState extends ConsumerState<DynamicsDetailPage> {
           ),
           IconButton(
             icon: const Icon(Icons.share_outlined),
-            tooltip: '分享到聊天',
+            tooltip: l10nOf(context)?.dynamicsDetailShareChat ?? '分享到聊天',
             onPressed: _shareToChat,
           ),
           // 本人动态管理：仅 `post.uin == myUin` 时出现。
           if (_isMinePost)
             PopupMenuButton<_PostAction>(
               key: dynamicsPostMenuKey,
-              tooltip: dynamicsPostMenuTooltip,
+              tooltip:
+                  l10nOf(context)?.dynamicsDetailMomentManagement ??
+                  dynamicsPostMenuTooltip,
               icon: const Icon(Icons.more_vert),
               onSelected: (a) => unawaited(_handlePostAction(a)),
               itemBuilder: (_) => _postMenuItems(),

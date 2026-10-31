@@ -21,8 +21,16 @@ import 'package:mnchat/core/storage/app_database.dart';
 const expectedIndexes = <String, List<String>>{
   'idx_chat_messages_owner_session_time': ['owner_uin', 'session_key', 'time'],
   'idx_chat_messages_owner_time': ['owner_uin', 'time'],
+  'idx_chat_messages_dedupe': [
+    'owner_uin',
+    'session_key',
+    'uin',
+    'time',
+    'content',
+  ],
   'idx_chat_sessions_owner_uin': ['owner_uin'],
   'idx_friends_owner_uin': ['owner_uin'],
+  'idx_chat_outbox_owner_next': ['owner_uin', 'next_attempt_at'],
 };
 
 const _v8ChatMessages = '''
@@ -52,6 +60,10 @@ const _settingsTable = '''
 CREATE TABLE "settings_table" ("key" TEXT NOT NULL, "value" TEXT NOT NULL, PRIMARY KEY ("key"));
 ''';
 
+/// v10 新增的本机消息标记表（v11 迁移不改它，但旧库要有这张表）。
+const _v10MessageMarks = '''
+CREATE TABLE "message_marks" ("owner_uin" INTEGER NOT NULL, "session_key" TEXT NOT NULL, "msg_uin" INTEGER NOT NULL, "msg_time" INTEGER NOT NULL, "kind" TEXT NOT NULL, "created_at" INTEGER NOT NULL, PRIMARY KEY ("owner_uin", "session_key", "msg_uin", "msg_time", "kind"));
+''';
 const _seedMessages = [
   'INSERT INTO "chat_messages" ("id","content","session_key","uin","time","extend_data","is_success","not_time","src_user_version","bubble","inter_code","group_id","is_system_msg","is_time","direction","msg_type","owner_uin") VALUES (1,\'hello\',\'friend_1001\',1001,1700000000,NULL,1,NULL,NULL,NULL,NULL,NULL,0,0,\'in\',\'text\',7)',
   'INSERT INTO "chat_messages" ("id","content","session_key","uin","time","extend_data","is_success","not_time","src_user_version","bubble","inter_code","group_id","is_system_msg","is_time","direction","msg_type","owner_uin") VALUES (2,\'world\',\'friend_1001\',1001,1700000100,NULL,1,NULL,NULL,NULL,NULL,NULL,0,0,\'out\',\'text\',7)',
@@ -150,6 +162,38 @@ QueryExecutor _v9Executor() => NativeDatabase.memory(
   },
 );
 
+/// 用一张 v10 形状的旧库启动连接（v9 索引 + message_marks），user_version=10。
+///
+/// 额外塞一行与 id=1 完全相同的重复逻辑消息：v11 建唯一索引前必须清理它。
+QueryExecutor _v10Executor() => NativeDatabase.memory(
+  setup: (raw) {
+    for (final sql in const [
+      _v8ChatMessages,
+      _v8ChatSessions,
+      _v8Friends,
+      _settingsTable,
+      _v10MessageMarks,
+    ]) {
+      raw.execute(sql);
+    }
+    for (final sql in _v9Indexes) {
+      raw.execute(sql);
+    }
+    for (final sql in const [
+      ..._seedMessages,
+      ..._seedSessions,
+      ..._seedFriends,
+      ..._seedSettings,
+    ]) {
+      raw.execute(sql);
+    }
+    raw.execute(
+      'INSERT INTO "chat_messages" ("id","content","session_key","uin","time","extend_data","is_success","not_time","src_user_version","bubble","inter_code","group_id","is_system_msg","is_time","direction","msg_type","owner_uin") VALUES (3,\'hello\',\'friend_1001\',1001,1700000000,NULL,1,NULL,NULL,NULL,NULL,NULL,0,0,\'in\',\'text\',7)',
+    );
+    raw.userVersion = 10;
+  },
+);
+
 Future<void> _open(AppDatabase db) => db.customSelect('SELECT 1').get();
 
 /// 非自动索引的索引名（按名字排序）。
@@ -170,6 +214,7 @@ Future<Map<String, List<String>>> _allIndexes(AppDatabase db) async {
     'chat_messages',
     'chat_sessions',
     'friends',
+    'chat_outbox',
   ]) {
     for (final name in await _indexNames(db, table)) {
       final rows = await db.customSelect('PRAGMA index_info("$name")').get();
@@ -341,6 +386,62 @@ void main() {
 
       // 升级库与全新库的索引集合仍然一致。
       expect(await _allIndexes(db), equals(expectedIndexes));
+    });
+  });
+
+  group('(e) v10→v11：去重索引 + 发件箱', () {
+    test('重复逻辑消息合并为一行，唯一索引与发件箱就绪，数据保留', () async {
+      final db = AppDatabase(_v10Executor());
+      addTearDown(db.close);
+      await _open(db);
+
+      // 旧库里 id=1 与 id=3 完全重复：迁移必须只保留一行。
+      final messages = await db.messagesOf(7, 'friend_1001');
+      expect(messages.map((m) => m.content).toList(), ['hello', 'world']);
+      expect(messages.map((m) => m.time).toList(), [1700000000, 1700000100]);
+
+      // 唯一索引生效：同一条逻辑消息再写一次不新增。
+      await db.insertMessageIdempotent(
+        ChatMessagesCompanion.insert(
+          content: 'hello',
+          sessionKey: 'friend_1001',
+          uin: 1001,
+          time: 1700000000,
+          isSuccess: true,
+          isSystemMsg: false,
+          isTime: false,
+          direction: 'in',
+          ownerUin: const Value(7),
+        ),
+      );
+      expect(await db.countMessages(7), 2);
+
+      // 发件箱空着但可读写。
+      expect(await db.outboxCount(7), 0);
+      expect(await db.allOutbox(7), isEmpty);
+
+      // 索引集合（含去重索引与发件箱索引）与全新库一致。
+      expect(await _allIndexes(db), equals(expectedIndexes));
+    });
+
+    test('不同内容/同一秒的消息不会被唯一索引误删', () async {
+      final db = AppDatabase(_v10Executor());
+      addTearDown(db.close);
+      await _open(db);
+      await db.insertMessage(
+        ChatMessagesCompanion.insert(
+          content: 'same-second-other',
+          sessionKey: 'friend_1001',
+          uin: 1001,
+          time: 1700000000,
+          isSuccess: true,
+          isSystemMsg: false,
+          isTime: false,
+          direction: 'in',
+          ownerUin: const Value(7),
+        ),
+      );
+      expect(await db.countMessages(7), 3);
     });
   });
 }

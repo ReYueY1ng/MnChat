@@ -66,14 +66,14 @@ mixin _AvatarEditStateViews
       child: Row(
         children: [
           Text(
-            '头像编辑',
+            l10nOf(context)?.profileEditAvatar ?? '头像编辑',
             style: theme.textTheme.titleMedium?.copyWith(
               fontWeight: FontWeight.w700,
             ),
           ),
           const Spacer(),
           IconButton(
-            tooltip: '关闭',
+            tooltip: l10nOf(context)?.commonClose ?? '关闭',
             onPressed: () => Navigator.of(context).pop(_changed),
             style: IconButton.styleFrom(
               backgroundColor: scheme.surface,
@@ -93,7 +93,7 @@ mixin _AvatarEditStateViews
     // 栏宽按最长页签的字数与实际字号放大，默认字号仍为 84（宽屏观感不变）；
     // 高度不够时由外面的 SingleChildScrollView 滚动。
     final maxChars = AvatarEditTab.values
-        .map((tab) => tab.label.length)
+        .map((tab) => tab.labelOf(context).length)
         .reduce(math.max);
     final navWidth = math.max(
       84.0,
@@ -117,7 +117,7 @@ mixin _AvatarEditStateViews
             children: [
               for (final tab in AvatarEditTab.values)
                 _NavItem(
-                  label: tab.label,
+                  label: tab.labelOf(context),
                   active: tab == _tab,
                   onTap: () => _switchTab(tab),
                 ),
@@ -176,7 +176,7 @@ mixin _AvatarEditStateViews
                     Icon(Icons.add, size: 20, color: scheme.onSurfaceVariant),
                   const SizedBox(height: AppSpacing.xs),
                   Text(
-                    '自定义',
+                    l10nOf(context)?.avatarEditCustom ?? '自定义',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -229,8 +229,8 @@ mixin _AvatarEditStateViews
     final grid = empty
         ? _EmptyHint(
             _source == AvatarSourceTab.ride
-                ? '外部客户端暂未获取坐骑头像列表'
-                : '暂未获取到已拥有的皮肤或立绘',
+                ? l10nOf(context)?.avatarEditThisExternalClientHasnt ?? '外部客户端暂未获取坐骑头像列表'
+                : l10nOf(context)?.profileNoOwnedSkinsArtwork ?? '暂未获取到已拥有的皮肤或立绘',
           )
         : GridView.count(
             padding: EdgeInsets.zero,
@@ -245,7 +245,9 @@ mixin _AvatarEditStateViews
       children: [
         _TopTabs(
           tabsKey: avatarEditSourceTabsKey,
-          labels: [for (final s in AvatarSourceTab.values) s.label],
+          labels: [
+            for (final s in AvatarSourceTab.values) s.labelOf(context),
+          ],
           index: _source.index,
           onChanged: (i) =>
               setState(() => _source = AvatarSourceTab.values[i]),
@@ -318,16 +320,16 @@ mixin _AvatarEditStateViews
             ),
           ),
           if (state == DiyAuditState.pending)
-            const Positioned(
+            Positioned(
               left: 2,
               bottom: 2,
-              child: _AuditTag(text: '审核中', warning: true),
+              child: _AuditTag(text: l10nOf(context)?.avatarEditUnderReview ?? '审核中', warning: true),
             ),
           if (state == DiyAuditState.failed)
-            const Positioned(
+            Positioned(
               left: 2,
               bottom: 2,
-              child: _AuditTag(text: '审核失败'),
+              child: _AuditTag(text: l10nOf(context)?.avatarEditReviewFailed ?? '审核失败'),
             ),
         ],
       ),
@@ -355,7 +357,7 @@ mixin _AvatarEditStateViews
       mainAxisSize: MainAxisSize.min,
       children: [
         Text(
-          '请勿上传包含恐怖、反动等不良元素的图片哦',
+          l10nOf(context)?.avatarEditPleaseDontUploadImages ?? '请勿上传包含恐怖、反动等不良元素的图片哦',
           textAlign: narrow ? TextAlign.start : TextAlign.center,
           style: theme.textTheme.bodySmall?.copyWith(color: scheme.outline),
         ),
@@ -370,12 +372,12 @@ mixin _AvatarEditStateViews
             ),
             const SizedBox(width: AppSpacing.xs),
             // 窄栏 + 大字号时这一行放不下四个字：换行而不是横向溢出。
-            const Flexible(child: Text('会员免费')),
+            Flexible(child: Text(l10nOf(context)?.avatarEditFreeMembers ?? '会员免费')),
           ],
         ),
         const SizedBox(height: AppSpacing.sm),
         Text(
-          '使用中',
+          l10nOf(context)?.avatarEditInUse ?? '使用中',
           style: theme.textTheme.labelMedium?.copyWith(
             color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,

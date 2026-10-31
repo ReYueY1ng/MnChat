@@ -296,7 +296,7 @@ class _TitleCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '有效期',
+                      l10nOf(context)?.avatarEditValidUntil ?? '有效期',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: baseColor.withValues(alpha: 0.7),
                       ),

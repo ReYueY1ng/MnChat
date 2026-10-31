@@ -132,7 +132,7 @@ void main() {
 
       final f = RequestErrorBus.instance.failures.value.single;
       expect(f.label, '网络请求');
-      expect(f.message, 'timeout');
+      expect(f.message, '请求超时', reason: 'message 改为 AppFailure.summary');
       expect(f.endpoint, contains('s7=***'));
       expect(f.endpoint, isNot(contains('SECRET')));
     });

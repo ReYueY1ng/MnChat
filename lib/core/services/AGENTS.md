@@ -9,7 +9,7 @@ HTTP service clients plus the realtime chat pipeline. Every `/miniw/*` and `/ser
 | Task | File |
 |------|------|
 | Build a signed /miniw/ URL | gateway.dart (181) — `GatewayClient`, `buildFriendRequestUrl`, `buildGroupUrl`, `buildMiniwParamMd5Url`, `decodeGatewayResponse`; all params incl. `cmd`/`msg` sign |
-| Chat I/O entry point | chat_service.dart (1,421) — owns all `chat/*` wiring and `SessionSnapshot` |
+| Chat I/O entry point | chat_service.dart (1,535) — composes chat/* collaborators (HistoryPager, GroupAdminOps, FriendAdminOps, …) and owns `SessionSnapshot` |
 | Feed / dynamics | dynamics.dart (2,155) — `DynamicsClient` + typed result models (`DynamicsAck`, `DynamicsTopic`, `DynamicsVoteInfo`, `DynamicsRedpointNotice`) |
 | Contacts | profile.dart (975, `ProfileClient`/`PlayerProfile`), partner.dart (860, `PartnerClient`), friend.dart (657, `FriendClient`), group.dart (403), family.dart (422) |
 | Own profile / home | player_home.dart (545), title_config.dart (406), social_sign.dart (325) |

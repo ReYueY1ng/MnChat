@@ -11,6 +11,8 @@ import 'package:material_ui/material_ui.dart';
 import '../../core/services/partner.dart';
 import '../theme/app_tokens.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 等级配色表（覆盖 0..6，更高回退默认橙）。
 ///
 /// 官方等级色表未从资源中导出 RGB，这里为近似值；数值协议不受影响。
@@ -108,8 +110,8 @@ class TacitBadge extends StatelessWidget {
     final ratio = next > 0 ? (tacitnum / next).clamp(0.0, 1.0) : null;
     return Tooltip(
       message: next <= 0
-          ? '默契度 · ${PartnerLab.name(lab)}'
-          : '默契度 · ${PartnerLab.name(lab)}（$tacitnum/$next）',
+          ? l10nOf(context)?.badgesRapport(PartnerLab.name(lab)) ?? '默契度 · ${PartnerLab.name(lab)}'
+          : l10nOf(context)?.badgesRapport2(PartnerLab.name(lab), tacitnum, next) ?? '默契度 · ${PartnerLab.name(lab)}（$tacitnum/$next）',
       child: _Pill(
         background: color.withValues(alpha: 0.16),
         border: color,
@@ -160,7 +162,7 @@ class VipBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Tooltip(
-      message: '大会员',
+      message: l10nOf(context)?.badgesPremiumMember ?? '大会员',
       child: _Pill(
         background: const Color(0xFFFFC107).withValues(alpha: 0.22),
         border: _gold,

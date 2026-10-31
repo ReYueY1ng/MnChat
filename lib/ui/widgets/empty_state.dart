@@ -11,6 +11,8 @@ library;
 import 'package:material_ui/material_ui.dart';
 
 import '../theme/app_tokens.dart';
+import 'app_l10n.dart' show l10nOf;
+
 /// 空状态：图标 + 一句人话 + 可选提示 + 可选主行动。
 class EmptyState extends StatelessWidget {
   /// 顶部图标。
@@ -122,7 +124,7 @@ class ErrorRetryCard extends StatelessWidget {
             FilledButton.icon(
               onPressed: onRetry,
               icon: const Icon(Icons.refresh, size: 18),
-              label: const Text('重试'),
+              label: Text(l10nOf(context)?.commonRetry ?? '重试'),
             ),
           ],
         ),

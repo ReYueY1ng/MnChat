@@ -21,6 +21,8 @@ import '../../core/services/request_errors.dart';
 import '../../state/providers.dart' show requestErrorBusProvider;
 import '../theme/app_tokens.dart';
 
+import 'app_l10n.dart' show l10nOf;
+
 /// 打开「最近的请求失败」详情弹窗。
 Future<void> showRequestErrorsDialog(
   BuildContext context,
@@ -54,7 +56,7 @@ Future<void> showRequestFailureDetail(
               mainAxisSize: MainAxisSize.min,
               children: [
                 SelectableText(
-                  f.endpoint.isEmpty ? '(无请求地址)' : f.endpoint,
+                  f.endpoint.isEmpty ? l10nOf(context)?.requestErrorNoUrl ?? '(无请求地址)' : f.endpoint,
                   style: theme.textTheme.bodySmall?.copyWith(
                     fontFamily: 'monospace',
                   ),
@@ -80,15 +82,15 @@ Future<void> showRequestFailureDetail(
                 : () {
                     Clipboard.setData(ClipboardData(text: f.endpoint));
                     ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(content: Text('已复制请求地址')),
+                      SnackBar(content: Text(l10nOf(context)?.requestErrorRequestURLCopied ?? '已复制请求地址')),
                     );
                   },
             icon: const Icon(Icons.copy, size: 16),
-            label: const Text('复制地址'),
+            label: Text(l10nOf(context)?.requestErrorCopyURL ?? '复制地址'),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
+            child: Text(l10nOf(context)?.commonClose ?? '关闭'),
           ),
         ],
       );
@@ -115,7 +117,7 @@ class RequestErrorIndicator extends ConsumerWidget {
           backgroundColor: colors.warningContainer,
           foregroundColor: colors.onWarningContainer,
           icon: const Icon(Icons.error_outline),
-          label: Text('$total 个请求失败'),
+          label: Text(l10nOf(context)?.requestErrorRequestsFailed(total) ?? '$total 个请求失败'),
           tooltip: failures.first.summary,
           onPressed: () => showRequestErrorsDialog(context, bus),
         );
@@ -180,7 +182,7 @@ class _RequestErrorListenerState extends ConsumerState<RequestErrorListener> {
             bottom: 76,
           ),
           action: SnackBarAction(
-            label: '详情',
+            label: l10nOf(context)?.mailDetails ?? '详情',
             onPressed: () =>
                 showRequestErrorsDialog(context, ref.read(requestErrorBusProvider)),
           ),
@@ -201,7 +203,7 @@ class _RequestErrorsDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('请求失败记录'),
+      title: Text(l10nOf(context)?.requestErrorFailedRequests ?? '请求失败记录'),
       content: SizedBox(
         width: dialogContentWidth(context, 560),
         // 高度随内容收缩（shrinkWrap + maxHeight）：只有一条记录时不再撑出
@@ -212,9 +214,9 @@ class _RequestErrorsDialog extends StatelessWidget {
             valueListenable: bus.failures,
             builder: (context, failures, _) {
               if (failures.isEmpty) {
-                return const Padding(
+                return Padding(
                   padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-                  child: Center(child: Text('暂无失败记录')),
+                  child: Center(child: Text(l10nOf(context)?.requestErrorNoFailureRecordsYet ?? '暂无失败记录')),
                 );
               }
               return ListView.separated(
@@ -263,11 +265,11 @@ class _RequestErrorsDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => bus.clear(),
-          child: const Text('清空'),
+          child: Text(l10nOf(context)?.blocklistClear ?? '清空'),
         ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          child: Text(l10nOf(context)?.commonClose ?? '关闭'),
         ),
       ],
     );

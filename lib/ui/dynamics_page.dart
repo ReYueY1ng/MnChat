@@ -12,6 +12,8 @@ import 'publish_dynamics_page.dart';
 import 'widgets/dynamics_card.dart';
 import 'theme/app_tokens.dart';
 
+import 'widgets/app_l10n.dart' show l10nOf;
+
 /// 动态页 —— 瀑布流信息流（热门/关注/同城/官方/我的）。
 ///
 /// 每个分类独立缓存：切换分类不清空其它分类已加载内容，
@@ -42,7 +44,8 @@ class _TabCache {
 
 /// 动态大厅的一个分类标签。
 class _HallTab {
-  final String label;
+  /// 服务端自定义分类名（内置分类为空）。
+  final String title;
 
   /// 内置分类的数据来源；服务端自定义分类为 null（拉列表时走 `get_posting_by_tag`）。
   final DynamicsFeedType? type;
@@ -50,11 +53,27 @@ class _HallTab {
   /// 服务端分类 id（自定义分类用）。
   final String? tag;
 
-  const _HallTab(this.label, {this.type, this.tag});
+  const _HallTab({this.title = '', this.type, this.tag});
+
+  /// 分类文案。**只能在 build 里调用**：initState 阶段子树尚未挂上
+  /// Localizations，取文案会触发 inherit 断言。
+  String labelOf(BuildContext context) => switch (type) {
+    DynamicsFeedType.hot => l10nOf(context)?.dynamicsPopular ?? '热门',
+    DynamicsFeedType.recommend => l10nOf(context)?.commonFollowing ?? '关注',
+    DynamicsFeedType.city => l10nOf(context)?.dynamicsLocal ?? '同城',
+    DynamicsFeedType.official => l10nOf(context)?.dynamicsOfficial ?? '官方',
+    DynamicsFeedType.mine => l10nOf(context)?.dynamicsMine ?? '我的',
+    null => title.isNotEmpty
+        ? title
+        : l10nOf(context)?.dynamicsCategory(tag ?? '') ?? '分类${tag ?? ''}',
+  };
 }
 
 class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   DynamicsClient? _client;
+
+  /// 未登录：文案在 build 里取（initState 不能读 Localizations）。
+  bool _authMissing = false;
 
   /// 当前 tab 下标（默认最左）。
   int _tab = 0;
@@ -67,12 +86,12 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   // （dynamicsinfocard.lua tab_type：official=4, city=3）；「我的」是客户端自己的
   // 入口（`get_posting_list`）。
   static const List<_HallTab> _baseTabs = [
-    _HallTab('热门', type: DynamicsFeedType.hot),
-    _HallTab('关注', type: DynamicsFeedType.recommend),
-    _HallTab('同城', type: DynamicsFeedType.city),
-    _HallTab('官方', type: DynamicsFeedType.official),
+    _HallTab(type: DynamicsFeedType.hot),
+    _HallTab(type: DynamicsFeedType.recommend),
+    _HallTab(type: DynamicsFeedType.city),
+    _HallTab(type: DynamicsFeedType.official),
   ];
-  static const _HallTab _mineTab = _HallTab('我的', type: DynamicsFeedType.mine);
+  static const _HallTab _mineTab = _HallTab(type: DynamicsFeedType.mine);
 
   /// 服务端下发的额外分类（`get_posting_tag_list`）。
   ///
@@ -84,7 +103,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   List<_HallTab> get _tabs => [
     ..._baseTabs,
     for (final t in _extraTags)
-      _HallTab(t.title.isEmpty ? '分类${t.tagId}' : t.title, tag: '${t.tagId}'),
+      _HallTab(title: t.title, tag: '${t.tagId}'),
     _mineTab,
   ];
 
@@ -101,8 +120,10 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
   void _init() {
     final auth = ref.read(chatServiceProvider).auth;
     if (auth == null) {
+      // initState 阶段不能读 Localizations（子树还没挂上去），先落标记，
+      // 文案留到 build 里取。
       setState(() {
-        _cacheFor(0).error = '未登录';
+        _authMissing = true;
         _cacheFor(0).loading = false;
       });
       return;
@@ -197,7 +218,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
       unawaited(_enrichAvatars(cache, seq));
     } catch (e) {
       if (!mounted || seq != _reqSeq) return;
-      setState(() => cache.error = '加载失败: $e');
+      setState(() => cache.error = l10nOf(context)?.commonFailedLoad2(e) ?? '加载失败: $e');
     } finally {
       if (mounted && seq == _reqSeq) {
         setState(() => cache.loading = false);
@@ -274,12 +295,12 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         appBar: AppBar(
           title: Text(
             _singleAuthor
-                ? '${widget.authorName ?? widget.authorUin} 的动态'
-                : '动态',
+                ? l10nOf(context)?.dynamicsAuthorMoments((widget.authorName ?? widget.authorUin).toString()) ?? '${widget.authorName ?? widget.authorUin} 的动态'
+                : l10nOf(context)?.shellMoments ?? '动态',
           ),
           actions: [
             IconButton(
-              tooltip: '动态通知',
+              tooltip: l10nOf(context)?.dynamicsMomentNotifications ?? '动态通知',
               icon: const Icon(Icons.notifications_outlined),
               // 动态通知统一进消息中心：顶部"动态互动"入口
               //（post_rep/post_prize/post_at + fans_change 同源）。
@@ -293,7 +314,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
             ),
             if (!_singleAuthor)
               IconButton(
-                tooltip: '发布动态',
+                tooltip: l10nOf(context)?.dynamicsPostMoment ?? '发布动态',
                 icon: const Icon(Icons.edit_outlined),
               onPressed: () async {
                 final ok = await Navigator.of(context).push<bool>(
@@ -314,7 +335,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
               },
             ),
             IconButton(
-              tooltip: '刷新',
+              tooltip: l10nOf(context)?.commonRefresh ?? '刷新',
               icon: const Icon(Icons.refresh),
               onPressed: _init,
             ),
@@ -330,7 +351,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
                   tabAlignment: isCompactWidth(context)
                       ? TabAlignment.start
                       : null,
-                  tabs: [for (final t in tabs) Tab(text: t.label)],
+                  tabs: [for (final t in tabs) Tab(text: t.labelOf(context))],
                 ),
         ),
         body: _body(),
@@ -340,6 +361,11 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
 
   Widget _body() {
     final cache = _cache;
+    if (_authMissing) {
+      return Center(
+        child: Text(l10nOf(context)?.commonNotSignedIn ?? '未登录'),
+      );
+    }
     // 首次加载（该 tab 还没有内容）→ 显示转圈
     if (!cache.loadedOnce && cache.loading) {
       return const Center(child: CircularProgressIndicator());
@@ -354,7 +380,7 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
             FilledButton.tonalIcon(
               onPressed: _load,
               icon: const Icon(Icons.refresh),
-              label: const Text('重试'),
+              label: Text(l10nOf(context)?.commonRetry ?? '重试'),
             ),
           ],
         ),
@@ -366,9 +392,9 @@ class _DynamicsPageState extends ConsumerState<DynamicsPage> {
         onRefresh: _load,
         child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          children: const [
+          children: [
             SizedBox(height: 160),
-            Center(child: Text('暂无动态，下拉刷新')),
+            Center(child: Text(l10nOf(context)?.dynamicsNoMomentsYetPull ?? '暂无动态，下拉刷新')),
           ],
         ),
       );

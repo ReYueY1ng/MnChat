@@ -19,6 +19,19 @@ import 'package:flutter/foundation.dart';
 import '../utils/log.dart';
 import 'native_bridge.dart';
 
+/// 通知上的用户动作。
+enum NotificationAction {
+  /// 点击通知主体 / 「打开」：跳到会话。
+  open,
+
+  /// 「标记已读」：清未读并撤通知。
+  markRead,
+}
+
+/// 把 freedesktop 的 action key 映射成内部动作（未知一律当打开）。
+NotificationAction notificationActionFrom(String action) =>
+    action == 'mark-read' ? NotificationAction.markRead : NotificationAction.open;
+
 /// 一条会话消息通知。
 class MessageNotification {
   /// 会话唯一 key，形如 `friend_123` / `group_456`。
@@ -87,6 +100,11 @@ abstract class NotificationService {
   /// 用户点击通知（载荷为 sessionKey）。
   Stream<String> get taps;
 
+  /// 用户在通知上点「标记已读」（载荷为 sessionKey）。
+  ///
+  /// 只有提供该动作的平台（目前是 Linux）会发；其它平台返回空流。
+  Stream<String> get readRequests;
+
   /// 冷启动：应用被通知拉起时那次通知的 sessionKey（无则 null）。
   Future<String?> initialTapSessionKey();
 
@@ -97,6 +115,7 @@ abstract class NotificationService {
 /// Android：转发到 `mnchat/native`。
 class AndroidNotificationService implements NotificationService {
   final _taps = StreamController<String>.broadcast();
+  final _reads = StreamController<String>.broadcast();
   bool _inited = false;
 
   @override
@@ -143,6 +162,9 @@ class AndroidNotificationService implements NotificationService {
   Stream<String> get taps => _taps.stream;
 
   @override
+  Stream<String> get readRequests => _reads.stream;
+
+  @override
   Future<String?> initialTapSessionKey() =>
       NativeBridge.initialNotificationSessionKey();
 
@@ -162,6 +184,7 @@ class LinuxNotificationService implements NotificationService {
   static const _busPath = '/org/freedesktop/Notifications';
 
   final _taps = StreamController<String>.broadcast();
+  final _reads = StreamController<String>.broadcast();
 
   DBusClient? _client;
   StreamSubscription<DBusSignal>? _signalSub;
@@ -198,7 +221,18 @@ class LinuxNotificationService implements NotificationService {
     final value = signal.values.first;
     if (value is! DBusUint32) return;
     final key = _idToSession[value.value];
-    if (key != null && key.isNotEmpty) _taps.add(key);
+    if (key == null || key.isEmpty) return;
+    final action = signal.values.length > 1 && signal.values[1] is DBusString
+        ? (signal.values[1] as DBusString).value
+        : 'default';
+    if (action == 'mark-read') {
+      _reads.add(key);
+      unawaited(cancel(key));
+      return;
+    }
+    if (notificationActionFrom(action) == NotificationAction.open) {
+      _taps.add(key);
+    }
   }
 
   @override
@@ -229,7 +263,7 @@ class LinuxNotificationService implements NotificationService {
         DBusString(''),
         DBusString(n.title),
         DBusString(body),
-        DBusArray.string(const ['default', '打开']),
+        DBusArray.string(const ['default', '打开', 'mark-read', '标记已读']),
         DBusDict.stringVariant(hints),
         DBusInt32(-1),
       ]);
@@ -277,6 +311,9 @@ class LinuxNotificationService implements NotificationService {
   Stream<String> get taps => _taps.stream;
 
   @override
+  Stream<String> get readRequests => _reads.stream;
+
+  @override
   Future<String?> initialTapSessionKey() async => null;
 
   @override
@@ -313,6 +350,9 @@ class NoopNotificationService implements NotificationService {
 
   @override
   Stream<String> get taps => const Stream<String>.empty();
+
+  @override
+  Stream<String> get readRequests => const Stream<String>.empty();
 
   @override
   Future<String?> initialTapSessionKey() async => null;

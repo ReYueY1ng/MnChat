@@ -1,4 +1,3 @@
-import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:material_ui/material_ui.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -11,7 +10,11 @@ import 'dynamics_page.dart';
 import 'friends_page.dart';
 import 'session_list_page.dart';
 import 'theme/app_tokens.dart';
+import 'chat_search_page.dart' show ChatSearchPage;
 import 'widgets/account_menu.dart';
+import 'widgets/desktop_shortcuts.dart' show DesktopShortcuts;
+import 'widgets/session_quick_switcher.dart' show showSessionQuickSwitcher;
+import 'widgets/app_l10n.dart' show l10nOf;
 import 'widgets/request_error_indicator.dart'
     show RequestErrorIndicator, RequestErrorListener;
 
@@ -145,6 +148,18 @@ class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
     }
   }
 
+  /// Ctrl+F：打开跨会话聊天记录搜索。
+  void _openSearch() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ChatSearchPage()),
+    );
+  }
+
+  /// Ctrl+K：快速切换会话。
+  void _openQuickSwitcher() {
+    showSessionQuickSwitcher(context);
+  }
+
   void _switchTab(int index) {
     if (index == _tab) return;
     setState(() => _tab = index);
@@ -249,16 +264,13 @@ class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
           // 会话列表 → 后台（不退出，前台服务继续收消息）
           _handleBack(chatOpen);
         },
-        child: CallbackShortcuts(
-          // 桌面端 ESC 与系统返回键同义，只是不会把应用退到后台。
-          bindings: {
-            const SingleActivator(LogicalKeyboardKey.escape): () =>
-                _handleBack(chatOpen, background: false),
-          },
-          child: Focus(
-            autofocus: true,
-            child: RequestErrorListener(
-              child: useRail
+        child: DesktopShortcuts(
+          // 桌面端：Ctrl+F 全局搜索 / Ctrl+K 快速切换 / ESC 返回。
+          onSearch: _openSearch,
+          onQuickSwitch: _openQuickSwitcher,
+          onEscape: () => _handleBack(chatOpen, background: false),
+          child: RequestErrorListener(
+            child: useRail
                   // 宽屏：常驻侧边栏 + 内容区
                   ? Scaffold(
                       floatingActionButton: const RequestErrorIndicator(),
@@ -285,15 +297,13 @@ class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
                           ? null
                           : _buildBottomBar(),
                     ),
-            ),
           ),
         ),
       );
     });
   }
 
-  Widget _buildRail() {
-    return NavigationRail(
+  Widget _buildRail() {    return NavigationRail(
       selectedIndex: _tab,
       onDestinationSelected: _switchTab,
       labelType: NavigationRailLabelType.all,
@@ -309,21 +319,21 @@ class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
         child: AccountMenuButton(),
       ),
       trailingAtBottom: true,
-      destinations: const [
+      destinations: [
         NavigationRailDestination(
           icon: Icon(Icons.forum_outlined),
           selectedIcon: Icon(Icons.forum),
-          label: Text('会话'),
+          label: Text(l10nOf(context)?.commonConversations ?? '会话'),
         ),
         NavigationRailDestination(
           icon: Icon(Icons.people_outline),
           selectedIcon: Icon(Icons.people),
-          label: Text('好友'),
+          label: Text(l10nOf(context)?.commonFriend ?? '好友'),
         ),
         NavigationRailDestination(
           icon: Icon(Icons.public_outlined),
           selectedIcon: Icon(Icons.public),
-          label: Text('动态'),
+          label: Text(l10nOf(context)?.shellMoments ?? '动态'),
         ),
       ],
     );
@@ -333,21 +343,21 @@ class _MainShellState extends ConsumerState<MainShell> with RestorationMixin {
     return NavigationBar(
       selectedIndex: _tab,
       onDestinationSelected: _switchTab,
-      destinations: const [
+      destinations: [
         NavigationDestination(
           icon: Icon(Icons.forum_outlined),
           selectedIcon: Icon(Icons.forum),
-          label: '会话',
+          label: l10nOf(context)?.commonConversations ?? '会话',
         ),
         NavigationDestination(
           icon: Icon(Icons.people_outline),
           selectedIcon: Icon(Icons.people),
-          label: '好友',
+          label: l10nOf(context)?.commonFriend ?? '好友',
         ),
         NavigationDestination(
           icon: Icon(Icons.public_outlined),
           selectedIcon: Icon(Icons.public),
-          label: '动态',
+          label: l10nOf(context)?.shellMoments ?? '动态',
         ),
       ],
     );
@@ -480,10 +490,10 @@ class _EmptyChatPlaceholder extends StatelessWidget {
             color: theme.colorScheme.outline,
           ),
           const SizedBox(height: AppSpacing.lg),
-          Text('选择会话开始聊天', style: theme.textTheme.titleMedium),
+          Text(l10nOf(context)?.shellSelectConversationStartChatting ?? '选择会话开始聊天', style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.xs),
           Text(
-            '好友 / 群聊 · 无需进入房间',
+            l10nOf(context)?.shellFriendsGroupChatsRoom ?? '好友 / 群聊 · 无需进入房间',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.outline,
             ),
