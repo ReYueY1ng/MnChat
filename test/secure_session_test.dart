@@ -180,6 +180,47 @@ void main() {
     });
   });
 
+  group('解封异常路径', () {
+    test('密文短于 tag 长度时抛 SecureSessionError', () async {
+      final session = _session();
+      await expectLater(
+        session.open(
+          path: '/server/friend',
+          apiValue: 'x',
+          cipherText: const [1, 2, 3],
+          nonceBase64Url: base64UrlEncode(List<int>.filled(12, 0)),
+        ),
+        throwsA(isA<SecureSessionError>()),
+      );
+    });
+
+    test('nonce 长度不对时抛 SecureSessionError', () async {
+      final session = _session();
+      await expectLater(
+        session.open(
+          path: '/server/friend',
+          apiValue: 'x',
+          cipherText: List<int>.filled(32, 0),
+          nonceBase64Url: base64UrlEncode(const [1, 2, 3]),
+        ),
+        throwsA(isA<SecureSessionError>()),
+      );
+    });
+
+    test('tag 被篡改时 AEAD 报错（不静默返回空）', () async {
+      final session = _session();
+      await expectLater(
+        session.open(
+          path: '/server/friend',
+          apiValue: 'x',
+          cipherText: List<int>.filled(32, 0),
+          nonceBase64Url: base64UrlEncode(List<int>.filled(12, 0)),
+        ),
+        throwsA(anything),
+      );
+    });
+  });
+
   group('SecureSessionInterceptor', () {
     test('无会话时请求原样发出（回退路径）', () async {
       final adapter = _CapturingAdapter();
