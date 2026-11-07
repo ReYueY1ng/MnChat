@@ -15,6 +15,12 @@ import '../crypto/xxtea.dart' show xxteaDecrypt, xxteaEncrypt, xxteaEncryptZip;
 import '../net/config.dart';
 import '../net/http_factory.dart';
 import '../net/msgpack.dart' show msgpackPack, msgpackUnpack;
+import '../net/secure_session.dart'
+    show
+        SecureSession,
+        SecureSessionRegistry,
+        base64UrlEncode,
+        kSecureProtocolAppId;
 
 /// 认证结果。
 class MiniAuth {
@@ -123,12 +129,22 @@ class LoginClient {
     final sign = md5Sign(['msg=', msg, '&key=', loginAuthKey]);
     // 端口池随机负载均衡。
     final port = kLoginPorts[Random().nextInt(kLoginPorts.length)];
+    // 1.60 安全会话：登录时上报 X25519 公钥与登录尝试号；服务端在响应的
+    // `session` 里回 s_pk / access_token，我方据此派生会话密钥。
+    final (clientSecretKey, clientPublicKey) =
+        await SecureSession.generateKeyPair();
+    final loginAttempt = _randomHex(16);
     final url = Uri.https(kLoginHost, kLoginPath, {
       'msg': msg,
       'sign': sign,
     }).replace(port: port);
 
-    final resp = await _dio.getUri(url);
+    final resp = await _dio.getUri(url, options: Options(headers: {
+      'X-Protocol-Capability': 'v4',
+      'X-Protocol-App-ID': kSecureProtocolAppId,
+      'X-Protocol-Client-Public-Key': base64UrlEncode(clientPublicKey),
+      'X-Protocol-Login-Attempt': loginAttempt,
+    }));
     final text = resp.data is String
         ? resp.data as String
         : jsonEncode(resp.data);
@@ -151,6 +167,19 @@ class LoginClient {
       final s2t = splitIdx <= 0 ? '' : fullSign.substring(splitIdx + 1);
       final roleInfo = ((baseinfo['RoleInfo'] as Map? ?? {})
           .cast<String, Object?>());
+
+      // 服务端未启用安全会话时 `session` 为 null/{}：清空会话，后续走明文。
+      final rawSession = data['session'];
+      final session = await SecureSession.fromLoginSession(
+        uin: uin,
+        session: rawSession is Map
+            ? rawSession.cast<String, Object?>()
+            : null,
+        clientSecretKey: clientSecretKey,
+        clientPublicKey: clientPublicKey,
+      );
+      SecureSessionRegistry.instance.install(session);
+
       return MiniAuth(
         uin: uin,
         apiId: apiId,
@@ -161,7 +190,19 @@ class LoginClient {
         ownedSkinIds: _parseOwnedSkins(baseinfo),
       );
     }
+    // 登录失败：不保留半截会话，避免用旧 token 去发加密请求。
+    SecureSessionRegistry.instance.clear();
     throw MiniAuthError('Login failed with code $code: ${data['msg']}');
+  }
+
+  /// 16 字节随机数的 hex（`X-Protocol-Login-Attempt`）。
+  static String _randomHex(int bytes) {
+    final rnd = Random.secure();
+    final out = StringBuffer();
+    for (var i = 0; i < bytes; i++) {
+      out.write(rnd.nextInt(256).toRadixString(16).padLeft(2, '0'));
+    }
+    return out.toString();
   }
 
   /// 解析登录 `baseinfo.BillDataSvr.RoleSkinInfo` → 已拥有皮肤 id 集合。
