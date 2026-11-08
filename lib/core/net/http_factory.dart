@@ -20,6 +20,7 @@ import '../utils/log.dart' show log, redactUrl;
 import 'config.dart' show kUa;
 import 'duplicate_request_monitor.dart'
     show DuplicateRequestMonitor, requestFingerprint;
+import 'secure_session_interceptor.dart' show SecureSessionInterceptor;
 
 /// 创建 Dio 实例（dio 默认 adapter：原生 IO）。
 ///
@@ -62,5 +63,7 @@ Dio createDio({Duration? connectTimeout, Duration? receiveTimeout}) {
       handler.next(e);
     },
   ));
+  // 1.60 安全会话：会话存在时把白名单网关请求改写成加密信封（否则原样放行）。
+  dio.interceptors.add(SecureSessionInterceptor());
   return dio;
 }
