@@ -177,6 +177,7 @@ class LoginClient {
             : null,
         clientSecretKey: clientSecretKey,
         clientPublicKey: clientPublicKey,
+        deviceId: deviceId,
       );
       SecureSessionRegistry.instance.install(session);
 

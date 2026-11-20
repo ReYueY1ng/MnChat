@@ -64,6 +64,8 @@ Dio createDio({Duration? connectTimeout, Duration? receiveTimeout}) {
     },
   ));
   // 1.60 安全会话：会话存在时把白名单网关请求改写成加密信封（否则原样放行）。
-  dio.interceptors.add(SecureSessionInterceptor());
+  final secure = SecureSessionInterceptor();
+  secure.attach(dio);
+  dio.interceptors.add(secure);
   return dio;
 }

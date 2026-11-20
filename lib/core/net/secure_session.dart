@@ -25,6 +25,9 @@ import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:cryptography/cryptography.dart';
+import 'package:dio/dio.dart';
+
+import 'config.dart' show backendShequ, kUa;
 
 /// 网关安全协议的版本常量（`X-Protocol-Version` / AAD 前缀）。
 const String kSecureProtocolVersion = 'v4';
@@ -112,11 +115,45 @@ String buildResponseAad({
 }) =>
     '$kSecureProtocolVersion|response|$path|$kSecureProtocolAppId|$uin|$apiValue';
 
+/// 续期端点（网关黑名单路径：明文 JSON，不走信封）。
+const String kSecureRefreshPath = '/miniw/crypto/refresh-access';
+
+/// 续期请求体（字段与真机逐字一致：uin 是字符串，apiid 是数字）。
+Map<String, Object?> buildRefreshAccessBody({
+  required int uin,
+  required String deviceId,
+  required String refreshToken,
+  String ver = '1.60.1',
+  int apiId = 110,
+}) =>
+    <String, Object?>{
+      'uin': '$uin',
+      'device_id': deviceId,
+      'apiid': apiId,
+      'ver': ver,
+      'refresh_token': refreshToken,
+    };
+
+/// 网关 401 里属于“token 过期/无效”的错误码。
+///
+/// 40101 access_token_invalid / 40102 access_session_invalid：
+/// 只有这两种值得续期后重试，其它 401（如 40105 白名单）重试无意义。
+const Set<int> kSecureAuthExpiredCodes = {40101, 40102};
+
 /// 登录下发的安全会话（`session` 字段）+ 本地密钥对。
 class SecureSession {
   final String sessionId;
+
+  /// 当前 access token（EdDSA JWT）；`refresh()` 后会被替换为新实例。
   final String accessToken;
+
+  /// 续期凭证（`rt1_…`）；为空表示服务端未下发，无法自动续期。
+  final String refreshToken;
+
   final int uin;
+
+  /// 登录时上报的 DeviceID；续期请求必须与 access_token 里的 `device_id` 一致。
+  final String deviceId;
 
   /// 客户端 X25519 私钥（32B），仅内存持有。
   final Uint8List clientSecretKey;
@@ -141,15 +178,45 @@ class SecureSession {
     required this.clientPublicKey,
     required this.rxKey,
     required this.txKey,
+    this.refreshToken = '',
+    this.deviceId = '',
     this.accessExpiresAt = 0,
   });
 
+  /// 是否已到需要续期的时刻。
+  ///
+  /// 提前 60s 就续，避开“刚好卡在过期那一刻请求”的窗口。
+  bool get needsRefresh {
+    if (accessExpiresAt <= 0) return false;
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return now >= accessExpiresAt - 60;
+  }
+
+  /// access token 已过期（用于判断请求是否值得重试）。
   bool get isExpired {
     if (accessExpiresAt <= 0) return false;
     final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
-    // 提前 60s 视为过期，给 refresh 留窗口。
-    return now >= accessExpiresAt - 60;
+    return now >= accessExpiresAt;
   }
+
+  /// 续期成功后只替换 token 与过期时间：会话密钥（rx/tx）由 X25519 派生，
+  /// 与 access_token 无关，不需要重新握手。
+  SecureSession copyWithAccessToken({
+    required String accessToken,
+    required int accessExpiresAt,
+  }) =>
+      SecureSession(
+        sessionId: sessionId,
+        accessToken: accessToken,
+        refreshToken: refreshToken,
+        uin: uin,
+        deviceId: deviceId,
+        clientSecretKey: clientSecretKey,
+        clientPublicKey: clientPublicKey,
+        rxKey: rxKey,
+        txKey: txKey,
+        accessExpiresAt: accessExpiresAt,
+      );
 
   /// 用会话密钥加密一条网关请求。
   ///
@@ -224,6 +291,7 @@ class SecureSession {
     required Map<String, Object?>? session,
     required Uint8List clientSecretKey,
     required Uint8List clientPublicKey,
+    String deviceId = '',
   }) async {
     if (session == null || session.isEmpty) return null;
     final sessionId = session['session_id'] as String? ?? '';
@@ -259,7 +327,9 @@ class SecureSession {
     return SecureSession(
       sessionId: sessionId,
       accessToken: accessToken,
+      refreshToken: session['refresh_token'] as String? ?? '',
       uin: uin,
+      deviceId: deviceId,
       clientSecretKey: clientSecretKey,
       clientPublicKey: clientPublicKey,
       rxKey: Uint8List.fromList(k.sublist(0, 32)),
@@ -295,17 +365,143 @@ class SecureSessionRegistry {
   static final SecureSessionRegistry instance = SecureSessionRegistry._();
 
   SecureSession? _session;
+  Future<SecureSession>? _refreshing;
 
   /// 运行期总开关：服务端回退时置 false 即可整体退回明文（默认开）。
   bool enabled = true;
+
+  /// access_token 续期次数（观测用：超过 0 说明跑过 15 分钟以上）。
+  int refreshCount = 0;
+
+  /// 最近一次续期失败原因（null 表示无失败）。
+  String? lastRefreshError;
 
   SecureSession? get session => _session;
 
   bool get active => enabled && _session != null;
 
-  void install(SecureSession? session) => _session = session;
+  void install(SecureSession? session) {
+    _session = session;
+    _refreshing = null;
+  }
 
-  void clear() => _session = null;
+  void clear() {
+    _session = null;
+    _refreshing = null;
+  }
+
+  /// 确保拿到未过期的 access token。
+  ///
+  /// 并发调用只会发一次续期请求（单飞）；失败时保留旧会话并抛出，
+  /// 由调用方决定是否降级。
+  Future<SecureSession> ensureFresh() {
+    final current = _session;
+    if (current == null) {
+      return Future<SecureSession>.error(
+        const SecureSessionError('无安全会话，无法续期'),
+      );
+    }
+    if (!current.needsRefresh) return Future<SecureSession>.value(current);
+    return _refreshWith(current);
+  }
+
+  /// 401 兑底：只对“可重试”的鉴权码续期。
+  Future<SecureSession> refreshAfterUnauthorized(int? code) {
+    final current = _session;
+    if (current == null) {
+      return Future<SecureSession>.error(
+        const SecureSessionError('无安全会话，无法续期'),
+      );
+    }
+    if (code != null && !kSecureAuthExpiredCodes.contains(code)) {
+      return Future<SecureSession>.error(
+        SecureSessionError('错误码 $code 不属于 token 过期，不续期'),
+      );
+    }
+    return _refreshWith(current);
+  }
+
+  Future<SecureSession> _refreshWith(SecureSession current) {
+    final inflight = _refreshing;
+    if (inflight != null) return inflight;
+
+    final future = _doRefresh(current);
+    _refreshing = future;
+    return future.whenComplete(() {
+      if (identical(_refreshing, future)) _refreshing = null;
+    });
+  }
+
+  Future<SecureSession> _doRefresh(SecureSession current) async {
+    if (current.refreshToken.isEmpty) {
+      throw const SecureSessionError('服务端未下发 refresh_token，无法续期');
+    }
+    // 续期接口在黑名单里，是明文 JSON，不能走信封拦截器，所以用独立 Dio。
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 15),
+      receiveTimeout: const Duration(seconds: 15),
+      headers: {'User-Agent': kUa},
+    ));
+    final url = '${backendShequ()}$kSecureRefreshPath';
+    final body = buildRefreshAccessBody(
+      uin: current.uin,
+      deviceId: current.deviceId,
+      refreshToken: current.refreshToken,
+    );
+
+    final Response<dynamic> resp;
+    try {
+      resp = await dio.post<dynamic>(
+        url,
+        data: jsonEncode(body),
+        options: Options(
+          contentType: 'application/json',
+          headers: {
+            'X-Protocol-App-ID': kSecureProtocolAppId,
+            'X-Protocol-UIN': '${current.uin}',
+          },
+          // 业务错误码在 body 里，不要因 4xx 抛掉可读信息。
+          validateStatus: (_) => true,
+        ),
+      );
+    } catch (e) {
+      lastRefreshError = '$e';
+      throw SecureSessionError('续期请求失败: $e');
+    }
+
+    final raw = resp.data;
+    final text = raw is String ? raw : jsonEncode(raw);
+    Map<String, Object?> decoded;
+    try {
+      decoded = (jsonDecode(text) as Map).cast<String, Object?>();
+    } catch (_) {
+      lastRefreshError = '响应非 JSON: ${text.length > 200 ? text.substring(0, 200) : text}';
+      throw SecureSessionError(lastRefreshError!);
+    }
+
+    if (decoded['code'] != 0) {
+      lastRefreshError = 'code=${decoded['code']} msg=${decoded['msg']}';
+      throw SecureSessionError('续期被拒: $lastRefreshError');
+    }
+    final data = (decoded['data'] as Map?)?.cast<String, Object?>() ?? {};
+    final accessToken = data['access_token'] as String? ?? '';
+    if (accessToken.isEmpty) {
+      lastRefreshError = '响应缺少 access_token';
+      throw const SecureSessionError('响应缺少 access_token');
+    }
+    final expires = data['access_expires_at'];
+    final updated = current.copyWithAccessToken(
+      accessToken: accessToken,
+      accessExpiresAt: expires is num ? expires.toInt() : 0,
+    );
+    // 续期期间可能已经重新登录，别用旧会话覆盖新会话。
+    if (identical(_session, current) || _session?.sessionId == current.sessionId) {
+      _session = updated;
+    }
+    refreshCount++;
+    lastRefreshError = null;
+    return updated;
+  }
 }
 
 Uint8List _randomBytes(int n) {

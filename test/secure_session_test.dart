@@ -26,15 +26,19 @@ SecureSession _session({
   Uint8List? rx,
   Uint8List? tx,
   int uin = 2089540493,
+  int expiresAt = 0,
 }) {
   return SecureSession(
     sessionId: 'test-session',
     accessToken: 'test-token',
+    refreshToken: 'test-refresh',
     uin: uin,
+    deviceId: 'test-device',
     clientSecretKey: Uint8List(32),
     clientPublicKey: Uint8List(32),
     rxKey: rx ?? Uint8List.fromList(List<int>.generate(32, (i) => i)),
     txKey: tx ?? Uint8List.fromList(List<int>.generate(32, (i) => 255 - i)),
+    accessExpiresAt: expiresAt,
   );
 }
 
@@ -218,6 +222,95 @@ void main() {
         ),
         throwsA(anything),
       );
+    });
+  });
+
+  group('access token 续期', () {
+    test('access/refresh token TTL 与真机一致（900s / 7d）', () {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final session = _session(expiresAt: now + 900);
+      expect(session.needsRefresh, isFalse);
+      expect(session.isExpired, isFalse);
+
+      // 提前 60s 进入续期窗口
+      final nearExpiry = _session(expiresAt: now + 30);
+      expect(nearExpiry.needsRefresh, isTrue);
+      expect(nearExpiry.isExpired, isFalse);
+
+      final expired = _session(expiresAt: now - 1);
+      expect(expired.isExpired, isTrue);
+    });
+
+    test('续期请求体与抓包逐字段一致（uin 是字符串、apiid 是数字）', () {
+      final body = buildRefreshAccessBody(
+        uin: 2089540493,
+        deviceId: 'WINcd275f6874fbddd2a491d7468e3655c6',
+        refreshToken: 'rt1_abc',
+      );
+      expect(body.keys.toList(), [
+        'uin',
+        'device_id',
+        'apiid',
+        'ver',
+        'refresh_token',
+      ]);
+      expect(body['uin'], '2089540493');
+      expect(body['apiid'], 110);
+      expect(body['ver'], '1.60.1');
+    });
+
+    test('只有 40101/40102 触发 401 续期', () {
+      expect(kSecureAuthExpiredCodes, {40101, 40102});
+      // 40105（白名单缺 access）重试无意义
+      expect(kSecureAuthExpiredCodes.contains(40105), isFalse);
+    });
+
+    test('不需要续期时 ensureFresh 原样返回，不发请求', () async {
+      final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+      final alive = _session(expiresAt: now + 900);
+      SecureSessionRegistry.instance.install(alive);
+      final fresh = await SecureSessionRegistry.instance.ensureFresh();
+      expect(identical(fresh, alive), isTrue);
+      expect(SecureSessionRegistry.instance.refreshCount, 0);
+    });
+
+    test('已过期但无 refresh_token 时续期抓错，且保留旧会话', () async {
+      final expired = _session(expiresAt: 1).copyWithAccessToken(
+        accessToken: 'old',
+        accessExpiresAt: 1,
+      );
+      // 服务端未下发 refresh_token 的情形
+      final noRt = SecureSession(
+        sessionId: expired.sessionId,
+        accessToken: expired.accessToken,
+        uin: expired.uin,
+        clientSecretKey: expired.clientSecretKey,
+        clientPublicKey: expired.clientPublicKey,
+        rxKey: expired.rxKey,
+        txKey: expired.txKey,
+        accessExpiresAt: 1,
+      );
+      SecureSessionRegistry.instance.install(noRt);
+      await expectLater(
+        SecureSessionRegistry.instance.ensureFresh(),
+        throwsA(isA<SecureSessionError>()),
+      );
+      expect(SecureSessionRegistry.instance.session, isNotNull);
+    });
+
+    test('续期只替换 token，rx/tx 与会话 id 保持不变', () {
+      final rx = Uint8List.fromList(List<int>.generate(32, (i) => i));
+      final tx = Uint8List.fromList(List<int>.generate(32, (i) => 255 - i));
+      final s = _session(rx: rx, tx: tx);
+      final next = s.copyWithAccessToken(
+        accessToken: 'new-token',
+        accessExpiresAt: 9999999999,
+      );
+      expect(next.accessToken, 'new-token');
+      expect(next.sessionId, s.sessionId);
+      expect(next.rxKey, s.rxKey);
+      expect(next.txKey, s.txKey);
+      expect(next.uin, s.uin);
     });
   });
 

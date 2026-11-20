@@ -63,7 +63,7 @@ Future<void> main() async {
     print('  friends payload: ${text.length > 200 ? text.substring(0, 200) : text}');
   }
 
-  print('[3/3] 黑名单路径保持明文（/miniw/php_cmd 域）…');
+  print('[3/4] 黑名单路径保持明文（/miniw/php_cmd 域）…');
   final gw = GatewayClient();
   Map<String, Object?> maps = <String, Object?>{};
   try {
@@ -74,6 +74,32 @@ Future<void> main() async {
     print('  my_maps: 请求异常（不致命）: $e');
   }
   print('  my_maps: OK');
+
+  print('[4/4] access_token 续期（模拟 15 分钟后过期）…');
+  final before = session.accessExpiresAt;
+  // 把过期时间改到眼前，逼 ensureFresh/refresh 走真实续期请求。
+  SecureSessionRegistry.instance.install(
+    session.copyWithAccessToken(
+      accessToken: session.accessToken,
+      accessExpiresAt:
+          DateTime.now().millisecondsSinceEpoch ~/ 1000 + 1,
+    ),
+  );
+  final refreshed = await SecureSessionRegistry.instance.ensureFresh();
+  print('  refresh OK: 旧 exp=$before 新 exp=${refreshed.accessExpiresAt} '
+      '次数=${SecureSessionRegistry.instance.refreshCount}');
+  if (refreshed.accessExpiresAt <= before) {
+    throw StateError('续期未推进过期时间');
+  }
+
+  // 用续期后的 token 再打一次白名单接口，证明续期后的 token 真的可用。
+  final again = await FriendClient(uin: uin, s2: auth.s2, s2t: auth.s2t)
+      .queryFriendList();
+  final againCode = again['code'] ?? again['ret'] ?? again['result'];
+  print('  续期后 /server/friend: code=$againCode');
+  if (againCode != null && againCode != 0) {
+    throw StateError('续期后请求失败: $againCode');
+  }
 
   final ok = code == null || code == 0;
   print(ok ? 'RESULT: PASS' : 'RESULT: FAIL（业务码 $code）');
